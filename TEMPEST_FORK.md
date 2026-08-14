@@ -59,3 +59,24 @@ tempest-broadcast-system\control-deck\starting-soon.html
 ```
 
 Edits are saved to the Tempest profile and automatically refresh an existing linked Browser Source. The overlay uses no external network assets.
+
+### Overlay modes
+
+The mode selector maintains independent saved content, generated files, countdown state, and Browser Sources for:
+
+- `Tempest // Starting Soon`
+- `Tempest // BRB`
+- `Tempest // Stream Ending`
+- `Tempest // Live HUD`
+
+Select the intended mode, edit its content, switch to the scene that should receive it, and use the mode-specific **Create / Update Source** button.
+
+### Audio reactivity
+
+The Reactive Audio selector can attach to any audio-capable OBS source. The native Control Deck samples its peak meter and writes a lightweight local telemetry stream at 20 Hz:
+
+```text
+tempest-broadcast-system\control-deck\telemetry.json
+```
+
+Each generated overlay reads that file locally and uses the signal to drive its core glow, archive rings, title pulse, and equalizer bars. No network server, WebSocket connection, or Browser Source reload is required. Use **Refresh** after adding or removing audio sources.
