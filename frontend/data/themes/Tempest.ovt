@@ -1,0 +1,106 @@
+@OBSThemeMeta {
+    name: 'Tempest Mainframe';
+    id: 'com.tempestmainframe.Broadcast';
+    extends: 'com.obsproject.Yami';
+    author: 'Tempest Mainframe';
+    dark: 'true';
+}
+
+@OBSThemeVars {
+    --grey1: rgb(116,143,164);
+    --grey2: rgb(65,89,108);
+    --grey3: rgb(31,50,66);
+    --grey4: rgb(19,34,47);
+    --grey5: rgb(13,26,38);
+    --grey6: rgb(9,20,30);
+    --grey7: rgb(6,15,24);
+    --grey8: rgb(3,9,15);
+
+    --primary: rgb(12,124,203);
+    --primary_light: rgb(69,217,255);
+    --primary_lighter: rgb(189,246,255);
+    --primary_dark: rgb(7,69,119);
+    --primary_darker: rgb(3,28,52);
+
+    --bg_base: var(--grey6);
+    --bg_window: var(--grey5);
+    --bg_preview: rgb(3,9,15);
+    --border_color: var(--grey3);
+
+    --input_bg: var(--grey7);
+    --input_bg_hover: var(--grey8);
+    --input_bg_focus: var(--grey8);
+    --input_border: var(--grey2);
+    --input_border_hover: var(--primary);
+    --input_border_focus: var(--primary_light);
+
+    --list_item_bg_selected: var(--primary_dark);
+    --list_item_bg_hover: var(--primary);
+
+    --button_bg: var(--primary_dark);
+    --button_bg_hover: var(--primary);
+    --button_bg_down: var(--primary_darker);
+    --button_bg_disabled: var(--grey6);
+    --button_border: var(--primary);
+    --button_border_hover: var(--primary_light);
+    --button_border_focus: var(--primary_light);
+
+    --button_bg_red: rgb(130,30,58);
+    --button_bg_red_hover: rgb(185,43,78);
+    --button_bg_red_down: rgb(83,20,42);
+
+    --tab_bg: var(--grey6);
+    --tab_bg_hover: var(--grey3);
+    --tab_bg_down: var(--primary_darker);
+    --tab_border: var(--grey3);
+    --tab_border_hover: var(--primary);
+    --tab_border_focus: var(--primary_light);
+    --tab_border_selected: var(--primary_light);
+
+    --scrollbar_handle: var(--grey2);
+    --scrollbar_hover: var(--primary);
+    --scrollbar_down: var(--primary_dark);
+    --scrollbar_border: var(--grey3);
+
+    --toolbutton_bg: var(--grey3);
+    --toolbutton_bg_hover: var(--primary);
+    --toolbutton_bg_down: var(--primary_dark);
+    --toolbutton_bg_disabled: var(--grey5);
+}
+
+QDockWidget::title {
+    background-color: var(--bg_base);
+    border-bottom: 1px solid var(--primary_dark);
+}
+
+QPushButton:checked,
+QPushButton.state-active {
+    border-color: var(--primary_light);
+}
+
+QTabBar::tab:top:selected {
+    border-bottom: 2px solid var(--primary_light);
+}
+
+QMenu::item:selected,
+QListWidget::item:selected,
+SceneTree::item:selected,
+SourceTree::item:selected {
+    background-color: var(--primary_dark);
+}
+
+QToolBar {
+    background-color: var(--grey5);
+}
+
+VolumeMeter {
+    qproperty-backgroundNominalColor: rgb(4,72,89);
+    qproperty-backgroundWarningColor: rgb(109,73,13);
+    qproperty-backgroundErrorColor: rgb(100,20,43);
+    qproperty-foregroundNominalColor: rgb(69,217,255);
+    qproperty-foregroundWarningColor: rgb(237,183,74);
+    qproperty-foregroundErrorColor: rgb(255,75,112);
+    qproperty-magnitudeColor: palette(window);
+    qproperty-majorTickColor: palette(window-text);
+    qproperty-minorTickColor: palette(mid);
+}

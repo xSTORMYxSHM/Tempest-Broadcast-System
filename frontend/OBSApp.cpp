@@ -298,7 +298,7 @@ bool OBSApp::InitGlobalConfigDefaults()
 	config_set_default_uint(appConfig, "General", "MaxLogs", 10);
 	config_set_default_int(appConfig, "General", "InfoIncrement", -1);
 	config_set_default_string(appConfig, "General", "ProcessPriority", "Normal");
-	config_set_default_bool(appConfig, "General", "EnableAutoUpdates", true);
+	config_set_default_bool(appConfig, "General", "EnableAutoUpdates", false);
 
 #if _WIN32
 	config_set_default_string(appConfig, "Video", "Renderer", "Direct3D 11");
@@ -407,36 +407,36 @@ static bool MakeUserDirs()
 {
 	char path[512];
 
-	if (GetAppConfigPath(path, sizeof(path), "obs-studio/basic") <= 0)
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/basic") <= 0)
 		return false;
 	if (!do_mkdir(path))
 		return false;
 
-	if (GetAppConfigPath(path, sizeof(path), "obs-studio/logs") <= 0)
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/logs") <= 0)
 		return false;
 	if (!do_mkdir(path))
 		return false;
 
-	if (GetAppConfigPath(path, sizeof(path), "obs-studio/profiler_data") <= 0)
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/profiler_data") <= 0)
 		return false;
 	if (!do_mkdir(path))
 		return false;
 
 #ifdef _WIN32
-	if (GetAppConfigPath(path, sizeof(path), "obs-studio/crashes") <= 0)
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/crashes") <= 0)
 		return false;
 	if (!do_mkdir(path))
 		return false;
 #endif
 
 #ifdef WHATSNEW_ENABLED
-	if (GetAppConfigPath(path, sizeof(path), "obs-studio/updates") <= 0)
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/updates") <= 0)
 		return false;
 	if (!do_mkdir(path))
 		return false;
 #endif
 
-	if (GetAppConfigPath(path, sizeof(path), "obs-studio/plugin_config") <= 0)
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/plugin_config") <= 0)
 		return false;
 	if (!do_mkdir(path))
 		return false;
@@ -444,9 +444,9 @@ static bool MakeUserDirs()
 	return true;
 }
 
-constexpr std::string_view OBSProfileSubDirectory = "obs-studio/basic/profiles";
-constexpr std::string_view OBSScenesSubDirectory = "obs-studio/basic/scenes";
-constexpr std::string_view OBSPluginManagerSubDirectory = "obs-studio/plugin_manager";
+constexpr std::string_view OBSProfileSubDirectory = "tempest-broadcast-system/basic/profiles";
+constexpr std::string_view OBSScenesSubDirectory = "tempest-broadcast-system/basic/scenes";
+constexpr std::string_view OBSPluginManagerSubDirectory = "tempest-broadcast-system/plugin_manager";
 
 static bool MakeUserProfileDirs()
 {
@@ -526,7 +526,7 @@ bool OBSApp::InitGlobalConfig()
 {
 	char path[512];
 
-	int len = GetAppConfigPath(path, sizeof(path), "obs-studio/global.ini");
+	int len = GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/global.ini");
 	if (len <= 0) {
 		return false;
 	}
@@ -598,7 +598,7 @@ bool OBSApp::InitGlobalConfig()
 
 bool OBSApp::InitUserConfig(std::filesystem::path &userConfigLocation, uint32_t lastVersion)
 {
-	const std::string userConfigFile = userConfigLocation.u8string() + "/obs-studio/user.ini";
+	const std::string userConfigFile = userConfigLocation.u8string() + "/tempest-broadcast-system/user.ini";
 
 	int errorCode = userConfig.Open(userConfigFile.c_str(), CONFIG_OPEN_ALWAYS);
 
@@ -658,8 +658,8 @@ void OBSApp::MigrateLegacySettings(const uint32_t lastVersion)
 	}
 }
 
-static constexpr string_view OBSGlobalIniPath = "/obs-studio/global.ini";
-static constexpr string_view OBSUserIniPath = "/obs-studio/user.ini";
+static constexpr string_view OBSGlobalIniPath = "/tempest-broadcast-system/global.ini";
+static constexpr string_view OBSUserIniPath = "/tempest-broadcast-system/user.ini";
 
 bool OBSApp::MigrateGlobalSettings()
 {
@@ -811,7 +811,7 @@ bool LoadBranchesFile(vector<UpdateBranch> &out)
 	string error;
 	string branchesText;
 
-	BPtr<char> branchesFilePath = GetAppConfigPathPtr("obs-studio/updates/branches.json");
+	BPtr<char> branchesFilePath = GetAppConfigPathPtr("tempest-broadcast-system/updates/branches.json");
 
 	QFile branchesFile(branchesFilePath.Get());
 	if (!branchesFile.open(QIODevice::ReadOnly)) {
@@ -925,7 +925,7 @@ OBSApp::OBSApp(int &argc, char **argv, profiler_name_store_t *store)
 	sleepInhibitor = os_inhibit_sleep_create("OBS Video/audio");
 
 #ifndef __APPLE__
-	setWindowIcon(QIcon::fromTheme("obs", QIcon(":/res/images/obs.png")));
+	setWindowIcon(QIcon(":/res/images/tempest-broadcast-system.png"));
 #endif
 
 	setDesktopFileName("com.obsproject.Studio");
@@ -943,7 +943,7 @@ static void move_basic_to_profiles(void)
 {
 	char path[512];
 
-	if (GetAppConfigPath(path, 512, "obs-studio/basic") <= 0) {
+	if (GetAppConfigPath(path, 512, "tempest-broadcast-system/basic") <= 0) {
 		return;
 	}
 
@@ -954,7 +954,7 @@ static void move_basic_to_profiles(void)
 	}
 
 	const std::filesystem::path profilesPath =
-		App()->userProfilesLocation / std::filesystem::u8path("obs-studio/basic/profiles");
+		App()->userProfilesLocation / std::filesystem::u8path("tempest-broadcast-system/basic/profiles");
 
 	if (std::filesystem::exists(profilesPath)) {
 		return;
@@ -1007,7 +1007,7 @@ static void move_basic_to_scene_collections(void)
 {
 	char path[512];
 
-	if (GetAppConfigPath(path, 512, "obs-studio/basic") <= 0) {
+	if (GetAppConfigPath(path, 512, "tempest-broadcast-system/basic") <= 0) {
 		return;
 	}
 
@@ -1018,7 +1018,7 @@ static void move_basic_to_scene_collections(void)
 	}
 
 	const std::filesystem::path sceneCollectionPath =
-		App()->userScenesLocation / std::filesystem::u8path("obs-studio/basic/scenes");
+		App()->userScenesLocation / std::filesystem::u8path("tempest-broadcast-system/basic/scenes");
 
 	if (std::filesystem::exists(sceneCollectionPath)) {
 		return;
@@ -1135,7 +1135,7 @@ static bool StartupOBS(const char *locale, profiler_name_store_t *store)
 {
 	char path[512];
 
-	if (GetAppConfigPath(path, sizeof(path), "obs-studio/plugin_config") <= 0)
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/plugin_config") <= 0)
 		return false;
 
 	return obs_startup(locale, path, store);
@@ -1393,14 +1393,14 @@ void OBSApp::uploadLastAppLog() const
 {
 	OBSBasic *basicWindow = static_cast<OBSBasic *>(GetMainWindow());
 
-	basicWindow->UploadLog("obs-studio/logs", GetLastLog(), OBS::LogFileType::LastAppLog);
+	basicWindow->UploadLog("tempest-broadcast-system/logs", GetLastLog(), OBS::LogFileType::LastAppLog);
 }
 
 void OBSApp::uploadCurrentAppLog() const
 {
 	OBSBasic *basicWindow = static_cast<OBSBasic *>(GetMainWindow());
 
-	basicWindow->UploadLog("obs-studio/logs", GetCurrentLog(), OBS::LogFileType::CurrentAppLog);
+	basicWindow->UploadLog("tempest-broadcast-system/logs", GetCurrentLog(), OBS::LogFileType::CurrentAppLog);
 }
 
 void OBSApp::uploadLastCrashLog()

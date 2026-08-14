@@ -163,7 +163,7 @@ bool GetUnusedName(std::string &name)
 	return true;
 }
 
-constexpr std::string_view OBSSceneCollectionPath = "obs-studio/basic/scenes/";
+constexpr std::string_view OBSSceneCollectionPath = "tempest-broadcast-system/basic/scenes/";
 
 void OBSImporter::importCollections()
 {

@@ -61,7 +61,7 @@
         <string/>
        </property>
        <property name="pixmap">
-        <pixmap>:res/images/obs.png</pixmap>
+        <pixmap>:res/images/tempest-broadcast-system.png</pixmap>
        </property>
        <property name="scaledContents">
         <bool>true</bool>
@@ -76,7 +76,7 @@
        <item>
         <widget class="QLabel" name="name">
          <property name="text">
-          <string notr="true">OBS Studio</string>
+          <string notr="true">Tempest Broadcast System</string>
          </property>
         </widget>
        </item>

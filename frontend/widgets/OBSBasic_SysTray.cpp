@@ -27,10 +27,10 @@ void OBSBasic::SystemTrayInit()
 	QIcon trayIconFile = QIcon(":/res/images/obs_macos.svg");
 	trayIconFile.setIsMask(true);
 #else
-	QIcon trayIconFile = QIcon(":/res/images/obs.png");
+	QIcon trayIconFile = QIcon(":/res/images/tempest-broadcast-system.png");
 #endif
 	trayIcon = new QSystemTrayIcon(QIcon::fromTheme("obs-tray", trayIconFile), this);
-	trayIcon->setToolTip("OBS Studio");
+	trayIcon->setToolTip("Tempest Broadcast System");
 
 	trayMenu = new QMenu(this);
 
@@ -100,7 +100,7 @@ void OBSBasic::SysTrayNotify(const QString &text, QSystemTrayIcon::MessageIcon n
 {
 	if (trayIcon && trayIcon->isVisible() && QSystemTrayIcon::supportsMessages()) {
 		QSystemTrayIcon::MessageIcon icon = QSystemTrayIcon::MessageIcon(n);
-		trayIcon->showMessage("OBS Studio", text, icon, 10000);
+		trayIcon->showMessage("Tempest Broadcast System", text, icon, 10000);
 	}
 }
 
