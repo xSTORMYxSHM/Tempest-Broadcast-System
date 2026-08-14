@@ -43,6 +43,7 @@ void OBSBasic::DisplayStreamStartError()
 	}
 
 	QMessageBox::critical(this, QTStr("Output.StartStreamFailed"), message);
+	emit StreamingStartFailed();
 }
 
 void OBSBasic::StartStreaming()

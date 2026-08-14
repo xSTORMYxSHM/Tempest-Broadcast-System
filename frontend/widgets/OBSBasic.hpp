@@ -57,6 +57,8 @@ class OBSLogViewer;
 class OBSMissingFiles;
 class OBSProjector;
 class TempestControlDeck;
+class TempestMainframeBar;
+class QToolBar;
 class VolumeControl;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
@@ -445,6 +447,15 @@ private:
 	QPointer<OBSDock> controlsDock;
 	QPointer<OBSDock> mixerDock;
 	QPointer<TempestControlDeck> tempestControlDeck;
+	QPointer<QToolBar> tempestCommandToolbar;
+	QPointer<TempestMainframeBar> tempestMainframeBar;
+	QByteArray tempestCommandDockState;
+	QByteArray tempestEngineeringDockState;
+	bool tempestCommandWorkspace = true;
+
+	void SetTempestWorkspace(bool commandMode, bool initial = false);
+	void ConfigureTempestCommandLayout();
+	void SaveTempestWorkspaceState();
 
 public:
 	void AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool extraBrowser = false);
@@ -1391,6 +1402,7 @@ signals:
 	/* Streaming signals */
 	void StreamingPreparing();
 	void StreamingStarting(bool broadcastAutoStart);
+	void StreamingStartFailed();
 	void StreamingStarted(bool withDelay = false);
 	void StreamingStopping();
 	void StreamingStopped(bool withDelay = false);

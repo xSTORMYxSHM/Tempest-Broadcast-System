@@ -80,3 +80,17 @@ tempest-broadcast-system\control-deck\telemetry.json
 ```
 
 Each generated overlay reads that file locally and uses the signal to drive its core glow, archive rings, title pulse, and equalizer bars. No network server, WebSocket connection, or Browser Source reload is required. Use **Refresh** after adding or removing audio sources.
+
+## Mainframe workstation shell
+
+The default 1920x1080 workspace is headed by the native **Mainframe Command Nexus**. It provides:
+
+- persistent Command and Engineering workspaces,
+- an armed transmission safety state before streaming can begin,
+- direct stream and recording controls backed by the existing OBS output system,
+- a confirmed emergency uplink cut that leaves local recording intact,
+- current-scene, render FPS, CPU, render-lag, archive, and transmission-time telemetry,
+- a Command layout optimized for a large program canvas with scenes, sources, audio, and the Tempest Control Deck,
+- one-click access to the full conventional OBS frontend in Engineering mode.
+
+Each workspace stores its dock layout independently. Plugins and advanced dialogs remain available in Engineering mode while Command mode presents the Tempest-first operating surface.

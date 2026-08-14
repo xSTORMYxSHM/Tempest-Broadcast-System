@@ -20,8 +20,11 @@
 #include "OBSBasic.hpp"
 
 #include <docks/TempestControlDeck.hpp>
+#include "TempestMainframeBar.hpp"
 
 #include <qt-wrappers.hpp>
+
+#include <algorithm>
 
 void setupDockAction(QDockWidget *dock)
 {
@@ -43,6 +46,84 @@ void setupDockAction(QDockWidget *dock)
 
 	// Make the action unable to be disabled
 	QObject::connect(action, &QAction::enabledChanged, action, neverDisable);
+}
+
+void OBSBasic::ConfigureTempestCommandLayout()
+{
+	ui->scenesDock->setFloating(false);
+	ui->sourcesDock->setFloating(false);
+	ui->mixerDock->setFloating(false);
+	tempestControlDeck->setFloating(false);
+
+	addDockWidget(Qt::LeftDockWidgetArea, ui->scenesDock);
+	splitDockWidget(ui->scenesDock, ui->sourcesDock, Qt::Vertical);
+	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
+	addDockWidget(Qt::BottomDockWidgetArea, ui->mixerDock);
+
+	ui->scenesDock->setVisible(true);
+	ui->sourcesDock->setVisible(true);
+	ui->mixerDock->setVisible(true);
+	tempestControlDeck->setVisible(true);
+	ui->transitionsDock->setVisible(false);
+	controlsDock->setVisible(false);
+	statsDock->setVisible(false);
+
+	const int leftWidth = std::clamp(width() * 15 / 100, 260, 320);
+	const int commandWidth = std::clamp(width() * 20 / 100, 350, 430);
+	const int mixerHeight = std::clamp(height() * 24 / 100, 210, 280);
+	resizeDocks({ui->scenesDock, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
+	resizeDocks({ui->mixerDock}, {mixerHeight}, Qt::Vertical);
+}
+
+void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
+{
+	if (!initial && commandMode == tempestCommandWorkspace)
+		return;
+
+	if (initial) {
+		if (tempestEngineeringDockState.isEmpty())
+			tempestEngineeringDockState = saveState();
+	} else if (tempestCommandWorkspace) {
+		tempestCommandDockState = saveState();
+	} else {
+		tempestEngineeringDockState = saveState();
+	}
+
+	tempestCommandWorkspace = commandMode;
+	if (commandMode) {
+		if (!tempestCommandDockState.isEmpty() && !restoreState(tempestCommandDockState))
+			tempestCommandDockState.clear();
+		if (tempestCommandDockState.isEmpty())
+			ConfigureTempestCommandLayout();
+		menuBar()->setVisible(false);
+	} else {
+		if (!tempestEngineeringDockState.isEmpty())
+			restoreState(tempestEngineeringDockState);
+		else
+			on_resetDocks_triggered(true);
+		menuBar()->setVisible(true);
+	}
+
+	tempestCommandToolbar->setVisible(true);
+	tempestMainframeBar->SetCommandWorkspace(commandMode);
+	config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace",
+			  commandMode ? "command" : "engineering");
+	config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+}
+
+void OBSBasic::SaveTempestWorkspaceState()
+{
+	if (tempestCommandWorkspace)
+		tempestCommandDockState = saveState();
+	else
+		tempestEngineeringDockState = saveState();
+
+	config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestCommandDockState",
+			  tempestCommandDockState.toBase64().constData());
+	config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestEngineeringDockState",
+			  tempestEngineeringDockState.toBase64().constData());
+	config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace",
+			  tempestCommandWorkspace ? "command" : "engineering");
 }
 
 void OBSBasic::on_resetDocks_triggered(bool force)

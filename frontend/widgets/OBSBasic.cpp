@@ -25,6 +25,7 @@
 #include "OBSBasicStats.hpp"
 #include "plugin-manager/PluginManager.hpp"
 #include <docks/TempestControlDeck.hpp>
+#include "TempestMainframeBar.hpp"
 
 #include <obs-module.h>
 
@@ -59,6 +60,7 @@
 
 #include <QActionGroup>
 #include <QThread>
+#include <QToolBar>
 #include <QWidgetAction>
 
 #ifdef _WIN32
@@ -246,6 +248,19 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 
 	ui->setupUi(this);
 	ui->previewDisabledWidget->setVisible(false);
+
+	tempestMainframeBar = new TempestMainframeBar(this);
+	tempestCommandToolbar = new QToolBar(QStringLiteral("Mainframe Command Nexus"), this);
+	tempestCommandToolbar->setObjectName(QStringLiteral("tempestCommandToolbar"));
+	tempestCommandToolbar->setMovable(false);
+	tempestCommandToolbar->setFloatable(false);
+	tempestCommandToolbar->setAllowedAreas(Qt::TopToolBarArea);
+	tempestCommandToolbar->setContextMenuPolicy(Qt::PreventContextMenu);
+	tempestCommandToolbar->setContentsMargins(0, 0, 0, 0);
+	tempestCommandToolbar->addWidget(tempestMainframeBar);
+	addToolBar(Qt::TopToolBarArea, tempestCommandToolbar);
+	connect(tempestMainframeBar, &TempestMainframeBar::WorkspaceRequested, this,
+		[this](bool commandMode) { SetTempestWorkspace(commandMode); });
 
 	/* Set up streaming connections */
 	connect(
@@ -1234,6 +1249,18 @@ void OBSBasic::OBSInit()
 			on_resetDocks_triggered(true);
 	}
 
+	const char *commandDockState =
+		config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestCommandDockState");
+	if (commandDockState && *commandDockState)
+		tempestCommandDockState = QByteArray::fromBase64(QByteArray(commandDockState));
+	const char *engineeringDockState =
+		config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestEngineeringDockState");
+	if (engineeringDockState && *engineeringDockState)
+		tempestEngineeringDockState = QByteArray::fromBase64(QByteArray(engineeringDockState));
+	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
+	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;
+	SetTempestWorkspace(commandWorkspace, true);
+
 	if (!config_has_user_value(App()->GetUserConfig(), "TempestControlDeck", "DockInitialized")) {
 		tempestControlDeck->setVisible(true);
 		tempestControlDeck->raise();
@@ -1865,6 +1892,7 @@ void OBSBasic::saveAll()
 	SaveProjectNow();
 
 	config_set_string(App()->GetUserConfig(), "BasicWindow", "DockState", saveState().toBase64().constData());
+	SaveTempestWorkspaceState();
 
 #ifdef BROWSER_AVAILABLE
 	if (cef) {
