@@ -56,6 +56,7 @@ class OBSBasicTransform;
 class OBSLogViewer;
 class OBSMissingFiles;
 class OBSProjector;
+class TempestControlDeck;
 class VolumeControl;
 #ifdef YOUTUBE_ENABLED
 class YouTubeAppDock;
@@ -443,6 +444,7 @@ private:
 
 	QPointer<OBSDock> controlsDock;
 	QPointer<OBSDock> mixerDock;
+	QPointer<TempestControlDeck> tempestControlDeck;
 
 public:
 	void AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool extraBrowser = false);

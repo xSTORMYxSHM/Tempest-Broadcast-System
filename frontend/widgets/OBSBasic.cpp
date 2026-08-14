@@ -24,6 +24,7 @@
 #include "OBSBasicControls.hpp"
 #include "OBSBasicStats.hpp"
 #include "plugin-manager/PluginManager.hpp"
+#include <docks/TempestControlDeck.hpp>
 
 #include <obs-module.h>
 
@@ -353,6 +354,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	resizeDocks({ui->scenesDock, ui->sourcesDock}, {sideDockWidth, sideDockWidth}, Qt::Horizontal);
 	addDockWidget(Qt::BottomDockWidgetArea, controlsDock);
 
+	tempestControlDeck = new TempestControlDeck(this);
+	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
+
 	startingDockLayout = saveState();
 
 	statsDock = new OBSDock();
@@ -523,6 +527,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(ui->transitionsDock);
 	SETUP_DOCK(controlsDock);
 	SETUP_DOCK(statsDock);
+	SETUP_DOCK(tempestControlDeck);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -1227,6 +1232,13 @@ void OBSBasic::OBSInit()
 		QByteArray dockState = QByteArray::fromBase64(QByteArray(dockStateStr));
 		if (!restoreState(dockState))
 			on_resetDocks_triggered(true);
+	}
+
+	if (!config_has_user_value(App()->GetUserConfig(), "TempestControlDeck", "DockInitialized")) {
+		tempestControlDeck->setVisible(true);
+		tempestControlDeck->raise();
+		config_set_bool(App()->GetUserConfig(), "TempestControlDeck", "DockInitialized", true);
+		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 	}
 
 	bool pre23Defaults = config_get_bool(App()->GetUserConfig(), "General", "Pre23Defaults");

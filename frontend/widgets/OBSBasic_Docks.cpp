@@ -19,6 +19,8 @@
 
 #include "OBSBasic.hpp"
 
+#include <docks/TempestControlDeck.hpp>
+
 #include <qt-wrappers.hpp>
 
 void setupDockAction(QDockWidget *dock)
@@ -86,6 +88,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	ui->mixerDock->setVisible(true);
 	ui->transitionsDock->setVisible(true);
 	controlsDock->setVisible(true);
+	tempestControlDeck->setVisible(true);
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
 
@@ -116,6 +119,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	ui->transitionsDock->setFeatures(mainFeatures);
 	controlsDock->setFeatures(mainFeatures);
 	statsDock->setFeatures(features);
+	tempestControlDeck->setFeatures(features);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--)
 		extraDocks[i]->setFeatures(features);

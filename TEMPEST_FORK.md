@@ -39,3 +39,23 @@ build_x64\rundir\RelWithDebInfo\bin\64bit\tempest-broadcast-system.exe
 ```
 
 Upstream OBS updates should be reviewed and merged deliberately into `tempest-main`; do not enable the OBS binary updater for this fork.
+
+## Tempest Control Deck
+
+The built-in **Tempest Control Deck** dock manages the reactive Starting Soon overlay. It is available from the Docks menu and appears automatically the first time a profile sees it.
+
+The deck provides:
+
+- editable transmission title and operator status;
+- rotating lore/status lines with an adjustable interval;
+- a persistent start/restart/clear countdown;
+- automatic generation of a transparent 1920x1080 HTML overlay; and
+- one-click creation or updating of the `Tempest // Starting Soon` Browser Source in the active scene.
+
+The generated overlay is stored beneath the active Tempest configuration root at:
+
+```text
+tempest-broadcast-system\control-deck\starting-soon.html
+```
+
+Edits are saved to the Tempest profile and automatically refresh an existing linked Browser Source. The overlay uses no external network assets.
