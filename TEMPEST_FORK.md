@@ -95,6 +95,12 @@ The default 1920x1080 workspace is headed by the native **Mainframe Command Nexu
 
 Each workspace stores its dock layout independently. Plugins and advanced dialogs remain available in Engineering mode while Command mode presents the Tempest-first operating surface.
 
+### Twitch Stream Information dock
+
+The standard authenticated OBS/Twitch **Stream Information** dock remains the owner of title, Go Live notification, category, audience, tags, language, content labels, rerun, and branded-content controls. When base OBS creates its `twitchInfo` dock, TBS detects it asynchronously, docks it into the right-side Mainframe operations stack beside the Control Deck, Sequence Director, Asset Vault, and HUD Composer, and includes it in both Command and Engineering workspace state. Its normal Docks menu action remains available.
+
+OBS only compiles this authenticated service dock when a Twitch developer client ID and matching obfuscation hash are supplied at configure time. The current private build does not embed third-party credentials, so the integration slot is present but the dock will not instantiate until TBS is configured with its own Twitch application credentials.
+
 ## Transmission Command Matrix
 
 Command mode replaces the conventional Scenes and Sources column with the native **Transmission Command Matrix**. Engineering mode retains those original OBS docks.

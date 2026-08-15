@@ -64,12 +64,16 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestSequenceDirector->setFloating(false);
 	tempestAssetVault->setFloating(false);
 	tempestHUDComposer->setFloating(false);
+	if (tempestStreamInfoDock)
+		tempestStreamInfoDock->setFloating(false);
 
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
 	tabifyDockWidget(tempestControlDeck, tempestSequenceDirector);
 	tabifyDockWidget(tempestSequenceDirector, tempestAssetVault);
 	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
+	if (tempestStreamInfoDock)
+		tabifyDockWidget(tempestHUDComposer, tempestStreamInfoDock);
 	addDockWidget(Qt::BottomDockWidgetArea, ui->mixerDock);
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
 
@@ -82,6 +86,8 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
 	tempestHUDComposer->setVisible(true);
+	if (tempestStreamInfoDock)
+		tempestStreamInfoDock->setVisible(true);
 	tempestControlDeck->raise();
 	ui->transitionsDock->setVisible(false);
 	controlsDock->setVisible(false);
@@ -93,6 +99,22 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	resizeDocks({tempestCommandMatrix, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
 	resizeDocks({ui->mixerDock}, {mixerHeight}, Qt::Vertical);
 	resizeDocks({ui->mixerDock, tempestMediaBay}, {width() * 3 / 5, width() * 2 / 5}, Qt::Horizontal);
+}
+
+void OBSBasic::IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal)
+{
+	if (!dock || dock->objectName() != QStringLiteral("twitchInfo"))
+		return;
+
+	tempestStreamInfoDock = dock;
+	const bool visible = reveal || dock->isVisible();
+	dock->setFloating(false);
+	addDockWidget(Qt::RightDockWidgetArea, dock);
+	if (tempestHUDComposer)
+		tabifyDockWidget(tempestHUDComposer, dock);
+	dock->setVisible(visible);
+	if (reveal)
+		dock->raise();
 }
 
 void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
@@ -123,6 +145,8 @@ void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
 			on_resetDocks_triggered(true);
 		menuBar()->setVisible(true);
 	}
+	if (tempestStreamInfoDock)
+		IntegrateTempestStreamInfoDock(tempestStreamInfoDock);
 
 	tempestCommandToolbar->setVisible(true);
 	tempestMainframeBar->SetCommandWorkspace(commandMode);
@@ -266,6 +290,17 @@ void OBSBasic::AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool ex
 	setupDockAction(dock);
 	dock->setFeatures(features);
 	addDockWidget(area, dock);
+	if (dock->objectName() == QStringLiteral("twitchInfo")) {
+		tempestStreamInfoDock = dock;
+		QPointer<QDockWidget> guardedDock(dock);
+		QMetaObject::invokeMethod(
+			this,
+			[this, guardedDock]() {
+				if (guardedDock)
+					IntegrateTempestStreamInfoDock(guardedDock, true);
+			},
+			Qt::QueuedConnection);
+	}
 
 #ifdef BROWSER_AVAILABLE
 	if (extraBrowser && extraBrowserMenuDocksSeparator.isNull())
@@ -290,6 +325,8 @@ void OBSBasic::AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool ex
 
 void OBSBasic::RemoveDockWidget(const QString &name)
 {
+	if (name == QStringLiteral("twitchInfo"))
+		tempestStreamInfoDock.clear();
 	if (extraDockNames.contains(name)) {
 		int idx = extraDockNames.indexOf(name);
 		extraDockNames.removeAt(idx);

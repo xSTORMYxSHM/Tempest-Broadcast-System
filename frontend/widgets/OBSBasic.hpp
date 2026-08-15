@@ -457,6 +457,7 @@ private:
 	QPointer<TempestSequenceDirector> tempestSequenceDirector;
 	QPointer<TempestAssetVault> tempestAssetVault;
 	QPointer<TempestHUDComposer> tempestHUDComposer;
+	QPointer<QDockWidget> tempestStreamInfoDock;
 	QPointer<QToolBar> tempestCommandToolbar;
 	QPointer<TempestMainframeBar> tempestMainframeBar;
 	QByteArray tempestCommandDockState;
@@ -465,6 +466,7 @@ private:
 
 	void SetTempestWorkspace(bool commandMode, bool initial = false);
 	void ConfigureTempestCommandLayout();
+	void IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal = false);
 	void SaveTempestWorkspaceState();
 
 public:
