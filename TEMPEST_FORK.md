@@ -141,6 +141,20 @@ The Director registers native hotkeys for running each of the four stacks plus h
 
 Protocol and scene switching uses the native OBS scene and transition system. It requires no WebSocket bridge, browser control server, macro plugin, or external automation utility.
 
+## Mainframe Asset Vault
+
+The native **Mainframe Asset Vault** shares the Command workspace bay with the Control Deck and Sequence Director. It indexes operator-selected folders recursively without copying, moving, renaming, decoding, or modifying the files it finds. No folders are selected by default.
+
+The Vault provides:
+
+- incremental indexing for MP4, MOV, MKV, WebM, AVI, M4V, and GIF visual assets;
+- filename and folder search plus persistent Fractal, Avatar, Lore, Interruption, and Unassigned banks;
+- direct folder access for locating an indexed file on disk;
+- deliberate load and preview through one reusable OBS Media Source named `Tempest // Asset Bus`; and
+- one-click creation of a timestamped asset cue in the Sequence Director's currently selected stack.
+
+Folder selection and rescanning are read-only operations. TBS creates or changes the Asset Bus only when **Load / Preview on Asset Bus** or **Add to Current Sequence** is pressed. The bus is added to the current scene once and reused for later assets, avoiding a separate OBS source for every indexed video. Asset cues retain their own file path, so the Director loads the correct video onto the bus immediately before executing that cue.
+
 ### Protocol action automation
 
 The matrix's **Configure Protocol Actions** editor stores an independent native action sequence for each Starting, Live, BRB, and Ending command. A protocol can:

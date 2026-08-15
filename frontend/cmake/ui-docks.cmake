@@ -11,4 +11,6 @@ target_sources(
     docks/TempestMediaBay.hpp
     docks/TempestSequenceDirector.cpp
     docks/TempestSequenceDirector.hpp
+    docks/TempestAssetVault.cpp
+    docks/TempestAssetVault.hpp
 )

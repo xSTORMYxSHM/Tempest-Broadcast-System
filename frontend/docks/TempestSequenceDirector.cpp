@@ -14,6 +14,8 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -205,6 +207,7 @@ void TempestSequenceDirector::LoadSequences()
 				cue.atMs = std::max(0, object.value(QStringLiteral("atMs")).toInt());
 				cue.label = object.value(QStringLiteral("label")).toString();
 				cue.mediaSourceUuid = object.value(QStringLiteral("mediaSourceUuid")).toString();
+				cue.mediaFilePath = object.value(QStringLiteral("mediaFilePath")).toString();
 				cue.mediaAction =
 					object.value(QStringLiteral("mediaAction")).toString(QStringLiteral("keep"));
 				cue.sceneItemName = object.value(QStringLiteral("sceneItemName")).toString();
@@ -236,6 +239,7 @@ void TempestSequenceDirector::SaveSequence(const QString &sequenceId)
 		object.insert(QStringLiteral("atMs"), cue.atMs);
 		object.insert(QStringLiteral("label"), cue.label);
 		object.insert(QStringLiteral("mediaSourceUuid"), cue.mediaSourceUuid);
+		object.insert(QStringLiteral("mediaFilePath"), cue.mediaFilePath);
 		object.insert(QStringLiteral("mediaAction"), cue.mediaAction);
 		object.insert(QStringLiteral("sceneItemName"), cue.sceneItemName);
 		object.insert(QStringLiteral("visibilityAction"), cue.visibilityAction);
@@ -255,41 +259,31 @@ void TempestSequenceDirector::SaveSequence(const QString &sequenceId)
 
 QVector<TempestSequenceDirector::Cue> TempestSequenceDirector::DefaultStartingSequence() const
 {
-	return {
-		{0,
-		 QStringLiteral("Recovery lineage online"),
-		 {},
-		 QStringLiteral("keep"),
-		 {},
-		 QStringLiteral("keep"),
-		 true,
-		 QStringLiteral("STORM HORIZON RADIO // 2526"),
-		 QStringLiteral("RECOVERY LINEAGE ONLINE"),
-		 QStringLiteral("FIRST STORM ARCHIVE // 2491\nRECOVERY CASCADE // EIGHTEEN YEARS\nLIVING ARCHIVE AWAKE"),
-		 {}},
-		{15000,
-		 QStringLiteral("Archive carrier acquired"),
-		 {},
-		 QStringLiteral("keep"),
-		 {},
-		 QStringLiteral("keep"),
-		 true,
-		 QStringLiteral("TEMPEST MAINFRAME // ARCHIVE CARRIER"),
-		 QStringLiteral("RECOVERING LOST SIGNALS"),
-		 QStringLiteral("FORGOTTEN IDEAS\nBROKEN MEMORIES\nWARNINGS AND CORRUPTED HISTORIES"),
-		 {}},
-		{30000,
-		 QStringLiteral("Preservation question"),
-		 {},
-		 QStringLiteral("keep"),
-		 {},
-		 QStringLiteral("keep"),
-		 true,
-		 QStringLiteral("TEMPEST MAINFRAME // LIVING ARCHIVE"),
-		 QStringLiteral("PRESERVATION PRIORITY ACTIVE"),
-		 QStringLiteral("WHAT IS WORTH PRESERVING\nWHEN EVERY SYSTEM EVENTUALLY FAILS?"),
-		 {}},
-	};
+	Cue recovery;
+	recovery.atMs = 0;
+	recovery.label = QStringLiteral("Recovery lineage online");
+	recovery.updateOverlay = true;
+	recovery.transmission = QStringLiteral("STORM HORIZON RADIO // 2526");
+	recovery.status = QStringLiteral("RECOVERY LINEAGE ONLINE");
+	recovery.messages =
+		QStringLiteral("FIRST STORM ARCHIVE // 2491\nRECOVERY CASCADE // EIGHTEEN YEARS\nLIVING ARCHIVE AWAKE");
+
+	Cue archive;
+	archive.atMs = 15000;
+	archive.label = QStringLiteral("Archive carrier acquired");
+	archive.updateOverlay = true;
+	archive.transmission = QStringLiteral("TEMPEST MAINFRAME // ARCHIVE CARRIER");
+	archive.status = QStringLiteral("RECOVERING LOST SIGNALS");
+	archive.messages = QStringLiteral("FORGOTTEN IDEAS\nBROKEN MEMORIES\nWARNINGS AND CORRUPTED HISTORIES");
+
+	Cue preservation;
+	preservation.atMs = 30000;
+	preservation.label = QStringLiteral("Preservation question");
+	preservation.updateOverlay = true;
+	preservation.transmission = QStringLiteral("TEMPEST MAINFRAME // LIVING ARCHIVE");
+	preservation.status = QStringLiteral("PRESERVATION PRIORITY ACTIVE");
+	preservation.messages = QStringLiteral("WHAT IS WORTH PRESERVING\nWHEN EVERY SYSTEM EVENTUALLY FAILS?");
+	return {recovery, archive, preservation};
 }
 
 void TempestSequenceDirector::ChangeSequence()
@@ -338,6 +332,8 @@ QString TempestSequenceDirector::CueSummary(const Cue &cue) const
 	QStringList actions;
 	if (cue.mediaAction != QStringLiteral("keep"))
 		actions.push_back(QStringLiteral("MEDIA %1").arg(cue.mediaAction.toUpper()));
+	if (!cue.mediaFilePath.isEmpty())
+		actions.push_back(QStringLiteral("ASSET %1").arg(QFileInfo(cue.mediaFilePath).fileName().toUpper()));
 	if (cue.visibilityAction != QStringLiteral("keep"))
 		actions.push_back(QStringLiteral("ITEM %1").arg(cue.visibilityAction.toUpper()));
 	if (cue.updateOverlay)
@@ -447,6 +443,22 @@ bool TempestSequenceDirector::OpenCueEditor(Cue &cue, const QString &title)
 	SetComboData(mediaSource, cue.mediaSourceUuid, QStringLiteral("Unavailable media source"));
 	SetComboData(mediaAction, cue.mediaAction);
 	mediaForm->addRow(QStringLiteral("Source"), mediaSource);
+	auto *fileRow = new QWidget(mediaGroup);
+	auto *fileLayout = new QHBoxLayout(fileRow);
+	fileLayout->setContentsMargins(0, 0, 0, 0);
+	auto *mediaFile = new QLineEdit(cue.mediaFilePath, fileRow);
+	mediaFile->setPlaceholderText(QStringLiteral("Optional file loaded before the media action"));
+	auto *browseMedia = new QPushButton(QStringLiteral("BROWSE"), fileRow);
+	fileLayout->addWidget(mediaFile, 1);
+	fileLayout->addWidget(browseMedia);
+	connect(browseMedia, &QPushButton::clicked, &dialog, [&dialog, mediaFile]() {
+		const QString file = QFileDialog::getOpenFileName(
+			&dialog, QStringLiteral("Select sequence media"), mediaFile->text(),
+			QStringLiteral("Video files (*.mp4 *.mov *.mkv *.webm *.avi *.m4v *.gif);;All files (*.*)"));
+		if (!file.isEmpty())
+			mediaFile->setText(file);
+	});
+	mediaForm->addRow(QStringLiteral("Asset file"), fileRow);
 	mediaForm->addRow(QStringLiteral("Action"), mediaAction);
 	layout->addWidget(mediaGroup);
 
@@ -506,6 +518,7 @@ bool TempestSequenceDirector::OpenCueEditor(Cue &cue, const QString &title)
 	cue.atMs = static_cast<int>(time->value() * 1000.0);
 	cue.label = label->text().trimmed();
 	cue.mediaSourceUuid = mediaSource->currentData().toString();
+	cue.mediaFilePath = mediaFile->text().trimmed();
 	cue.mediaAction = mediaAction->currentData().toString();
 	cue.sceneItemName = sceneItem->currentData().toString();
 	if (sceneItem->currentIndex() < 0)
@@ -565,6 +578,26 @@ QVector<TempestSequenceDirector::SourceInfo> TempestSequenceDirector::EnumerateV
 void TempestSequenceDirector::RunCurrentSequence()
 {
 	RunSequence(CurrentSequenceId());
+}
+
+bool TempestSequenceDirector::AddAssetCue(const QString &filePath, const QString &label, const QString &mediaSourceUuid)
+{
+	if (filePath.isEmpty() || mediaSourceUuid.isEmpty())
+		return false;
+	Cue cue;
+	auto &cues = sequences[CurrentSequenceId()];
+	cue.atMs = cues.isEmpty() ? 0 : cues.last().atMs + 5000;
+	cue.label = label.isEmpty() ? QFileInfo(filePath).completeBaseName() : label;
+	cue.mediaSourceUuid = mediaSourceUuid;
+	cue.mediaFilePath = filePath;
+	cue.mediaAction = QStringLiteral("restart");
+	cues.push_back(cue);
+	std::sort(cues.begin(), cues.end(), [](const Cue &a, const Cue &b) { return a.atMs < b.atMs; });
+	SaveSequence(CurrentSequenceId());
+	nextCueIndex = 0;
+	RebuildCueList();
+	SetStatus(QStringLiteral("ASSET QUEUED // %1").arg(cue.label.toUpper()));
+	return true;
 }
 
 void TempestSequenceDirector::RunSequence(const QString &sequenceId)
@@ -699,6 +732,8 @@ void TempestSequenceDirector::TickSequence()
 
 void TempestSequenceDirector::ExecuteCue(const Cue &cue, int index)
 {
+	if (!cue.mediaFilePath.isEmpty() && !cue.mediaSourceUuid.isEmpty())
+		TempestMediaBay::LoadMediaFile(cue.mediaSourceUuid, cue.mediaFilePath, false, false);
 	if (!cue.mediaSourceUuid.isEmpty() && cue.mediaAction != QStringLiteral("keep"))
 		TempestMediaBay::ApplyMediaAction(cue.mediaSourceUuid, cue.mediaAction);
 	ApplySceneItemAction(cue.sceneItemName, cue.visibilityAction);

@@ -28,6 +28,7 @@
 #include <docks/TempestCommandMatrix.hpp>
 #include <docks/TempestMediaBay.hpp>
 #include <docks/TempestSequenceDirector.hpp>
+#include <docks/TempestAssetVault.hpp>
 #include "TempestMainframeBar.hpp"
 
 #include <obs-module.h>
@@ -385,6 +386,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	addDockWidget(Qt::RightDockWidgetArea, tempestSequenceDirector);
 	tabifyDockWidget(tempestControlDeck, tempestSequenceDirector);
 	tempestCommandMatrix->SetSequenceDirector(tempestSequenceDirector);
+	tempestAssetVault = new TempestAssetVault(this, tempestSequenceDirector, tempestMediaBay, this);
+	addDockWidget(Qt::RightDockWidgetArea, tempestAssetVault);
+	tabifyDockWidget(tempestSequenceDirector, tempestAssetVault);
 	tempestControlDeck->raise();
 
 	startingDockLayout = saveState();
@@ -561,6 +565,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(tempestCommandMatrix);
 	SETUP_DOCK(tempestMediaBay);
 	SETUP_DOCK(tempestSequenceDirector);
+	SETUP_DOCK(tempestAssetVault);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -1277,11 +1282,11 @@ void OBSBasic::OBSInit()
 		tempestEngineeringDockState = QByteArray::fromBase64(QByteArray(engineeringDockState));
 	const int commandLayoutVersion =
 		config_get_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion");
-	if (commandLayoutVersion < 4) {
+	if (commandLayoutVersion < 5) {
 		tempestCommandDockState.clear();
 		tempestEngineeringDockState.clear();
 		on_resetDocks_triggered(true);
-		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 4);
+		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 5);
 	}
 	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
 	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;

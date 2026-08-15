@@ -20,6 +20,8 @@ class TempestMediaBay : public OBSDock {
 public:
 	explicit TempestMediaBay(QWidget *parent = nullptr);
 	static bool ApplyMediaAction(const QString &sourceUuid, const QString &action);
+	static bool LoadMediaFile(const QString &sourceUuid, const QString &filePath, bool loop, bool restart);
+	void SelectSourceUuid(const QString &sourceUuid);
 
 private slots:
 	void RefreshSources();

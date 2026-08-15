@@ -29,6 +29,7 @@ public:
 	~TempestSequenceDirector() override;
 	void RegisterHotkeys();
 	void UnregisterHotkeys();
+	bool AddAssetCue(const QString &filePath, const QString &label, const QString &mediaSourceUuid);
 
 public slots:
 	void RunSequence(const QString &sequenceId);
@@ -51,6 +52,7 @@ private:
 		int atMs = 0;
 		QString label;
 		QString mediaSourceUuid;
+		QString mediaFilePath;
 		QString mediaAction = QStringLiteral("keep");
 		QString sceneItemName;
 		QString visibilityAction = QStringLiteral("keep");

@@ -11,6 +11,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstring>
 
 #include "moc_TempestMediaBay.cpp"
 
@@ -231,6 +232,39 @@ bool TempestMediaBay::ApplyMediaAction(const QString &sourceUuid, const QString 
 	else
 		return false;
 	return true;
+}
+
+bool TempestMediaBay::LoadMediaFile(const QString &sourceUuid, const QString &filePath, bool loop, bool restart)
+{
+	if (sourceUuid.isEmpty() || filePath.isEmpty())
+		return false;
+	OBSSourceAutoRelease source = obs_get_source_by_uuid(sourceUuid.toUtf8().constData());
+	if (!source || strcmp(obs_source_get_unversioned_id(source), "ffmpeg_source") != 0)
+		return false;
+	OBSDataAutoRelease settings = obs_source_get_settings(source);
+	obs_data_set_bool(settings, "is_local_file", true);
+	obs_data_set_string(settings, "local_file", filePath.toUtf8().constData());
+	obs_data_set_bool(settings, "looping", loop);
+	obs_data_set_bool(settings, "restart_on_activate", true);
+	obs_data_set_bool(settings, "clear_on_media_end", true);
+	obs_data_set_bool(settings, "close_when_inactive", false);
+	obs_source_update(source, settings);
+	if (restart)
+		obs_source_media_restart(source);
+	return true;
+}
+
+void TempestMediaBay::SelectSourceUuid(const QString &sourceUuid)
+{
+	selectedSourceUuid = sourceUuid;
+	RefreshSources();
+	const int index = sourceSelector->findData(sourceUuid);
+	if (index >= 0) {
+		QSignalBlocker blocker(sourceSelector);
+		sourceSelector->setCurrentIndex(index);
+	}
+	SaveSelectedSource();
+	RefreshPlaybackState();
 }
 
 void TempestMediaBay::TogglePlayback()
