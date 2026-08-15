@@ -28,6 +28,8 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QHBoxLayout>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProcess>
@@ -39,6 +41,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStringList>
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
@@ -46,6 +49,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace {
 constexpr char ConfigSection[] = "TempestCommandMatrix";
@@ -436,6 +440,12 @@ void TempestCommandMatrix::BuildInterface()
 		QToolBar#matrixSourceToolbar { border: none; background: #07131e; spacing: 3px; }
 		QToolBar#matrixSourceToolbar QToolButton { min-width: 28px; min-height: 28px; border: 1px solid #153b52; background: #0d2230; }
 		QToolBar#matrixSourceToolbar QToolButton:hover { border-color: #45d9ff; background: #0c456b; }
+		QWidget#matrixSourceInspector { border: 1px solid #153b52; background: #06101a; }
+		QWidget#matrixSourceInspector QLabel { border: none; background: transparent; }
+		QLabel#matrixInspectorSource { color: #bdf6ff; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+		QLabel#matrixInspectorType { color: #748fa4; font-size: 9px; }
+		QPushButton[inspectorAction="true"] { min-height: 27px; padding: 0 5px; font-size: 9px; }
+		QPushButton[inspectorAction="true"]:disabled { color: #40596b; border-color: #102c3d; background: #091722; }
 		QSplitter::handle { background: #153b52; height: 2px; margin: 4px 0; }
 	)"));
 
@@ -538,6 +548,10 @@ void TempestCommandMatrix::BuildInterface()
 		const QModelIndex index = sourceTree->indexAt(pos);
 		main->CreateSourcePopupMenu(index.row(), false);
 	});
+	connect(sourceTree->selectionModel(), &QItemSelectionModel::currentChanged, this,
+		[this](const QModelIndex &, const QModelIndex &) { UpdateSourceInspector(); });
+	connect(sourceTree->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+		[this](const QItemSelection &, const QItemSelection &) { UpdateSourceInspector(); });
 	sourcePaneLayout->addWidget(sourceTree, 1);
 
 	auto *sourceToolbar = new QToolBar(sourcePane);
@@ -557,6 +571,85 @@ void TempestCommandMatrix::BuildInterface()
 	addSourceAction("actionSourceUp");
 	addSourceAction("actionSourceDown");
 	sourcePaneLayout->addWidget(sourceToolbar);
+
+	sourceInspectorPanel = new QWidget(sourcePane);
+	sourceInspectorPanel->setObjectName(QStringLiteral("matrixSourceInspector"));
+	sourceInspectorPanel->setAccessibleName(QStringLiteral("Selected source inspector"));
+	auto *inspectorLayout = new QVBoxLayout(sourceInspectorPanel);
+	inspectorLayout->setContentsMargins(7, 6, 7, 7);
+	inspectorLayout->setSpacing(4);
+	inspectorSourceLabel = new QLabel(QStringLiteral("SOURCE INSPECTOR // SELECT A SOURCE"), sourceInspectorPanel);
+	inspectorSourceLabel->setObjectName(QStringLiteral("matrixInspectorSource"));
+	inspectorTypeLabel = new QLabel(QStringLiteral("No source selected"), sourceInspectorPanel);
+	inspectorTypeLabel->setObjectName(QStringLiteral("matrixInspectorType"));
+	inspectorLayout->addWidget(inspectorSourceLabel);
+	inspectorLayout->addWidget(inspectorTypeLabel);
+
+	auto *inspectorGrid = new QGridLayout();
+	inspectorGrid->setContentsMargins(0, 2, 0, 0);
+	inspectorGrid->setHorizontalSpacing(4);
+	inspectorGrid->setVerticalSpacing(4);
+	auto addInspectorButton = [this, inspectorGrid](QPointer<QPushButton> &target, const QString &text, int row,
+							int column, int columnSpan = 1) {
+		target = new QPushButton(text, sourceInspectorPanel);
+		target->setProperty("inspectorAction", true);
+		target->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		target->setAccessibleName(QStringLiteral("Source inspector %1").arg(text.toLower()));
+		inspectorGrid->addWidget(target, row, column, 1, columnSpan);
+	};
+	addInspectorButton(inspectorFitButton, QStringLiteral("FIT"), 0, 0);
+	addInspectorButton(inspectorCenterButton, QStringLiteral("CENTER"), 0, 1);
+	addInspectorButton(inspectorResetButton, QStringLiteral("RESET"), 0, 2);
+	addInspectorButton(inspectorPropertiesButton, QStringLiteral("PROPERTIES"), 1, 0);
+	addInspectorButton(inspectorFiltersButton, QStringLiteral("FILTERS"), 1, 1);
+	addInspectorButton(inspectorRenameButton, QStringLiteral("RENAME"), 1, 2);
+	addInspectorButton(inspectorDuplicateButton, QStringLiteral("DUPLICATE"), 2, 0);
+	addInspectorButton(inspectorInteractButton, QStringLiteral("INTERACT"), 2, 1);
+	addInspectorButton(inspectorRefreshButton, QStringLiteral("REFRESH"), 2, 2);
+	addInspectorButton(inspectorPlayButton, QStringLiteral("PLAY"), 3, 0);
+	addInspectorButton(inspectorPauseButton, QStringLiteral("PAUSE"), 3, 1);
+	addInspectorButton(inspectorRestartButton, QStringLiteral("RESTART"), 3, 2);
+	addInspectorButton(inspectorMuteButton, QStringLiteral("MUTE AUDIO"), 4, 0, 3);
+	inspectorLayout->addLayout(inspectorGrid);
+
+	connect(inspectorFitButton, &QPushButton::clicked, this, [this]() { TriggerMainAction("actionFitToScreen"); });
+	connect(inspectorCenterButton, &QPushButton::clicked, this,
+		[this]() { TriggerMainAction("actionCenterToScreen"); });
+	connect(inspectorResetButton, &QPushButton::clicked, this,
+		[this]() { TriggerMainAction("actionResetTransform"); });
+	connect(inspectorPropertiesButton, &QPushButton::clicked, this, [this]() {
+		obs_source_t *source = SelectedInspectorSource();
+		if (main && source)
+			main->CreatePropertiesWindow(source);
+	});
+	connect(inspectorFiltersButton, &QPushButton::clicked, this, [this]() {
+		obs_source_t *source = SelectedInspectorSource();
+		if (main && source)
+			main->CreateFiltersWindow(source);
+	});
+	connect(inspectorRenameButton, &QPushButton::clicked, this, [this]() {
+		if (!sourceTree)
+			return;
+		QModelIndex index = sourceTree->currentIndex();
+		const QModelIndexList selected = sourceTree->selectionModel()->selectedIndexes();
+		if (!index.isValid() && !selected.isEmpty())
+			index = selected.constFirst();
+		if (index.isValid())
+			sourceTree->Edit(index.row());
+	});
+	connect(inspectorDuplicateButton, &QPushButton::clicked, this, &TempestCommandMatrix::DuplicateSelectedSource);
+	connect(inspectorInteractButton, &QPushButton::clicked, this, [this]() {
+		obs_source_t *source = SelectedInspectorSource();
+		if (main && source)
+			main->CreateInteractionWindow(source);
+	});
+	connect(inspectorRefreshButton, &QPushButton::clicked, this, &TempestCommandMatrix::RefreshSelectedBrowser);
+	connect(inspectorPlayButton, &QPushButton::clicked, this, [this]() { ApplySelectedMediaAction("play"); });
+	connect(inspectorPauseButton, &QPushButton::clicked, this, [this]() { ApplySelectedMediaAction("pause"); });
+	connect(inspectorRestartButton, &QPushButton::clicked, this, [this]() { ApplySelectedMediaAction("restart"); });
+	connect(inspectorMuteButton, &QPushButton::clicked, this, &TempestCommandMatrix::ToggleSelectedMute);
+	sourcePaneLayout->addWidget(sourceInspectorPanel);
+	UpdateSourceInspector();
 	routingSplitter->addWidget(sourcePane);
 	routingSplitter->setStretchFactor(0, 1);
 	routingSplitter->setStretchFactor(1, 1);
@@ -837,9 +930,167 @@ void TempestCommandMatrix::RefreshSourcePanel(const QString &sceneUuid, const QS
 	sourceSceneLabel->setText(
 		QStringLiteral("SCENE SOURCES // %1 // %2").arg(sceneName.toUpper()).arg(sources.size()));
 	QPointer<SourceTree> guardedTree(sourceTree);
-	QTimer::singleShot(0, sourceTree, [guardedTree]() {
-		if (guardedTree)
+	QPointer<TempestCommandMatrix> guardedMatrix(this);
+	QTimer::singleShot(0, sourceTree, [guardedTree, guardedMatrix]() {
+		if (guardedTree) {
 			guardedTree->RefreshItems();
+			if (guardedMatrix)
+				guardedMatrix->UpdateSourceInspector();
+		}
+	});
+}
+
+obs_sceneitem_t *TempestCommandMatrix::SelectedInspectorItem() const
+{
+	if (!sourceTree)
+		return nullptr;
+	QModelIndex index = sourceTree->currentIndex();
+	const QModelIndexList selected = sourceTree->selectionModel()->selectedIndexes();
+	if (!index.isValid() && !selected.isEmpty())
+		index = selected.constFirst();
+	if (!index.isValid())
+		return nullptr;
+	OBSSceneItem item = sourceTree->Get(index.row());
+	return item;
+}
+
+obs_source_t *TempestCommandMatrix::SelectedInspectorSource() const
+{
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	return item ? obs_sceneitem_get_source(item) : nullptr;
+}
+
+void TempestCommandMatrix::UpdateSourceInspector()
+{
+	if (!sourceInspectorPanel || !inspectorSourceLabel || !inspectorTypeLabel)
+		return;
+
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	obs_source_t *source = item ? obs_sceneitem_get_source(item) : nullptr;
+	const bool selected = source != nullptr;
+	sourceInspectorPanel->setEnabled(selected);
+	if (!selected) {
+		inspectorSourceLabel->setText(QStringLiteral("SOURCE INSPECTOR // SELECT A SOURCE"));
+		inspectorTypeLabel->setText(QStringLiteral("No source selected"));
+		inspectorInteractButton->setVisible(false);
+		inspectorRefreshButton->setVisible(false);
+		inspectorPlayButton->setVisible(false);
+		inspectorPauseButton->setVisible(false);
+		inspectorRestartButton->setVisible(false);
+		inspectorMuteButton->setVisible(false);
+		return;
+	}
+
+	const char *sourceName = obs_source_get_name(source);
+	const char *sourceId = obs_source_get_unversioned_id(source);
+	const char *displayName = sourceId ? obs_source_get_display_name(sourceId) : nullptr;
+	const uint32_t flags = obs_source_get_output_flags(source);
+	const bool isBrowser = sourceId && strcmp(sourceId, "browser_source") == 0;
+	const bool canInteract = (flags & OBS_SOURCE_INTERACTION) != 0;
+	const bool isMedia = (flags & OBS_SOURCE_CONTROLLABLE_MEDIA) != 0;
+	const bool hasAudio = (flags & OBS_SOURCE_AUDIO) != 0;
+	const bool locked = obs_sceneitem_locked(item);
+
+	inspectorSourceLabel->setText(QStringLiteral("SOURCE INSPECTOR // %1")
+					      .arg(QString::fromUtf8(sourceName ? sourceName : "Unnamed").toUpper()));
+	QStringList capabilities;
+	if (isBrowser)
+		capabilities.push_back(QStringLiteral("BROWSER"));
+	else if (displayName)
+		capabilities.push_back(QString::fromUtf8(displayName).toUpper());
+	if (isMedia)
+		capabilities.push_back(QStringLiteral("MEDIA"));
+	if (hasAudio)
+		capabilities.push_back(QStringLiteral("AUDIO"));
+	capabilities.push_back(locked ? QStringLiteral("LOCKED") : QStringLiteral("EDITABLE"));
+	capabilities.push_back(obs_source_active(source) ? QStringLiteral("ACTIVE") : QStringLiteral("INACTIVE"));
+	inspectorTypeLabel->setText(capabilities.join(QStringLiteral(" // ")));
+
+	inspectorFitButton->setEnabled(!locked);
+	inspectorCenterButton->setEnabled(!locked);
+	inspectorResetButton->setEnabled(!locked);
+	inspectorPropertiesButton->setEnabled(true);
+	inspectorFiltersButton->setEnabled(true);
+	inspectorRenameButton->setEnabled(true);
+	inspectorDuplicateButton->setEnabled(true);
+	inspectorInteractButton->setVisible(canInteract);
+	inspectorRefreshButton->setVisible(isBrowser);
+	inspectorPlayButton->setVisible(isMedia);
+	inspectorPauseButton->setVisible(isMedia);
+	inspectorRestartButton->setVisible(isMedia);
+	inspectorMuteButton->setVisible(hasAudio);
+	if (hasAudio)
+		inspectorMuteButton->setText(obs_source_muted(source) ? QStringLiteral("UNMUTE AUDIO")
+								      : QStringLiteral("MUTE AUDIO"));
+}
+
+void TempestCommandMatrix::TriggerMainAction(const char *objectName)
+{
+	if (!main || !SelectedInspectorItem())
+		return;
+	QAction *action = main->findChild<QAction *>(QString::fromUtf8(objectName));
+	if (action && action->isEnabled())
+		action->trigger();
+}
+
+void TempestCommandMatrix::RefreshSelectedBrowser()
+{
+	obs_source_t *source = SelectedInspectorSource();
+	const char *sourceId = source ? obs_source_get_unversioned_id(source) : nullptr;
+	if (!sourceId || strcmp(sourceId, "browser_source") != 0)
+		return;
+
+	obs_properties_t *properties = obs_source_properties(source);
+	obs_property_t *refresh = properties ? obs_properties_get(properties, "refreshnocache") : nullptr;
+	if (refresh)
+		obs_property_button_clicked(refresh, source);
+	if (properties)
+		obs_properties_destroy(properties);
+	SetStatus(QStringLiteral("Browser source refreshed"));
+}
+
+void TempestCommandMatrix::ApplySelectedMediaAction(const char *action)
+{
+	obs_source_t *source = SelectedInspectorSource();
+	if (!source || !(obs_source_get_output_flags(source) & OBS_SOURCE_CONTROLLABLE_MEDIA))
+		return;
+	if (strcmp(action, "play") == 0)
+		obs_source_media_play_pause(source, false);
+	else if (strcmp(action, "pause") == 0)
+		obs_source_media_play_pause(source, true);
+	else if (strcmp(action, "restart") == 0)
+		obs_source_media_restart(source);
+	SetStatus(QStringLiteral("Media command // %1").arg(QString::fromUtf8(action).toUpper()));
+}
+
+void TempestCommandMatrix::ToggleSelectedMute()
+{
+	obs_source_t *source = SelectedInspectorSource();
+	if (!source || !(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO))
+		return;
+	const bool muted = !obs_source_muted(source);
+	obs_source_set_muted(source, muted);
+	SetStatus(muted ? QStringLiteral("Source audio muted") : QStringLiteral("Source audio restored"));
+	UpdateSourceInspector();
+}
+
+void TempestCommandMatrix::DuplicateSelectedSource()
+{
+	if (!main || !SelectedInspectorItem())
+		return;
+	QAction *copyAction = main->findChild<QAction *>(QStringLiteral("actionCopySource"));
+	if (!copyAction || !copyAction->isEnabled())
+		return;
+	copyAction->trigger();
+	QPointer<OBSBasic> guardedMain(main);
+	QTimer::singleShot(0, this, [this, guardedMain]() {
+		if (!guardedMain)
+			return;
+		QAction *pasteAction = guardedMain->findChild<QAction *>(QStringLiteral("actionPasteDup"));
+		if (pasteAction && pasteAction->isEnabled()) {
+			pasteAction->trigger();
+			SetStatus(QStringLiteral("Source duplicated"));
+		}
 	});
 }
 

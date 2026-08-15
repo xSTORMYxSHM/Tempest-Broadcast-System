@@ -130,6 +130,14 @@ private:
 	void ApplyProtocolOverlay(obs_source_t *sceneSource, const QString &sourceName);
 	void SetViewMode(const QString &mode, bool save = true);
 	void UpdateActiveScene();
+	obs_sceneitem_t *SelectedInspectorItem() const;
+	obs_source_t *SelectedInspectorSource() const;
+	void UpdateSourceInspector();
+	void TriggerMainAction(const char *objectName);
+	void RefreshSelectedBrowser();
+	void ApplySelectedMediaAction(const char *action);
+	void ToggleSelectedMute();
+	void DuplicateSelectedSource();
 	void SetStatus(const QString &message, bool error = false);
 	ProtocolWidgets *FindProtocol(const QString &id);
 
@@ -149,6 +157,22 @@ private:
 	QPointer<QPushButton> protocolViewButton;
 	QPointer<QStackedWidget> viewStack;
 	QPointer<SourceTree> sourceTree;
+	QPointer<QWidget> sourceInspectorPanel;
+	QPointer<QLabel> inspectorSourceLabel;
+	QPointer<QLabel> inspectorTypeLabel;
+	QPointer<QPushButton> inspectorFitButton;
+	QPointer<QPushButton> inspectorCenterButton;
+	QPointer<QPushButton> inspectorResetButton;
+	QPointer<QPushButton> inspectorPropertiesButton;
+	QPointer<QPushButton> inspectorFiltersButton;
+	QPointer<QPushButton> inspectorRenameButton;
+	QPointer<QPushButton> inspectorDuplicateButton;
+	QPointer<QPushButton> inspectorInteractButton;
+	QPointer<QPushButton> inspectorRefreshButton;
+	QPointer<QPushButton> inspectorPlayButton;
+	QPointer<QPushButton> inspectorPauseButton;
+	QPointer<QPushButton> inspectorRestartButton;
+	QPointer<QPushButton> inspectorMuteButton;
 	QPointer<QWidget> basicViewPage;
 	QPointer<QWidget> protocolViewPage;
 	QPointer<QCheckBox> isolateOverlay;
