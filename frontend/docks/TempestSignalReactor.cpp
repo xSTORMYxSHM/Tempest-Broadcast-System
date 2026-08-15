@@ -2,6 +2,7 @@
 
 #include <OBSApp.hpp>
 #include <utility/platform.hpp>
+#include <widgets/OBSBasic.hpp>
 
 #include <obs.hpp>
 #include <qt-wrappers.hpp>
@@ -50,7 +51,7 @@ int SuggestedSourceIndex(QComboBox *selector, const QStringList &terms)
 }
 } // namespace
 
-TempestSignalReactor::TempestSignalReactor(QWidget *parent) : OBSDock(parent)
+TempestSignalReactor::TempestSignalReactor(OBSBasic *main, QWidget *parent) : OBSDock(parent), main(main)
 {
 	setObjectName(QStringLiteral("tempestSignalReactor"));
 	setWindowTitle(QStringLiteral("Mainframe Signal Reactor"));
@@ -74,6 +75,7 @@ TempestSignalReactor::TempestSignalReactor(QWidget *parent) : OBSDock(parent)
 
 TempestSignalReactor::~TempestSignalReactor()
 {
+	UnregisterHotkeys();
 	if (telemetryTimer)
 		telemetryTimer->stop();
 	DestroyMeter(desktopChannel);
@@ -89,6 +91,7 @@ void TempestSignalReactor::BuildInterface()
 		QLabel#reactorTitle { color: #45d9ff; font-size: 15px; font-weight: 700; letter-spacing: 2px; }
 		QLabel#reactorSubtitle, QLabel#reactorChannelLabel { color: #748fa4; font-size: 10px; letter-spacing: 1px; }
 		QLabel#reactorStatus { color: #45d9ff; font-size: 10px; }
+		QLabel#reactorControl { color: #9b8cff; font-size: 10px; letter-spacing: 1px; padding: 5px; border: 1px solid #302d67; background: #090d1d; }
 		QLabel#reactorHint { color: #748fa4; font-size: 10px; padding: 7px; border: 1px solid #183a50; background: #06101a; }
 		QFrame#reactorChannel { background: #081a27; border: 1px solid #183a50; }
 		QComboBox, QDoubleSpinBox { min-height: 29px; padding: 0 7px; color: #bdf6ff; background: #06101a; border: 1px solid #1f506d; }
@@ -169,10 +172,14 @@ void TempestSignalReactor::BuildInterface()
 	pulseRow->addWidget(peakButton);
 	pulseRow->addWidget(refresh);
 	layout->addLayout(pulseRow);
+	controlLabel = new QLabel(QStringLiteral("CONTROL BRIDGE // INITIALIZING"), root);
+	controlLabel->setObjectName(QStringLiteral("reactorControl"));
+	controlLabel->setAccessibleName(QStringLiteral("Signal Reactor external control status"));
+	layout->addWidget(controlLabel);
 
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Desktop, microphone, and manual pulse energy are merged onto the master bus. HUD elements can bind to the master mix or an individual channel."),
+			"Desktop, microphone, and manual pulse energy are merged onto the master bus. Assign Pulse and Peak in Settings > Hotkeys, or call tempest-mainframe / TriggerSignal after enabling the OBS WebSocket server."),
 		root);
 	hint->setObjectName(QStringLiteral("reactorHint"));
 	hint->setWordWrap(true);
@@ -191,8 +198,72 @@ void TempestSignalReactor::BuildInterface()
 	connect(desktopSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(microphoneSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(smoothing, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
-	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerManualPulse(0.65f); });
-	connect(peakButton, &QPushButton::clicked, this, [this]() { TriggerManualPulse(1.0f); });
+	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerPulse(0.65f, QStringLiteral("dock")); });
+	connect(peakButton, &QPushButton::clicked, this, [this]() { TriggerPulse(1.0f, QStringLiteral("dock")); });
+}
+
+void TempestSignalReactor::RegisterHotkeys()
+{
+	UnregisterHotkeys();
+	struct Definition {
+		const char *name;
+		const char *description;
+		float strength;
+	};
+	constexpr Definition definitions[] = {
+		{"TempestMainframe.Signal.Pulse", "Tempest Mainframe: Trigger Signal Pulse", 0.65f},
+		{"TempestMainframe.Signal.Peak", "Tempest Mainframe: Trigger Signal Peak", 1.0f},
+	};
+	for (const Definition &definition : definitions) {
+		const obs_hotkey_id id =
+			obs_hotkey_register_frontend(definition.name, definition.description, HotkeyCallback, this);
+		if (id == OBS_INVALID_HOTKEY_ID)
+			continue;
+		pulseHotkeys.insert(id, definition.strength);
+		LoadHotkey(id, QByteArray(definition.name));
+	}
+	UpdateControlBridgeState();
+}
+
+void TempestSignalReactor::UnregisterHotkeys()
+{
+	for (auto it = pulseHotkeys.cbegin(); it != pulseHotkeys.cend(); ++it)
+		obs_hotkey_unregister(it.key());
+	pulseHotkeys.clear();
+	UpdateControlBridgeState();
+}
+
+void TempestSignalReactor::LoadHotkey(obs_hotkey_id id, const QByteArray &name)
+{
+	if (!main)
+		return;
+	const char *json = config_get_string(main->Config(), "Hotkeys", name.constData());
+	if (!json || !*json)
+		return;
+	OBSDataAutoRelease data = obs_data_create_from_json(json);
+	if (!data)
+		return;
+	OBSDataArrayAutoRelease bindings = obs_data_get_array(data, "bindings");
+	if (bindings)
+		obs_hotkey_load(id, bindings);
+}
+
+void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotkey_t *, bool pressed)
+{
+	if (!pressed)
+		return;
+	auto *reactor = static_cast<TempestSignalReactor *>(data);
+	const float strength = reactor->pulseHotkeys.value(id, 0.0f);
+	if (strength <= 0.0f)
+		return;
+	QPointer<TempestSignalReactor> guarded(reactor);
+	QMetaObject::invokeMethod(
+		reactor,
+		[guarded, strength]() {
+			if (guarded)
+				guarded->TriggerPulse(strength, QStringLiteral("hotkey"));
+		},
+		Qt::QueuedConnection);
 }
 
 void TempestSignalReactor::LoadState()
@@ -353,11 +424,36 @@ void TempestSignalReactor::AttachMicrophoneSource()
 	SaveState();
 }
 
-void TempestSignalReactor::TriggerManualPulse(float strength)
+void TempestSignalReactor::TriggerPulse(float strength, const QString &origin)
 {
-	manualPulse = std::max(manualPulse, strength);
+	const float boundedStrength = std::clamp(strength, 0.05f, 1.5f);
+	manualPulse = std::max(manualPulse, boundedStrength);
 	if (!reactorEnabled->isChecked())
 		reactorEnabled->setChecked(true);
+	emit PulseTriggered(boundedStrength, origin);
+}
+
+void TempestSignalReactor::SetWebSocketReady(bool ready)
+{
+	webSocketReady = ready;
+	UpdateControlBridgeState();
+}
+
+void TempestSignalReactor::UpdateControlBridgeState()
+{
+	if (!controlLabel)
+		return;
+	const bool hotkeysReady = pulseHotkeys.size() == 2;
+	QString state;
+	if (hotkeysReady && webSocketReady)
+		state = QStringLiteral("CONTROL BRIDGE // 2 HOTKEYS + WEBSOCKET VENDOR API READY");
+	else if (hotkeysReady)
+		state = QStringLiteral("CONTROL BRIDGE // 2 HOTKEYS READY");
+	else
+		state = QStringLiteral("CONTROL BRIDGE // INITIALIZING");
+	controlLabel->setText(state);
+	controlLabel->setAccessibleName(state);
+	controlLabel->setAccessibleDescription(state);
 }
 
 void TempestSignalReactor::PublishTelemetry()

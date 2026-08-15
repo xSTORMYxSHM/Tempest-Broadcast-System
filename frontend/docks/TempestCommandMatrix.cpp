@@ -4,6 +4,7 @@
 #include "TempestHUDComposer.hpp"
 #include "TempestMediaBay.hpp"
 #include "TempestSequenceDirector.hpp"
+#include "TempestSignalReactor.hpp"
 
 #include <OBSApp.hpp>
 #ifdef TEMPEST_WEBSOCKET_AVAILABLE
@@ -39,6 +40,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 constexpr char ConfigSection[] = "TempestCommandMatrix";
@@ -132,6 +134,8 @@ TempestCommandMatrix::~TempestCommandMatrix()
 							"RunSequence");
 		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
 							"ControlSequence");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"TriggerSignal");
 	}
 #endif
 }
@@ -144,6 +148,20 @@ void TempestCommandMatrix::SetSequenceDirector(TempestSequenceDirector *director
 void TempestCommandMatrix::SetHUDComposer(TempestHUDComposer *composer)
 {
 	hudComposer = composer;
+}
+
+void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
+{
+	signalReactor = reactor;
+	if (!signalReactor)
+		return;
+	connect(signalReactor, &TempestSignalReactor::PulseTriggered, this,
+		[this](float strength, const QString &origin) {
+			OBSDataAutoRelease eventData = obs_data_create();
+			obs_data_set_double(eventData, "strength", strength);
+			obs_data_set_string(eventData, "origin", origin.toUtf8().constData());
+			EmitRouterEvent("SignalTriggered", eventData);
+		});
 }
 
 void TempestCommandMatrix::RunProtocol(const QString &protocolId)
@@ -230,9 +248,37 @@ void TempestCommandMatrix::RegisterExternalControls()
 	const bool sequenceControlReady =
 		sequenceDirector &&
 		obs_websocket_vendor_register_request(vendor, "ControlSequence", WebSocketControlSequence, this);
-	webSocketReady = protocolReady && sceneReady && overlayReady && sequenceReady && sequenceControlReady;
+	const bool signalReady = signalReactor && obs_websocket_vendor_register_request(vendor, "TriggerSignal",
+											WebSocketTriggerSignal, this);
+	webSocketReady = protocolReady && sceneReady && overlayReady && sequenceReady && sequenceControlReady &&
+			 signalReady;
 #endif
 	SetRouterState();
+}
+
+void TempestCommandMatrix::WebSocketTriggerSignal(obs_data_t *request, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->signalReactor) {
+		SetRouterResponse(response, false, "signal reactor is unavailable");
+		return;
+	}
+	const double requestedStrength =
+		obs_data_has_user_value(request, "strength") ? obs_data_get_double(request, "strength") : 1.0;
+	if (!std::isfinite(requestedStrength) || requestedStrength < 0.05 || requestedStrength > 1.5) {
+		SetRouterResponse(response, false, "strength must be between 0.05 and 1.5");
+		return;
+	}
+	QPointer<TempestSignalReactor> guarded(matrix->signalReactor);
+	QMetaObject::invokeMethod(
+		matrix,
+		[guarded, requestedStrength]() {
+			if (guarded)
+				guarded->TriggerPulse((float)requestedStrength, QStringLiteral("websocket"));
+		},
+		Qt::QueuedConnection);
+	obs_data_set_double(response, "strength", requestedStrength);
+	SetRouterResponse(response, true, "signal command queued");
 }
 
 void TempestCommandMatrix::WebSocketRunProtocol(obs_data_t *request, obs_data_t *response, void *data)
@@ -353,11 +399,13 @@ void TempestCommandMatrix::SetRouterState()
 		return;
 	const bool hotkeysReady = protocolHotkeys.size() == protocols.size();
 	if (hotkeysReady && webSocketReady)
-		routerLabel->setText(QStringLiteral("CONTROL ROUTER // HOTKEYS + OBS WEBSOCKET READY"));
+		routerLabel->setText(QStringLiteral("CONTROL ROUTER // HOTKEYS + WEBSOCKET VENDOR API READY"));
 	else if (hotkeysReady)
 		routerLabel->setText(QStringLiteral("CONTROL ROUTER // HOTKEYS READY"));
 	else
 		routerLabel->setText(QStringLiteral("CONTROL ROUTER // INITIALIZING"));
+	if (signalReactor)
+		signalReactor->SetWebSocketReady(webSocketReady);
 }
 
 void TempestCommandMatrix::BuildInterface()

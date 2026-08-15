@@ -379,10 +379,11 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 
 	tempestControlDeck = new TempestControlDeck(this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
-	tempestSignalReactor = new TempestSignalReactor(this);
+	tempestSignalReactor = new TempestSignalReactor(this, this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestSignalReactor);
 	tabifyDockWidget(tempestControlDeck, tempestSignalReactor);
 	tempestCommandMatrix = new TempestCommandMatrix(this, tempestControlDeck, this);
+	tempestCommandMatrix->SetSignalReactor(tempestSignalReactor);
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	tempestCommandMatrix->setVisible(false);
 	tempestMediaBay = new TempestMediaBay(this);

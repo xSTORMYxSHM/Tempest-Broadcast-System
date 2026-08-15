@@ -21,6 +21,7 @@ class QTimer;
 class OBSBasic;
 class TempestControlDeck;
 class TempestHUDComposer;
+class TempestSignalReactor;
 class TempestSequenceDirector;
 
 class TempestCommandMatrix : public OBSDock {
@@ -34,6 +35,7 @@ public:
 	void RegisterExternalControls();
 	void SetSequenceDirector(TempestSequenceDirector *director);
 	void SetHUDComposer(TempestHUDComposer *composer);
+	void SetSignalReactor(TempestSignalReactor *reactor);
 	void RunProtocol(const QString &protocolId);
 
 protected:
@@ -88,6 +90,7 @@ private:
 	static void WebSocketSetOverlayState(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketRunSequence(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketControlSequence(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketTriggerSignal(obs_data_t *request, obs_data_t *response, void *data);
 
 	void BuildInterface();
 	QVector<SceneInfo> EnumerateScenes() const;
@@ -121,6 +124,7 @@ private:
 	QPointer<OBSBasic> main;
 	QPointer<TempestControlDeck> controlDeck;
 	QPointer<TempestHUDComposer> hudComposer;
+	QPointer<TempestSignalReactor> signalReactor;
 	QPointer<TempestSequenceDirector> sequenceDirector;
 	QPointer<QGridLayout> sceneGrid;
 	QPointer<QGridLayout> protocolGrid;
