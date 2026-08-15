@@ -18,8 +18,8 @@ class QPushButton;
 class QResizeEvent;
 class QStackedWidget;
 class QTimer;
-class QVBoxLayout;
 class OBSBasic;
+class SourceTree;
 class TempestControlDeck;
 class TempestHUDComposer;
 class TempestSignalReactor;
@@ -107,8 +107,6 @@ private:
 	QVector<SceneInfo> EnumerateScenes() const;
 	void RebuildSceneGrid(const QVector<SceneInfo> &scenes);
 	void RefreshSourcePanel(const QString &sceneUuid, const QString &sceneName);
-	void RebuildSourceList(const QVector<SceneSourceInfo> &sources);
-	void SetSceneItemVisible(const QString &sceneUuid, int64_t itemId, const QString &sourceName, bool visible);
 	void RelayoutRoutingGrids();
 	void RebuildAssignments(const QVector<SceneInfo> &scenes);
 	void ExecuteProtocol(const QString &protocolId);
@@ -150,7 +148,7 @@ private:
 	QPointer<QPushButton> basicViewButton;
 	QPointer<QPushButton> protocolViewButton;
 	QPointer<QStackedWidget> viewStack;
-	QPointer<QVBoxLayout> sourceListLayout;
+	QPointer<SourceTree> sourceTree;
 	QPointer<QWidget> basicViewPage;
 	QPointer<QWidget> protocolViewPage;
 	QPointer<QCheckBox> isolateOverlay;
@@ -164,7 +162,6 @@ private:
 	QVector<SceneInfo> currentScenes;
 	QString sceneFingerprint;
 	QString sourceFingerprint;
-	QString sourceSceneUuid;
 	int routingColumnCount = 0;
 	quint64 executionRevision = 0;
 	void *webSocketVendor = nullptr;
