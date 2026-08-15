@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -20,23 +21,180 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSignalBlocker>
 #include <QSize>
+#include <QTimer>
 #include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "moc_TempestHUDComposer.cpp"
 
+class TempestReactionPreview : public QWidget {
+public:
+	explicit TempestReactionPreview(QWidget *parent = nullptr) : QWidget(parent)
+	{
+		setMinimumHeight(150);
+		setAccessibleName(QStringLiteral("Tempest reaction live preview"));
+		timer.setInterval(33);
+		connect(&timer, &QTimer::timeout, this, [this]() { Tick(); });
+		timer.start();
+	}
+
+	void SetTelemetryPath(const QString &path) { telemetryPath = path; }
+
+	void SetState(const QString &newTitle, const QString &newAccent, const QString &newReaction,
+		      const QString &newSignal, double newStrength, double newThreshold, double newAttack,
+		      double newDecay, double newIdle)
+	{
+		title = newTitle.isEmpty() ? QStringLiteral("TEMPEST SIGNAL ELEMENT") : newTitle;
+		accent = QColor(newAccent);
+		if (!accent.isValid())
+			accent = QColor(QStringLiteral("#45d9ff"));
+		reaction = newReaction;
+		signal = newSignal;
+		strength = newStrength;
+		threshold = newThreshold;
+		attack = newAttack;
+		decay = newDecay;
+		idle = newIdle;
+		update();
+	}
+
+	void TriggerTest()
+	{
+		testLevel = 1.0;
+		update();
+	}
+
+protected:
+	void paintEvent(QPaintEvent *) override
+	{
+		QPainter painter(this);
+		painter.setRenderHint(QPainter::Antialiasing);
+		painter.fillRect(rect(), QColor(QStringLiteral("#050d16")));
+		const double breathing = reaction == QStringLiteral("pulse") ? idle * (1.0 + 0.45 * std::sin(phase)) : 0.0;
+		double react = std::max(envelope * strength, breathing);
+		if (reaction == QStringLiteral("glow"))
+			react *= 0.68;
+		react = std::clamp(react, 0.0, 1.8);
+		const int shift = reaction == QStringLiteral("glitch") && react > 0.62
+				  ? (int)std::round(std::sin(phase * 11.0) * react * 5.0)
+				  : 0;
+		QRectF panel = rect().adjusted(14 + shift, 14, -14 + shift, -14);
+		for (int width = 12; width >= 4; width -= 4) {
+			QColor glow = accent;
+			glow.setAlpha((int)(8 + react * (20 - width)));
+			painter.setPen(QPen(glow, width));
+			painter.drawRoundedRect(panel, 4, 4);
+		}
+		QColor border = accent;
+		border.setAlpha((int)std::clamp(105.0 + react * 100.0, 0.0, 255.0));
+		painter.setPen(QPen(border, 1.4));
+		painter.setBrush(QColor(7, 22, 34, 235));
+		painter.drawRoundedRect(panel, 4, 4);
+
+		const qreal corner = 25.0;
+		painter.setPen(QPen(accent, 3));
+		painter.drawLine(panel.topLeft(), panel.topLeft() + QPointF(corner, 0));
+		painter.drawLine(panel.topLeft(), panel.topLeft() + QPointF(0, corner));
+		painter.drawLine(panel.bottomRight(), panel.bottomRight() - QPointF(corner, 0));
+		painter.drawLine(panel.bottomRight(), panel.bottomRight() - QPointF(0, corner));
+
+		const qreal coreSize = 42.0 + react * 7.0;
+		QRectF core(panel.left() + 24, panel.center().y() - coreSize / 2, coreSize, coreSize);
+		painter.save();
+		painter.translate(core.center());
+		painter.rotate(45);
+		painter.translate(-core.center());
+		painter.setBrush(QColor(accent.red(), accent.green(), accent.blue(), (int)(45 + react * 90)));
+		painter.setPen(QPen(accent, 2));
+		painter.drawRect(core);
+		painter.restore();
+
+		painter.setPen(QColor(QStringLiteral("#748fa4")));
+		painter.setFont(QFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold));
+		painter.drawText(QRectF(panel.left() + 90, panel.top() + 25, panel.width() - 125, 18),
+				 Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("REACTION LAB // %1 BUS").arg(signal.toUpper()));
+		painter.setPen(QColor(QStringLiteral("#d8fbff")));
+		painter.setFont(QFont(QStringLiteral("Segoe UI"), 13, QFont::Bold));
+		painter.drawText(QRectF(panel.left() + 90, panel.top() + 48, panel.width() - 125, 30),
+				 Qt::AlignLeft | Qt::AlignVCenter, title.toUpper());
+		painter.setPen(accent);
+		painter.setFont(QFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold));
+		painter.drawText(QRectF(panel.left() + 90, panel.bottom() - 34, panel.width() - 125, 18),
+				 Qt::AlignLeft | Qt::AlignVCenter,
+				 QStringLiteral("%1 // T %2 // A %3 // D %4")
+					 .arg(reaction.toUpper())
+					 .arg(threshold, 0, 'f', 2)
+					 .arg(attack, 0, 'f', 2)
+					 .arg(decay, 0, 'f', 2));
+
+		const QRectF meter(panel.right() - 18, panel.top() + 16, 5, panel.height() - 32);
+		painter.fillRect(meter, QColor(accent.red(), accent.green(), accent.blue(), 24));
+		QRectF levelBar = meter;
+		levelBar.setTop(meter.bottom() - meter.height() * std::clamp(react, 0.0, 1.0));
+		painter.fillRect(levelBar, accent);
+		QColor scan = accent;
+		scan.setAlpha((int)(15 + react * 55));
+		painter.fillRect(QRectF(0, std::fmod(phase * 19.0, std::max(1, height())), width(), 1), scan);
+	}
+
+private:
+	void Tick()
+	{
+		double raw = 0.0;
+		if (!telemetryPath.isEmpty()) {
+			QFile file(telemetryPath);
+			if (file.open(QIODevice::ReadOnly)) {
+				const QJsonObject data = QJsonDocument::fromJson(file.readAll()).object();
+				const QString key = signal == QStringLiteral("desktop")
+						    ? QStringLiteral("desktop")
+						    : signal == QStringLiteral("microphone") ? QStringLiteral("microphone")
+										  : QStringLiteral("master");
+				raw = data.value(key).toDouble(data.value(QStringLiteral("level")).toDouble());
+				raw = std::max(raw, data.value(QStringLiteral("pulse")).toDouble());
+			}
+		}
+		raw = std::max(raw, testLevel);
+		testLevel *= 0.82;
+		const double normalized = std::clamp((raw - threshold) / std::max(0.001, 1.0 - threshold), 0.0, 1.5);
+		if (normalized > envelope)
+			envelope += (normalized - envelope) * attack;
+		else
+			envelope *= decay;
+		phase += 0.09;
+		update();
+	}
+
+	QTimer timer{this};
+	QString telemetryPath;
+	QString title = QStringLiteral("TEMPEST SIGNAL ELEMENT");
+	QString reaction = QStringLiteral("signal");
+	QString signal = QStringLiteral("master");
+	QColor accent = QColor(QStringLiteral("#45d9ff"));
+	double strength = 1.0;
+	double threshold = 0.08;
+	double attack = 0.55;
+	double decay = 0.82;
+	double idle = 0.08;
+	double envelope = 0.0;
+	double testLevel = 0.0;
+	double phase = 0.0;
+};
+
 namespace {
 constexpr char ConfigSection[] = "TempestHUDComposer";
-constexpr int HudSchemaVersion = 3;
+constexpr int HudSchemaVersion = 4;
 
 QSize ElementSize(const QString &type)
 {
@@ -115,6 +273,8 @@ TempestHUDComposer::TempestHUDComposer(OBSBasic *main, QWidget *parent) : OBSDoc
 	BuildInterface();
 	EnableContentScaling(objectName());
 	EnsureOutputDirectory();
+	if (reactionPreview && !outputDirectory.isEmpty())
+		reactionPreview->SetTelemetryPath(QDir(outputDirectory).filePath(QStringLiteral("telemetry.json")));
 	LoadElements();
 	RebuildElementList();
 	for (const Element &element : elements)
@@ -161,6 +321,16 @@ void TempestHUDComposer::BuildInterface()
 	connect(newButton, &QPushButton::clicked, this, &TempestHUDComposer::NewElement);
 	layout->addWidget(newButton);
 
+	auto *reactionLabel = new QLabel(QStringLiteral("REACTION LAB // LIVE SIGNAL PREVIEW"), root);
+	reactionLabel->setObjectName(QStringLiteral("hudSubtitle"));
+	layout->addWidget(reactionLabel);
+	reactionPreview = new TempestReactionPreview(root);
+	layout->addWidget(reactionPreview);
+	auto *testReactionButton = new QPushButton(QStringLiteral("TEST SELECTED REACTION"), root);
+	testReactionButton->setAccessibleName(QStringLiteral("Test selected HUD reaction"));
+	connect(testReactionButton, &QPushButton::clicked, this, &TempestHUDComposer::TestReaction);
+	layout->addWidget(testReactionButton);
+
 	auto *form = new QFormLayout();
 	nameField = new QLineEdit(root);
 	nameField->setPlaceholderText(QStringLiteral("Element and OBS source name"));
@@ -191,6 +361,26 @@ void TempestHUDComposer::BuildInterface()
 	strengthField->setRange(0.0, 2.5);
 	strengthField->setSingleStep(0.1);
 	strengthField->setDecimals(1);
+	thresholdField = new QDoubleSpinBox(root);
+	thresholdField->setRange(0.0, 0.95);
+	thresholdField->setSingleStep(0.05);
+	thresholdField->setDecimals(2);
+	thresholdField->setAccessibleName(QStringLiteral("Reaction activation threshold"));
+	attackField = new QDoubleSpinBox(root);
+	attackField->setRange(0.05, 1.0);
+	attackField->setSingleStep(0.05);
+	attackField->setDecimals(2);
+	attackField->setAccessibleName(QStringLiteral("Reaction attack speed"));
+	decayField = new QDoubleSpinBox(root);
+	decayField->setRange(0.50, 0.98);
+	decayField->setSingleStep(0.02);
+	decayField->setDecimals(2);
+	decayField->setAccessibleName(QStringLiteral("Reaction decay speed"));
+	idleField = new QDoubleSpinBox(root);
+	idleField->setRange(0.0, 0.50);
+	idleField->setSingleStep(0.02);
+	idleField->setDecimals(2);
+	idleField->setAccessibleName(QStringLiteral("Reaction idle energy"));
 	form->addRow(QStringLiteral("Element name"), nameField);
 	form->addRow(QStringLiteral("Element type"), typeSelector);
 	form->addRow(QStringLiteral("Primary text"), primaryField);
@@ -199,9 +389,22 @@ void TempestHUDComposer::BuildInterface()
 	form->addRow(QStringLiteral("Accent color"), accentField);
 	form->addRow(QStringLiteral("Reaction"), reactionSelector);
 	form->addRow(QStringLiteral("Signal input"), signalSelector);
-	form->addRow(QStringLiteral("Strength"), strengthField);
+	form->addRow(QStringLiteral("Intensity"), strengthField);
+	form->addRow(QStringLiteral("Threshold"), thresholdField);
+	form->addRow(QStringLiteral("Attack"), attackField);
+	form->addRow(QStringLiteral("Decay"), decayField);
+	form->addRow(QStringLiteral("Idle energy"), idleField);
 	layout->addLayout(form);
 	connect(typeSelector, &QComboBox::currentIndexChanged, this, [this]() { UpdateBrowserUrlAvailability(); });
+	connect(reactionSelector, &QComboBox::currentIndexChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(signalSelector, &QComboBox::currentIndexChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(strengthField, &QDoubleSpinBox::valueChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(thresholdField, &QDoubleSpinBox::valueChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(attackField, &QDoubleSpinBox::valueChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(decayField, &QDoubleSpinBox::valueChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(idleField, &QDoubleSpinBox::valueChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(accentField, &QLineEdit::textChanged, this, &TempestHUDComposer::UpdateReactionPreview);
+	connect(primaryField, &QLineEdit::textChanged, this, &TempestHUDComposer::UpdateReactionPreview);
 
 	auto *protocolLabel = new QLabel(QStringLiteral("VISIBLE IN PROTOCOL"), root);
 	protocolLabel->setObjectName(QStringLiteral("hudSubtitle"));
@@ -229,7 +432,7 @@ void TempestHUDComposer::BuildInterface()
 
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Frame sources deploy canvas-sized and locked. Plates deploy unlocked; move and resize them with the normal OBS canvas controls. Choose Master, Desktop, or Voice from the Signal Reactor for each element."),
+			"Reaction Lab previews the live Signal Reactor bus. Threshold removes background noise; Attack controls the rise, Decay controls the tail, and Idle Energy keeps breathing effects alive."),
 		root);
 	hint->setObjectName(QStringLiteral("hudHint"));
 	hint->setWordWrap(true);
@@ -334,6 +537,10 @@ void TempestHUDComposer::LoadElements()
 				element.signal = QStringLiteral("microphone");
 			}
 			element.strength = object.value(QStringLiteral("strength")).toDouble(1.0);
+			element.threshold = object.value(QStringLiteral("threshold")).toDouble(0.08);
+			element.attack = object.value(QStringLiteral("attack")).toDouble(0.55);
+			element.decay = object.value(QStringLiteral("decay")).toDouble(0.82);
+			element.idle = object.value(QStringLiteral("idle")).toDouble(0.08);
 			element.starting = object.value(QStringLiteral("starting")).toBool(true);
 			element.live = object.value(QStringLiteral("live")).toBool(true);
 			element.brb = object.value(QStringLiteral("brb")).toBool(true);
@@ -390,6 +597,10 @@ void TempestHUDComposer::SaveElements()
 		object.insert(QStringLiteral("reaction"), element.reaction);
 		object.insert(QStringLiteral("signal"), element.signal);
 		object.insert(QStringLiteral("strength"), element.strength);
+		object.insert(QStringLiteral("threshold"), element.threshold);
+		object.insert(QStringLiteral("attack"), element.attack);
+		object.insert(QStringLiteral("decay"), element.decay);
+		object.insert(QStringLiteral("idle"), element.idle);
 		object.insert(QStringLiteral("starting"), element.starting);
 		object.insert(QStringLiteral("live"), element.live);
 		object.insert(QStringLiteral("brb"), element.brb);
@@ -462,11 +673,35 @@ void TempestHUDComposer::LoadEditor(const Element &element)
 	reactionSelector->setCurrentIndex(std::max(0, reactionSelector->findData(element.reaction)));
 	signalSelector->setCurrentIndex(std::max(0, signalSelector->findData(element.signal)));
 	strengthField->setValue(element.strength);
+	thresholdField->setValue(element.threshold);
+	attackField->setValue(element.attack);
+	decayField->setValue(element.decay);
+	idleField->setValue(element.idle);
 	startingVisible->setChecked(element.starting);
 	liveVisible->setChecked(element.live);
 	brbVisible->setChecked(element.brb);
 	endingVisible->setChecked(element.ending);
 	UpdateBrowserUrlAvailability();
+	UpdateReactionPreview();
+}
+
+void TempestHUDComposer::UpdateReactionPreview()
+{
+	if (!reactionPreview || !reactionSelector || !signalSelector || !strengthField || !thresholdField ||
+	    !attackField || !decayField || !idleField)
+		return;
+	reactionPreview->SetState(primaryField ? primaryField->text().trimmed() : QString(),
+				  accentField ? accentField->text().trimmed() : QStringLiteral("#45d9ff"),
+				  reactionSelector->currentData().toString(), signalSelector->currentData().toString(),
+				  strengthField->value(), thresholdField->value(), attackField->value(),
+				  decayField->value(), idleField->value());
+}
+
+void TempestHUDComposer::TestReaction()
+{
+	UpdateReactionPreview();
+	if (reactionPreview)
+		reactionPreview->TriggerTest();
 }
 
 void TempestHUDComposer::UpdateBrowserUrlAvailability()
@@ -535,6 +770,10 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 	element.reaction = reactionSelector->currentData().toString();
 	element.signal = signalSelector->currentData().toString();
 	element.strength = strengthField->value();
+	element.threshold = thresholdField->value();
+	element.attack = attackField->value();
+	element.decay = decayField->value();
+	element.idle = idleField->value();
 	element.starting = startingVisible->isChecked();
 	element.live = liveVisible->isChecked();
 	element.brb = brbVisible->isChecked();
@@ -631,6 +870,10 @@ QString TempestHUDComposer::BuildElementHtml(const Element &element) const
 	state.insert(QStringLiteral("reaction"), element.reaction);
 	state.insert(QStringLiteral("signal"), element.signal);
 	state.insert(QStringLiteral("strength"), element.strength);
+	state.insert(QStringLiteral("threshold"), element.threshold);
+	state.insert(QStringLiteral("attack"), element.attack);
+	state.insert(QStringLiteral("decay"), element.decay);
+	state.insert(QStringLiteral("idle"), element.idle);
 	QString json = QString::fromUtf8(QJsonDocument(state).toJson(QJsonDocument::Compact));
 	json.replace(QStringLiteral("</"), QStringLiteral("<\\/"));
 
@@ -660,7 +903,7 @@ body.frame-type .frame{display:block}body.frame-type .plate{display:none}body.ch
 <section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>MAINFRAME</b>CHAT RELAY FOUNDATION ONLINE</div><div class="msg"><b>CHANNEL LINK</b>ADD A TWITCH POPOUT CHAT OR OVERLAY URL IN HUD COMPOSER</div><div class="msg"><b>OPERATOR NOTE</b>THE CHAT TERMINAL WILL SWITCH TO THE REMOTE BROWSER FEED</div></main><footer class="chat-foot"><span>RELAY STANDBY</span><span>SIGNAL REACTIVE</span></footer></section>
 <script id="hud-state" type="application/json">{{STATE_JSON}}</script><script>
 const s=JSON.parse(document.getElementById('hud-state').textContent),root=document.documentElement,body=document.body;root.style.setProperty('--accent',s.accent||'#45d9ff');body.classList.add((s.type||'plate')+'-type');body.classList.add(s.reaction||'signal');for(const id of ['primary','framePrimary','chatPrimary'])document.getElementById(id).textContent=s.primary||'TEMPEST MAINFRAME';for(const id of ['secondary','frameSecondary','chatSecondary'])document.getElementById(id).textContent=s.secondary||'SIGNAL ELEMENT ONLINE';let level=0,phase=0;
-async function telemetry(){try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:(d.master??d.level);level=Math.max(Number(routed)||0,Number(d.pulse)||0,level*.74)}}catch(_){level*=.82}phase+=.12;let react=level*Math.max(0,Number(s.strength)||0);if(s.reaction==='pulse')react=Math.max(react,.16+.12*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
+async function telemetry(){let raw=0;try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:(d.master??d.level);raw=Math.max(Number(routed)||0,Number(d.pulse)||0)}}catch(_){}const threshold=Math.min(.95,Math.max(0,Number(s.threshold)||0)),target=Math.min(1.5,Math.max(0,(raw-threshold)/Math.max(.001,1-threshold))),attack=Math.min(1,Math.max(.05,Number(s.attack)||.55)),decay=Math.min(.98,Math.max(.5,Number(s.decay)||.82));if(target>level)level+=(target-level)*attack;else level*=decay;phase+=.12;let react=level*Math.max(0,Number(s.strength)||0),idle=Math.min(.5,Math.max(0,Number(s.idle)||0));if(s.reaction==='pulse')react=Math.max(react,idle+idle*.45*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
 </script></body></html>)TEMPEST");
 	html.replace(QStringLiteral("{{STATE_JSON}}"), json);
 	return html;

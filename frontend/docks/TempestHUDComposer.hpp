@@ -16,6 +16,7 @@ class QLineEdit;
 class QListWidget;
 class QPushButton;
 class OBSBasic;
+class TempestReactionPreview;
 
 class TempestHUDComposer : public OBSDock {
 	Q_OBJECT
@@ -31,6 +32,8 @@ private slots:
 	void AddSelectedToScene();
 	void DeployStarterHud();
 	void RefreshSelectedSource();
+	void UpdateReactionPreview();
+	void TestReaction();
 
 private:
 	struct Element {
@@ -45,6 +48,10 @@ private:
 		QString reaction = QStringLiteral("signal");
 		QString signal = QStringLiteral("master");
 		double strength = 1.0;
+		double threshold = 0.08;
+		double attack = 0.55;
+		double decay = 0.82;
+		double idle = 0.08;
 		bool starting = true;
 		bool live = true;
 		bool brb = true;
@@ -85,6 +92,11 @@ private:
 	QPointer<QComboBox> reactionSelector;
 	QPointer<QComboBox> signalSelector;
 	QPointer<QDoubleSpinBox> strengthField;
+	QPointer<QDoubleSpinBox> thresholdField;
+	QPointer<QDoubleSpinBox> attackField;
+	QPointer<QDoubleSpinBox> decayField;
+	QPointer<QDoubleSpinBox> idleField;
+	QPointer<TempestReactionPreview> reactionPreview;
 	QPointer<QCheckBox> startingVisible;
 	QPointer<QCheckBox> liveVisible;
 	QPointer<QCheckBox> brbVisible;
