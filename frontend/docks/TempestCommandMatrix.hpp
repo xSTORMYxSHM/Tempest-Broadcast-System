@@ -18,6 +18,7 @@ class QPushButton;
 class QResizeEvent;
 class QStackedWidget;
 class QTimer;
+class QVBoxLayout;
 class OBSBasic;
 class TempestControlDeck;
 class TempestHUDComposer;
@@ -57,6 +58,15 @@ private:
 		QString name;
 	};
 
+	struct SceneSourceInfo {
+		int64_t itemId = 0;
+		QString uuid;
+		QString name;
+		QString typeName;
+		bool visible = false;
+		bool locked = false;
+	};
+
 	struct ProtocolActionConfig {
 		int delayMs = 0;
 		QString transitionUuid;
@@ -83,6 +93,7 @@ private:
 
 	static bool EnumScene(void *data, obs_source_t *source);
 	static bool EnumSource(void *data, obs_source_t *source);
+	static bool EnumSceneSource(obs_scene_t *scene, obs_sceneitem_t *item, void *data);
 	static bool SetOverlayVisibility(obs_scene_t *scene, obs_sceneitem_t *item, void *data);
 	static void ProtocolHotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed);
 	static void WebSocketRunProtocol(obs_data_t *request, obs_data_t *response, void *data);
@@ -95,6 +106,9 @@ private:
 	void BuildInterface();
 	QVector<SceneInfo> EnumerateScenes() const;
 	void RebuildSceneGrid(const QVector<SceneInfo> &scenes);
+	void RefreshSourcePanel(const QString &sceneUuid, const QString &sceneName);
+	void RebuildSourceList(const QVector<SceneSourceInfo> &sources);
+	void SetSceneItemVisible(const QString &sceneUuid, int64_t itemId, const QString &sourceName, bool visible);
 	void RelayoutRoutingGrids();
 	void RebuildAssignments(const QVector<SceneInfo> &scenes);
 	void ExecuteProtocol(const QString &protocolId);
@@ -130,11 +144,13 @@ private:
 	QPointer<QGridLayout> protocolGrid;
 	QPointer<QLabel> emptySceneLabel;
 	QPointer<QLabel> currentSceneLabel;
+	QPointer<QLabel> sourceSceneLabel;
 	QPointer<QLabel> statusLabel;
 	QPointer<QLabel> routerLabel;
 	QPointer<QPushButton> basicViewButton;
 	QPointer<QPushButton> protocolViewButton;
 	QPointer<QStackedWidget> viewStack;
+	QPointer<QVBoxLayout> sourceListLayout;
 	QPointer<QWidget> basicViewPage;
 	QPointer<QWidget> protocolViewPage;
 	QPointer<QCheckBox> isolateOverlay;
@@ -147,6 +163,8 @@ private:
 	QHash<QString, QPointer<QPushButton>> sceneButtons;
 	QVector<SceneInfo> currentScenes;
 	QString sceneFingerprint;
+	QString sourceFingerprint;
+	QString sourceSceneUuid;
 	int routingColumnCount = 0;
 	quint64 executionRevision = 0;
 	void *webSocketVendor = nullptr;

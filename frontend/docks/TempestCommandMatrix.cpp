@@ -34,6 +34,7 @@
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QTabWidget>
 #include <QTimer>
@@ -424,9 +425,15 @@ void TempestCommandMatrix::BuildInterface()
 		QPushButton:checked { border: 2px solid #45d9ff; background: #073c5f; color: white; }
 		QPushButton[protocol="true"] { min-height: 48px; font-size: 11px; letter-spacing: 1px; }
 		QPushButton[sceneRoute="true"] { min-height: 44px; }
+		QPushButton[sourceVisibility="true"] { min-height: 28px; max-height: 28px; min-width: 54px; max-width: 54px; font-size: 9px; letter-spacing: 1px; }
+		QPushButton[sourceVisibility="true"]:checked { border: 1px solid #45d9ff; background: #073c5f; color: #ffffff; }
+		QFrame[sourceRow="true"] { border: 1px solid #153b52; background: #081a27; }
+		QLabel[sourceName="true"] { color: #bdf6ff; font-weight: 700; background: transparent; border: none; }
+		QLabel[sourceType="true"] { color: #748fa4; font-size: 9px; letter-spacing: 1px; background: transparent; border: none; }
 		QComboBox { min-height: 28px; background: #06101a; border: 1px solid #1f506d; color: #bdf6ff; }
 		QCheckBox { color: #748fa4; spacing: 7px; }
 		QScrollArea { border: none; background: transparent; }
+		QSplitter::handle { background: #153b52; height: 2px; margin: 4px 0; }
 	)"));
 
 	auto *layout = new QVBoxLayout(root);
@@ -475,12 +482,20 @@ void TempestCommandMatrix::BuildInterface()
 	basicViewPage = new QWidget(viewStack);
 	auto *basicLayout = new QVBoxLayout(basicViewPage);
 	basicLayout->setContentsMargins(0, 0, 0, 0);
-	basicLayout->setSpacing(7);
-	auto *sceneLabel = new QLabel(QStringLiteral("DIRECT SCENE ROUTING"), basicViewPage);
-	sceneLabel->setObjectName(QStringLiteral("matrixSection"));
-	basicLayout->addWidget(sceneLabel);
+	basicLayout->setSpacing(0);
+	auto *routingSplitter = new QSplitter(Qt::Vertical, basicViewPage);
+	routingSplitter->setObjectName(QStringLiteral("matrixRoutingSplitter"));
+	routingSplitter->setChildrenCollapsible(false);
 
-	auto *scroll = new QScrollArea(basicViewPage);
+	auto *scenePane = new QWidget(routingSplitter);
+	auto *scenePaneLayout = new QVBoxLayout(scenePane);
+	scenePaneLayout->setContentsMargins(0, 0, 0, 4);
+	scenePaneLayout->setSpacing(7);
+	auto *sceneLabel = new QLabel(QStringLiteral("DIRECT SCENE ROUTING"), scenePane);
+	sceneLabel->setObjectName(QStringLiteral("matrixSection"));
+	scenePaneLayout->addWidget(sceneLabel);
+
+	auto *scroll = new QScrollArea(scenePane);
 	scroll->setWidgetResizable(true);
 	auto *sceneContainer = new QWidget(scroll);
 	sceneContainer->setStyleSheet(QStringLiteral("background: transparent;"));
@@ -492,7 +507,35 @@ void TempestCommandMatrix::BuildInterface()
 	sceneGrid->setColumnStretch(0, 1);
 	sceneGrid->setColumnStretch(1, 1);
 	scroll->setWidget(sceneContainer);
-	basicLayout->addWidget(scroll, 1);
+	scenePaneLayout->addWidget(scroll, 1);
+	routingSplitter->addWidget(scenePane);
+
+	auto *sourcePane = new QWidget(routingSplitter);
+	auto *sourcePaneLayout = new QVBoxLayout(sourcePane);
+	sourcePaneLayout->setContentsMargins(0, 4, 0, 0);
+	sourcePaneLayout->setSpacing(7);
+	sourceSceneLabel = new QLabel(QStringLiteral("SCENE SOURCES // INITIALIZING"), sourcePane);
+	sourceSceneLabel->setObjectName(QStringLiteral("matrixSection"));
+	sourceSceneLabel->setAccessibleName(QStringLiteral("Active scene sources"));
+	sourcePaneLayout->addWidget(sourceSceneLabel);
+
+	auto *sourceScroll = new QScrollArea(sourcePane);
+	sourceScroll->setObjectName(QStringLiteral("matrixSourceScroll"));
+	sourceScroll->setWidgetResizable(true);
+	auto *sourceContainer = new QWidget(sourceScroll);
+	sourceContainer->setObjectName(QStringLiteral("matrixSourceContainer"));
+	sourceContainer->setStyleSheet(QStringLiteral("background: transparent;"));
+	sourceListLayout = new QVBoxLayout(sourceContainer);
+	sourceListLayout->setContentsMargins(0, 0, 0, 0);
+	sourceListLayout->setSpacing(5);
+	sourceListLayout->setAlignment(Qt::AlignTop);
+	sourceScroll->setWidget(sourceContainer);
+	sourcePaneLayout->addWidget(sourceScroll, 1);
+	routingSplitter->addWidget(sourcePane);
+	routingSplitter->setStretchFactor(0, 1);
+	routingSplitter->setStretchFactor(1, 1);
+	routingSplitter->setSizes(QList<int>{240, 320});
+	basicLayout->addWidget(routingSplitter, 1);
 	viewStack->addWidget(basicViewPage);
 
 	protocolViewPage = new QWidget(viewStack);
@@ -627,6 +670,28 @@ bool TempestCommandMatrix::EnumSource(void *data, obs_source_t *source)
 	return true;
 }
 
+bool TempestCommandMatrix::EnumSceneSource(obs_scene_t *, obs_sceneitem_t *item, void *data)
+{
+	auto *sources = static_cast<QVector<SceneSourceInfo> *>(data);
+	obs_source_t *source = obs_sceneitem_get_source(item);
+	if (!source || obs_source_removed(source))
+		return true;
+
+	const char *uuid = obs_source_get_uuid(source);
+	const char *name = obs_source_get_name(source);
+	const char *sourceId = obs_source_get_unversioned_id(source);
+	const char *displayName = sourceId ? obs_source_get_display_name(sourceId) : nullptr;
+	SceneSourceInfo info;
+	info.itemId = obs_sceneitem_get_id(item);
+	info.uuid = uuid ? QString::fromUtf8(uuid) : QString();
+	info.name = name ? QString::fromUtf8(name) : QStringLiteral("Unnamed source");
+	info.typeName = displayName ? QString::fromUtf8(displayName) : QStringLiteral("Source");
+	info.visible = obs_sceneitem_visible(item);
+	info.locked = obs_sceneitem_locked(item);
+	sources->push_back(info);
+	return true;
+}
+
 QVector<TempestCommandMatrix::SceneInfo> TempestCommandMatrix::EnumerateScenes() const
 {
 	QVector<SceneInfo> scenes;
@@ -712,6 +777,117 @@ void TempestCommandMatrix::RebuildSceneGrid(const QVector<SceneInfo> &scenes)
 	}
 	routingColumnCount = 0;
 	RelayoutRoutingGrids();
+}
+
+void TempestCommandMatrix::RefreshSourcePanel(const QString &sceneUuid, const QString &sceneName)
+{
+	if (!sourceListLayout || !sourceSceneLabel)
+		return;
+
+	QVector<SceneSourceInfo> sources;
+	if (!sceneUuid.isEmpty()) {
+		OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.toUtf8().constData());
+		obs_scene_t *scene = sceneSource ? obs_scene_from_source(sceneSource) : nullptr;
+		if (scene)
+			obs_scene_enum_items(scene, EnumSceneSource, &sources);
+	}
+	std::reverse(sources.begin(), sources.end());
+
+	QString fingerprint = sceneUuid + QLatin1Char('\n');
+	for (const SceneSourceInfo &source : sources) {
+		fingerprint += QString::number(source.itemId) + QLatin1Char('|') + source.uuid + QLatin1Char('|') +
+			       source.name + QLatin1Char('|') + source.typeName + QLatin1Char('|') +
+			       (source.visible ? QLatin1Char('1') : QLatin1Char('0')) +
+			       (source.locked ? QLatin1Char('1') : QLatin1Char('0')) + QLatin1Char('\n');
+	}
+	if (fingerprint == sourceFingerprint)
+		return;
+
+	sourceFingerprint = fingerprint;
+	sourceSceneUuid = sceneUuid;
+	sourceSceneLabel->setText(
+		QStringLiteral("SCENE SOURCES // %1 // %2").arg(sceneName.toUpper()).arg(sources.size()));
+	RebuildSourceList(sources);
+}
+
+void TempestCommandMatrix::RebuildSourceList(const QVector<SceneSourceInfo> &sources)
+{
+	while (QLayoutItem *item = sourceListLayout->takeAt(0)) {
+		if (QWidget *widget = item->widget())
+			widget->deleteLater();
+		delete item;
+	}
+
+	QWidget *container = sourceListLayout->parentWidget();
+	if (sources.isEmpty()) {
+		auto *empty = new QLabel(QStringLiteral("No sources in the active scene."), container);
+		empty->setObjectName(QStringLiteral("matrixSubtitle"));
+		empty->setWordWrap(true);
+		sourceListLayout->addWidget(empty);
+		return;
+	}
+
+	for (const SceneSourceInfo &source : sources) {
+		auto *row = new QFrame(container);
+		row->setProperty("sourceRow", true);
+		row->setObjectName(QStringLiteral("matrixSourceRow"));
+		auto *rowLayout = new QHBoxLayout(row);
+		rowLayout->setContentsMargins(7, 6, 7, 6);
+		rowLayout->setSpacing(8);
+
+		auto *visibility =
+			new QPushButton(source.visible ? QStringLiteral("ONLINE") : QStringLiteral("OFFLINE"), row);
+		visibility->setCheckable(true);
+		visibility->setChecked(source.visible);
+		visibility->setProperty("sourceVisibility", true);
+		visibility->setAccessibleName(QStringLiteral("Visibility for source %1").arg(source.name));
+		visibility->setToolTip(QStringLiteral("Show or hide %1 in this scene").arg(source.name));
+		connect(visibility, &QPushButton::toggled, this,
+			[this, sceneUuid = sourceSceneUuid, itemId = source.itemId, sourceName = source.name,
+			 visibility](bool visible) {
+				visibility->setText(visible ? QStringLiteral("ONLINE") : QStringLiteral("OFFLINE"));
+				SetSceneItemVisible(sceneUuid, itemId, sourceName, visible);
+			});
+		rowLayout->addWidget(visibility);
+
+		auto *details = new QWidget(row);
+		details->setStyleSheet(QStringLiteral("background: transparent;"));
+		auto *detailsLayout = new QVBoxLayout(details);
+		detailsLayout->setContentsMargins(0, 0, 0, 0);
+		detailsLayout->setSpacing(1);
+		auto *name = new QLabel(source.name, details);
+		name->setProperty("sourceName", true);
+		name->setToolTip(source.name);
+		QString typeText = source.typeName.toUpper();
+		if (source.locked)
+			typeText += QStringLiteral(" // LOCKED");
+		auto *type = new QLabel(typeText, details);
+		type->setProperty("sourceType", true);
+		detailsLayout->addWidget(name);
+		detailsLayout->addWidget(type);
+		rowLayout->addWidget(details, 1);
+		sourceListLayout->addWidget(row);
+	}
+}
+
+void TempestCommandMatrix::SetSceneItemVisible(const QString &sceneUuid, int64_t itemId, const QString &sourceName,
+					       bool visible)
+{
+	OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.toUtf8().constData());
+	obs_scene_t *scene = sceneSource ? obs_scene_from_source(sceneSource) : nullptr;
+	obs_sceneitem_t *item = scene ? obs_scene_find_sceneitem_by_id(scene, itemId) : nullptr;
+	if (!item) {
+		SetStatus(QStringLiteral("SOURCE CONTROL UNAVAILABLE // %1").arg(sourceName), true);
+		sourceFingerprint.clear();
+		UpdateActiveScene();
+		return;
+	}
+
+	obs_sceneitem_set_visible(item, visible);
+	SetStatus(QStringLiteral("SOURCE %1 // %2")
+			  .arg(visible ? QStringLiteral("ONLINE") : QStringLiteral("OFFLINE"), sourceName));
+	sourceFingerprint.clear();
+	UpdateActiveScene();
 }
 
 void TempestCommandMatrix::RelayoutRoutingGrids()
@@ -1282,6 +1458,7 @@ void TempestCommandMatrix::UpdateActiveScene()
 	const QString currentUuid = current ? QString::fromUtf8(obs_source_get_uuid(current)) : QString();
 	const QString currentName = current ? QString::fromUtf8(obs_source_get_name(current)) : QStringLiteral("NONE");
 	currentSceneLabel->setText(QStringLiteral("ACTIVE // %1").arg(currentName.toUpper()));
+	RefreshSourcePanel(currentUuid, currentName);
 	for (auto it = sceneButtons.begin(); it != sceneButtons.end(); ++it) {
 		if (it.value())
 			it.value()->setChecked(it.key() == currentUuid);
