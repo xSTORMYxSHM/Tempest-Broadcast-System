@@ -33,4 +33,5 @@ public:
 
 	void closeEvent(QCloseEvent *event) override;
 	void showEvent(QShowEvent *event) override;
+	void contentScaleChanged() override;
 };

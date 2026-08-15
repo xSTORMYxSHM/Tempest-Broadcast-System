@@ -370,6 +370,7 @@ private:
 	void SaveExtraBrowserDocks();
 	void ManageExtraBrowserDocks();
 	void AddExtraBrowserDock(const QString &title, const QString &url, const QString &uuid, bool firstCreate);
+	void CreateTempestStreamInfoWebDock();
 #endif
 
 public:
@@ -458,6 +459,7 @@ private:
 	QPointer<TempestAssetVault> tempestAssetVault;
 	QPointer<TempestHUDComposer> tempestHUDComposer;
 	QPointer<QDockWidget> tempestStreamInfoDock;
+	QPointer<QDockWidget> tempestStreamInfoWebDock;
 	QPointer<QToolBar> tempestCommandToolbar;
 	QPointer<TempestMainframeBar> tempestMainframeBar;
 	QByteArray tempestCommandDockState;

@@ -1260,6 +1260,7 @@ void OBSBasic::OBSInit()
 		ui->menuDocks->insertSeparator(ui->scenesDock->toggleViewAction());
 
 		LoadExtraBrowserDocks();
+		CreateTempestStreamInfoWebDock();
 	}
 #endif
 
@@ -2051,6 +2052,8 @@ void OBSBasic::closeWindow()
 	auth.reset();
 
 #ifdef BROWSER_AVAILABLE
+	if (tempestStreamInfoWebDock)
+		RemoveDockWidget(tempestStreamInfoWebDock->objectName());
 	ClearExtraBrowserDocks();
 
 #ifdef YOUTUBE_ENABLED

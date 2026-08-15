@@ -25,6 +25,9 @@
 #include <docks/TempestSequenceDirector.hpp>
 #include <docks/TempestAssetVault.hpp>
 #include <docks/TempestHUDComposer.hpp>
+#ifdef BROWSER_AVAILABLE
+#include <docks/BrowserDock.hpp>
+#endif
 #include "TempestMainframeBar.hpp"
 
 #include <qt-wrappers.hpp>
@@ -289,10 +292,31 @@ void OBSBasic::OpenTempestDockManager()
 
 void OBSBasic::IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal)
 {
-	if (!dock || dock->objectName() != QStringLiteral("twitchInfo"))
+	if (!dock)
+		return;
+	const bool nativeDock = dock->objectName() == QStringLiteral("twitchInfo");
+	const bool webDock = dock->objectName() == QStringLiteral("tempestStreamInfoWeb");
+	if (!nativeDock && !webDock)
 		return;
 
+	if (webDock) {
+		tempestStreamInfoWebDock = dock;
+		if (tempestStreamInfoDock && tempestStreamInfoDock->objectName() == QStringLiteral("twitchInfo")) {
+			dock->setVisible(false);
+			dock->toggleViewAction()->setVisible(false);
+			return;
+		}
+	} else if (tempestStreamInfoWebDock && tempestStreamInfoWebDock != dock) {
+		tempestStreamInfoWebDock->setVisible(false);
+		tempestStreamInfoWebDock->toggleViewAction()->setVisible(false);
+	}
+
 	tempestStreamInfoDock = dock;
+	dock->toggleViewAction()->setVisible(true);
+#ifdef BROWSER_AVAILABLE
+	if (auto *browserDock = qobject_cast<BrowserDock *>(dock); browserDock && !browserDock->HasContentScaling())
+		browserDock->EnableContentScaling(dock->objectName());
+#endif
 	const bool visible = reveal || dock->isVisible();
 	dock->setFloating(false);
 	addDockWidget(Qt::RightDockWidgetArea, dock);
@@ -403,6 +427,8 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
 	tempestHUDComposer->setVisible(true);
+	if (tempestStreamInfoDock)
+		IntegrateTempestStreamInfoDock(tempestStreamInfoDock, true);
 	tempestControlDeck->raise();
 	tempestCommandMatrix->setVisible(false);
 	statsDock->setVisible(false);
@@ -476,8 +502,8 @@ void OBSBasic::AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool ex
 	setupDockAction(dock);
 	dock->setFeatures(features);
 	addDockWidget(area, dock);
-	if (dock->objectName() == QStringLiteral("twitchInfo")) {
-		tempestStreamInfoDock = dock;
+	if (dock->objectName() == QStringLiteral("twitchInfo") ||
+	    dock->objectName() == QStringLiteral("tempestStreamInfoWeb")) {
 		QPointer<QDockWidget> guardedDock(dock);
 		QMetaObject::invokeMethod(
 			this,
@@ -511,8 +537,15 @@ void OBSBasic::AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool ex
 
 void OBSBasic::RemoveDockWidget(const QString &name)
 {
-	if (name == QStringLiteral("twitchInfo"))
+	const bool restoreWebDock = name == QStringLiteral("twitchInfo") && tempestStreamInfoWebDock;
+	if (name == QStringLiteral("twitchInfo") &&
+	    (!tempestStreamInfoDock || tempestStreamInfoDock->objectName() == QStringLiteral("twitchInfo")))
 		tempestStreamInfoDock.clear();
+	if (name == QStringLiteral("tempestStreamInfoWeb")) {
+		if (tempestStreamInfoDock == tempestStreamInfoWebDock)
+			tempestStreamInfoDock.clear();
+		tempestStreamInfoWebDock.clear();
+	}
 	if (extraDockNames.contains(name)) {
 		int idx = extraDockNames.indexOf(name);
 		extraDockNames.removeAt(idx);
@@ -523,6 +556,16 @@ void OBSBasic::RemoveDockWidget(const QString &name)
 		extraCustomDockNames.removeAt(idx);
 		removeDockWidget(extraCustomDocks[idx]);
 		extraCustomDocks.removeAt(idx);
+	}
+	if (restoreWebDock) {
+		QPointer<QDockWidget> guardedDock(tempestStreamInfoWebDock);
+		QMetaObject::invokeMethod(
+			this,
+			[this, guardedDock]() {
+				if (guardedDock)
+					IntegrateTempestStreamInfoDock(guardedDock, true);
+			},
+			Qt::QueuedConnection);
 	}
 }
 
