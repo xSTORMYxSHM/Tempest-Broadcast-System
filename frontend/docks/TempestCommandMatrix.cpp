@@ -3,6 +3,9 @@
 #include "TempestControlDeck.hpp"
 
 #include <OBSApp.hpp>
+#ifdef TEMPEST_WEBSOCKET_AVAILABLE
+#include <obs-websocket-api.h>
+#endif
 #include <widgets/OBSBasic.hpp>
 
 #include <obs.hpp>
@@ -56,6 +59,18 @@ void SetComboData(QComboBox *combo, const QString &value, const QString &unavail
 	}
 	combo->setCurrentIndex(std::max(index, 0));
 }
+
+bool IsProtocolId(const QString &protocolId)
+{
+	return protocolId == QStringLiteral("starting") || protocolId == QStringLiteral("live") ||
+	       protocolId == QStringLiteral("brb") || protocolId == QStringLiteral("ending");
+}
+
+void SetRouterResponse(obs_data_t *response, bool accepted, const char *message)
+{
+	obs_data_set_bool(response, "accepted", accepted);
+	obs_data_set_string(response, "message", message);
+}
 } // namespace
 
 TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *controlDeck, QWidget *parent)
@@ -85,6 +100,172 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 	connect(refreshTimer, &QTimer::timeout, this, &TempestCommandMatrix::RefreshScenes);
 	refreshTimer->start();
 	RefreshScenes();
+}
+
+TempestCommandMatrix::~TempestCommandMatrix()
+{
+	UnregisterHotkeys();
+#ifdef TEMPEST_WEBSOCKET_AVAILABLE
+	if (webSocketVendor) {
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"RunProtocol");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"RouteScene");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"SetOverlayState");
+	}
+#endif
+}
+
+void TempestCommandMatrix::RegisterHotkeys()
+{
+	UnregisterHotkeys();
+	for (const ProtocolWidgets &protocol : protocols) {
+		const QString name = QStringLiteral("TempestMainframe.Run.%1").arg(protocol.id);
+		const QString description = QStringLiteral("Tempest Mainframe: Run %1 Protocol").arg(protocol.label);
+		const QByteArray nameUtf8 = name.toUtf8();
+		const QByteArray descriptionUtf8 = description.toUtf8();
+		const obs_hotkey_id id = obs_hotkey_register_frontend(nameUtf8.constData(), descriptionUtf8.constData(),
+								      ProtocolHotkey, this);
+		if (id == OBS_INVALID_HOTKEY_ID)
+			continue;
+		protocolHotkeys.insert(id, protocol.id);
+		LoadHotkey(id, nameUtf8);
+	}
+	SetRouterState();
+}
+
+void TempestCommandMatrix::UnregisterHotkeys()
+{
+	for (auto it = protocolHotkeys.cbegin(); it != protocolHotkeys.cend(); ++it)
+		obs_hotkey_unregister(it.key());
+	protocolHotkeys.clear();
+	SetRouterState();
+}
+
+void TempestCommandMatrix::LoadHotkey(obs_hotkey_id id, const QByteArray &name)
+{
+	const char *json = config_get_string(main->Config(), "Hotkeys", name.constData());
+	if (!json || !*json)
+		return;
+	OBSDataAutoRelease data = obs_data_create_from_json(json);
+	if (!data)
+		return;
+	OBSDataArrayAutoRelease bindings = obs_data_get_array(data, "bindings");
+	if (bindings)
+		obs_hotkey_load(id, bindings);
+}
+
+void TempestCommandMatrix::ProtocolHotkey(void *data, obs_hotkey_id id, obs_hotkey_t *, bool pressed)
+{
+	if (!pressed)
+		return;
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	const QString protocolId = matrix->protocolHotkeys.value(id);
+	if (protocolId.isEmpty())
+		return;
+	QPointer<TempestCommandMatrix> guarded(matrix);
+	QMetaObject::invokeMethod(matrix, [guarded, protocolId]() {
+		if (guarded)
+			guarded->ExecuteProtocol(protocolId);
+	}, Qt::QueuedConnection);
+}
+
+void TempestCommandMatrix::RegisterExternalControls()
+{
+#ifdef TEMPEST_WEBSOCKET_AVAILABLE
+	if (webSocketVendor)
+		return;
+	webSocketVendor = obs_websocket_register_vendor("tempest-mainframe");
+	if (!webSocketVendor) {
+		SetRouterState();
+		return;
+	}
+
+	const auto vendor = static_cast<obs_websocket_vendor>(webSocketVendor);
+	const bool protocolReady =
+		obs_websocket_vendor_register_request(vendor, "RunProtocol", WebSocketRunProtocol, this);
+	const bool sceneReady = obs_websocket_vendor_register_request(vendor, "RouteScene", WebSocketRouteScene, this);
+	const bool overlayReady =
+		obs_websocket_vendor_register_request(vendor, "SetOverlayState", WebSocketSetOverlayState, this);
+	webSocketReady = protocolReady && sceneReady && overlayReady;
+#endif
+	SetRouterState();
+}
+
+void TempestCommandMatrix::WebSocketRunProtocol(obs_data_t *request, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	const QString protocolId = QString::fromUtf8(obs_data_get_string(request, "protocol")).toLower();
+	if (!IsProtocolId(protocolId)) {
+		SetRouterResponse(response, false, "protocol must be starting, live, brb, or ending");
+		return;
+	}
+
+	QPointer<TempestCommandMatrix> guarded(matrix);
+	QMetaObject::invokeMethod(matrix, [guarded, protocolId]() {
+		if (guarded)
+			guarded->ExecuteProtocol(protocolId);
+	}, Qt::QueuedConnection);
+	SetRouterResponse(response, true, "protocol command queued");
+}
+
+void TempestCommandMatrix::WebSocketRouteScene(obs_data_t *request, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	const QString uuid = QString::fromUtf8(obs_data_get_string(request, "sceneUuid"));
+	const QString name = QString::fromUtf8(obs_data_get_string(request, "sceneName"));
+	if (uuid.isEmpty() && name.isEmpty()) {
+		SetRouterResponse(response, false, "sceneUuid or sceneName is required");
+		return;
+	}
+
+	QPointer<TempestCommandMatrix> guarded(matrix);
+	QMetaObject::invokeMethod(matrix, [guarded, uuid, name]() {
+		if (guarded)
+			guarded->RouteExternalScene(uuid, name);
+	}, Qt::QueuedConnection);
+	SetRouterResponse(response, true, "scene route queued");
+}
+
+void TempestCommandMatrix::WebSocketSetOverlayState(obs_data_t *request, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	const QString mode = QString::fromUtf8(obs_data_get_string(request, "mode")).toLower();
+	if (!IsProtocolId(mode)) {
+		SetRouterResponse(response, false, "mode must be starting, live, brb, or ending");
+		return;
+	}
+	const QString transmission = QString::fromUtf8(obs_data_get_string(request, "transmission"));
+	const QString status = QString::fromUtf8(obs_data_get_string(request, "status"));
+	const QString messages = QString::fromUtf8(obs_data_get_string(request, "messages"));
+	const bool startCountdown = obs_data_get_bool(request, "startCountdown");
+
+	QPointer<TempestCommandMatrix> guarded(matrix);
+	QMetaObject::invokeMethod(matrix, [guarded, mode, transmission, status, messages, startCountdown]() {
+		if (!guarded || !guarded->controlDeck)
+			return;
+		guarded->controlDeck->UpdateOverlayText(mode, transmission, status, messages);
+		if (startCountdown)
+			guarded->controlDeck->ActivateMode(mode, true);
+		OBSDataAutoRelease eventData = obs_data_create();
+		obs_data_set_string(eventData, "mode", mode.toUtf8().constData());
+		guarded->EmitRouterEvent("OverlayStateUpdated", eventData);
+	}, Qt::QueuedConnection);
+	SetRouterResponse(response, true, "overlay state queued");
+}
+
+void TempestCommandMatrix::SetRouterState()
+{
+	if (!routerLabel)
+		return;
+	const bool hotkeysReady = protocolHotkeys.size() == protocols.size();
+	if (hotkeysReady && webSocketReady)
+		routerLabel->setText(QStringLiteral("CONTROL ROUTER // HOTKEYS + OBS WEBSOCKET READY"));
+	else if (hotkeysReady)
+		routerLabel->setText(QStringLiteral("CONTROL ROUTER // HOTKEYS READY"));
+	else
+		routerLabel->setText(QStringLiteral("CONTROL ROUTER // INITIALIZING"));
 }
 
 void TempestCommandMatrix::BuildInterface()
@@ -121,6 +302,12 @@ void TempestCommandMatrix::BuildInterface()
 	currentSceneLabel = new QLabel(QStringLiteral("ACTIVE // INITIALIZING"), root);
 	currentSceneLabel->setObjectName(QStringLiteral("matrixCurrent"));
 	layout->addWidget(currentSceneLabel);
+	routerLabel = new QLabel(QStringLiteral("CONTROL ROUTER // INITIALIZING"), root);
+	routerLabel->setObjectName(QStringLiteral("matrixSubtitle"));
+	routerLabel->setToolTip(QStringLiteral(
+		"Assign Stream Deck keyboard buttons in OBS Settings > Hotkeys. Advanced clients can use the "
+		"tempest-mainframe OBS WebSocket vendor."));
+	layout->addWidget(routerLabel);
 
 	auto *protocolLabel = new QLabel(QStringLiteral("TRANSMISSION PROTOCOLS"), root);
 	protocolLabel->setObjectName(QStringLiteral("matrixSection"));
@@ -411,6 +598,12 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 			  .arg(protocol->label, obs_source_get_name(sceneSource),
 			       launchFailed ? QStringLiteral(" // PROGRAM FAILED") : QString()),
 		  launchFailed);
+	OBSDataAutoRelease eventData = obs_data_create();
+	obs_data_set_string(eventData, "protocol", protocolId.toUtf8().constData());
+	obs_data_set_string(eventData, "sceneUuid", sceneUuid.toUtf8().constData());
+	obs_data_set_string(eventData, "sceneName", obs_source_get_name(sceneSource));
+	obs_data_set_bool(eventData, "programLaunchFailed", launchFailed);
+	EmitRouterEvent("ProtocolExecuted", eventData);
 	UpdateActiveScene();
 }
 
@@ -456,7 +649,36 @@ void TempestCommandMatrix::SwitchScene(const QString &uuid, const QString &name)
 	}
 	main->SetCurrentScene(OBSSource(sceneSource.Get()));
 	SetStatus(QStringLiteral("DIRECT ROUTE // %1").arg(name));
+	OBSDataAutoRelease eventData = obs_data_create();
+	obs_data_set_string(eventData, "sceneUuid", uuid.toUtf8().constData());
+	obs_data_set_string(eventData, "sceneName", name.toUtf8().constData());
+	EmitRouterEvent("SceneRouted", eventData);
 	UpdateActiveScene();
+}
+
+void TempestCommandMatrix::RouteExternalScene(const QString &uuid, const QString &name)
+{
+	const QVector<SceneInfo> scenes = EnumerateScenes();
+	for (const SceneInfo &scene : scenes) {
+		if ((!uuid.isEmpty() && scene.uuid == uuid) ||
+		    (uuid.isEmpty() && scene.name.compare(name, Qt::CaseInsensitive) == 0)) {
+			SwitchScene(scene.uuid, scene.name);
+			return;
+		}
+	}
+	SetStatus(QStringLiteral("EXTERNAL ROUTE FAILED // SCENE NOT FOUND"), true);
+}
+
+void TempestCommandMatrix::EmitRouterEvent(const char *eventName, obs_data_t *eventData)
+{
+#ifdef TEMPEST_WEBSOCKET_AVAILABLE
+	if (webSocketReady && webSocketVendor)
+		obs_websocket_vendor_emit_event(static_cast<obs_websocket_vendor>(webSocketVendor), eventName,
+						eventData);
+#else
+	UNUSED_PARAMETER(eventName);
+	UNUSED_PARAMETER(eventData);
+#endif
 }
 
 QVector<TempestCommandMatrix::SourceInfo> TempestCommandMatrix::EnumerateAudioSources() const

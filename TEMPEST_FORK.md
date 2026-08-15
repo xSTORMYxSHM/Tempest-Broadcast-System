@@ -123,3 +123,38 @@ The matrix's **Configure Protocol Actions** editor stores an independent native 
 - optionally launch a chosen local executable with arguments.
 
 Actions default to **KEEP** or disabled, so adding the feature does not alter existing audio, recording, or application state. A direct scene route or newer protocol command cancels any older delayed route. Program launching uses Qt's detached process API directly and does not invoke a command shell.
+
+## Mainframe Event Router
+
+The Transmission Command Matrix registers four persistent native OBS hotkeys:
+
+- `Tempest Mainframe: Run STARTING Protocol`
+- `Tempest Mainframe: Run LIVE Protocol`
+- `Tempest Mainframe: Run BRB Protocol`
+- `Tempest Mainframe: Run ENDING Protocol`
+
+Assign them under **Settings > Hotkeys** by filtering for `Tempest`. A Stream Deck can then use its ordinary Hotkey action to execute complete Tempest protocols; no Stream Deck plugin is required. TBS continues to expose the standard OBS hotkeys for streaming, recording, replay buffer, scene items, and other conventional controls.
+
+### OBS WebSocket commands
+
+When the bundled OBS WebSocket module is available, TBS registers the authenticated vendor `tempest-mainframe`. Enable and secure the server under **Tools > WebSocket Server Settings** before connecting another local program. The router does not open a second port or bypass OBS WebSocket authentication.
+
+Send an OBS WebSocket `CallVendorRequest` with one of these vendor request types:
+
+- `RunProtocol` — `{ "protocol": "starting|live|brb|ending" }`
+- `RouteScene` — `{ "sceneUuid": "..." }` or `{ "sceneName": "..." }`
+- `SetOverlayState` — `{ "mode": "starting|live|brb|ending", "transmission": "...", "status": "...", "messages": "line one\nline two", "startCountdown": false }`
+
+For example, the request data passed to `CallVendorRequest` is:
+
+```json
+{
+  "vendorName": "tempest-mainframe",
+  "requestType": "RunProtocol",
+  "requestData": {
+    "protocol": "live"
+  }
+}
+```
+
+The vendor emits `ProtocolExecuted`, `SceneRouted`, and `OverlayStateUpdated` events so connected control surfaces can reflect completed Mainframe state changes. The Command Matrix reports whether both the hotkey and OBS WebSocket paths registered successfully.

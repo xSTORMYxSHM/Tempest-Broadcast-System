@@ -42,6 +42,11 @@ target_link_libraries(
     OBS::bpm
 )
 
+if(TARGET OBS::websocket-api)
+  target_link_libraries(obs-studio PRIVATE OBS::websocket-api)
+  target_compile_definitions(obs-studio PRIVATE TEMPEST_WEBSOCKET_AVAILABLE)
+endif()
+
 include(cmake/ui-components.cmake)
 include(cmake/ui-dialogs.cmake)
 include(cmake/ui-docks.cmake)

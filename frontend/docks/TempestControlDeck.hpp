@@ -25,6 +25,8 @@ public:
 	explicit TempestControlDeck(QWidget *parent = nullptr);
 	~TempestControlDeck() override;
 	void ActivateMode(const QString &modeId, bool beginCountdown = false);
+	void UpdateOverlayText(const QString &modeId, const QString &transmission, const QString &status,
+			       const QString &messages);
 
 private slots:
 	void ChangeOverlayMode(int index);

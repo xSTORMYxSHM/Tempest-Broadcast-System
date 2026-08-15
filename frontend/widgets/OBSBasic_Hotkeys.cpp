@@ -19,6 +19,7 @@
 
 #include "OBSBasic.hpp"
 
+#include <docks/TempestCommandMatrix.hpp>
 #include <widgets/OBSBasicStats.hpp>
 
 void OBSBasic::InitHotkeys()
@@ -279,10 +280,17 @@ void OBSBasic::CreateHotkeys()
 	sourceScreenshotHotkey = obs_hotkey_register_frontend("OBSBasic.SelectedSourceScreenshot",
 							      Str("Screenshot.SourceHotkey"), screenshotSource, this);
 	LoadHotkey(sourceScreenshotHotkey, "OBSBasic.SelectedSourceScreenshot");
+
+	if (tempestCommandMatrix) {
+		tempestCommandMatrix->RegisterHotkeys();
+		tempestCommandMatrix->RegisterExternalControls();
+	}
 }
 
 void OBSBasic::ClearHotkeys()
 {
+	if (tempestCommandMatrix)
+		tempestCommandMatrix->UnregisterHotkeys();
 	obs_hotkey_pair_unregister(streamingHotkeys);
 	obs_hotkey_pair_unregister(recordingHotkeys);
 	obs_hotkey_pair_unregister(pauseHotkeys);

@@ -4317,6 +4317,8 @@ void OBSBasicSettings::SearchHotkeys(const QString &text, obs_key_combination_t 
 		return;
 
 	QFormLayout *hotkeysLayout = qobject_cast<QFormLayout *>(hotkeys->layout());
+	if (!hotkeysLayout)
+		return;
 	hotkeysLayout->setEnabled(false);
 
 	QString needle = text.toLower();
@@ -4334,7 +4336,7 @@ void OBSBasicSettings::SearchHotkeys(const QString &text, obs_key_combination_t 
 
 		showHotkey = needle.isEmpty() || fullname.toLower().contains(needle);
 
-		if (showHotkey && !obs_key_combination_is_empty(filterCombo)) {
+		if (showHotkey && !obs_key_combination_is_empty(filterCombo) && item->widget) {
 			showHotkey = false;
 
 			item->widget->GetCombinations(combos);
@@ -4346,10 +4348,11 @@ void OBSBasicSettings::SearchHotkeys(const QString &text, obs_key_combination_t 
 			}
 		}
 
-		label->widget()->setVisible(showHotkey);
+		if (QWidget *labelWidget = label->widget())
+			labelWidget->setVisible(showHotkey);
 
 		auto field = hotkeysLayout->itemAt(i, QFormLayout::FieldRole);
-		if (field)
+		if (field && field->widget())
 			field->widget()->setVisible(showHotkey);
 	}
 	hotkeysLayout->setEnabled(true);

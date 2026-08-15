@@ -156,6 +156,19 @@ void TempestControlDeck::ActivateMode(const QString &modeId, bool beginCountdown
 	raise();
 }
 
+void TempestControlDeck::UpdateOverlayText(const QString &modeId, const QString &transmission,
+					   const QString &status, const QString &messages)
+{
+	ActivateMode(modeId);
+	if (!transmission.isEmpty())
+		streamTitle->setText(transmission);
+	if (!status.isEmpty())
+		statusLine->setText(status);
+	if (!messages.isEmpty())
+		rotationMessages->setPlainText(messages);
+	QueueOverlayRender();
+}
+
 void TempestControlDeck::BuildInterface()
 {
 	QWidget *body = new QWidget(this);

@@ -4,6 +4,7 @@
 
 #include <obs.h>
 
+#include <QByteArray>
 #include <QHash>
 #include <QPointer>
 #include <QString>
@@ -23,6 +24,10 @@ class TempestCommandMatrix : public OBSDock {
 
 public:
 	TempestCommandMatrix(OBSBasic *main, TempestControlDeck *controlDeck, QWidget *parent = nullptr);
+	~TempestCommandMatrix() override;
+	void RegisterHotkeys();
+	void UnregisterHotkeys();
+	void RegisterExternalControls();
 
 private slots:
 	void RefreshScenes();
@@ -64,6 +69,10 @@ private:
 	static bool EnumScene(void *data, obs_source_t *source);
 	static bool EnumSource(void *data, obs_source_t *source);
 	static bool SetOverlayVisibility(obs_scene_t *scene, obs_sceneitem_t *item, void *data);
+	static void ProtocolHotkey(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed);
+	static void WebSocketRunProtocol(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketRouteScene(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketSetOverlayState(obs_data_t *request, obs_data_t *response, void *data);
 
 	void BuildInterface();
 	QVector<SceneInfo> EnumerateScenes() const;
@@ -78,6 +87,10 @@ private:
 	void OpenActionEditor();
 	void LoadActionConfigs();
 	void SaveActionConfigs();
+	void LoadHotkey(obs_hotkey_id id, const QByteArray &name);
+	void RouteExternalScene(const QString &uuid, const QString &name);
+	void EmitRouterEvent(const char *eventName, obs_data_t *eventData);
+	void SetRouterState();
 	QVector<SourceInfo> EnumerateAudioSources() const;
 	QVector<SourceInfo> EnumerateTransitions() const;
 	void SwitchScene(const QString &uuid, const QString &name);
@@ -91,13 +104,17 @@ private:
 	QPointer<QGridLayout> sceneGrid;
 	QPointer<QLabel> currentSceneLabel;
 	QPointer<QLabel> statusLabel;
+	QPointer<QLabel> routerLabel;
 	QPointer<QCheckBox> isolateOverlay;
 	QPointer<QCheckBox> startCountdown;
 	QPointer<QTimer> refreshTimer;
 	QVector<ProtocolWidgets> protocols;
 	QHash<QString, QString> configuredSceneUuids;
 	QHash<QString, ProtocolActionConfig> actionConfigs;
+	QHash<obs_hotkey_id, QString> protocolHotkeys;
 	QHash<QString, QPointer<QPushButton>> sceneButtons;
 	QString sceneFingerprint;
 	quint64 executionRevision = 0;
+	void *webSocketVendor = nullptr;
+	bool webSocketReady = false;
 };
