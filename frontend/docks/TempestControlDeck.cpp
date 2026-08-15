@@ -9,7 +9,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QComboBox>
-#include <QFile>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -19,7 +18,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
-#include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -29,10 +27,7 @@
 #include <QVBoxLayout>
 
 #include <cstring>
-#include <algorithm>
 #include <array>
-#include <cmath>
-#include <vector>
 
 namespace {
 constexpr char ConfigSection[] = "TempestControlDeck";
@@ -107,17 +102,6 @@ TempestControlDeck::TempestControlDeck(QWidget *parent) : OBSDock(parent)
 	connect(clockTimer, &QTimer::timeout, this, &TempestControlDeck::UpdateCountdownPreview);
 	clockTimer->start();
 
-	audioMeter = obs_volmeter_create(OBS_FADER_LOG);
-	if (audioMeter) {
-		obs_volmeter_set_peak_meter_type(audioMeter, SAMPLE_PEAK_METER);
-		obs_volmeter_add_callback(audioMeter, AudioLevelCallback, this);
-	}
-
-	telemetryTimer = new QTimer(this);
-	telemetryTimer->setInterval(50);
-	connect(telemetryTimer, &QTimer::timeout, this, &TempestControlDeck::WriteAudioTelemetry);
-	telemetryTimer->start();
-
 	connect(overlayMode, &QComboBox::currentIndexChanged, this, &TempestControlDeck::ChangeOverlayMode);
 	connect(streamTitle, &QLineEdit::textChanged, this, &TempestControlDeck::QueueOverlayRender);
 	connect(statusLine, &QLineEdit::textChanged, this, &TempestControlDeck::QueueOverlayRender);
@@ -127,21 +111,8 @@ TempestControlDeck::TempestControlDeck(QWidget *parent) : OBSDock(parent)
 	connect(startCountdownButton, &QPushButton::clicked, this, &TempestControlDeck::StartCountdown);
 	connect(resetCountdownButton, &QPushButton::clicked, this, &TempestControlDeck::ResetCountdown);
 	connect(createSourceButton, &QPushButton::clicked, this, &TempestControlDeck::CreateOrUpdateSource);
-	connect(refreshAudioButton, &QPushButton::clicked, this, &TempestControlDeck::RefreshAudioSources);
-	connect(audioSourceCombo, &QComboBox::currentIndexChanged, this, &TempestControlDeck::AttachAudioMeter);
-
 	RenderOverlay();
 	UpdateCountdownPreview();
-	QTimer::singleShot(3500, this, &TempestControlDeck::RefreshAudioSources);
-}
-
-TempestControlDeck::~TempestControlDeck()
-{
-	if (audioMeter) {
-		obs_volmeter_remove_callback(audioMeter, AudioLevelCallback, this);
-		obs_volmeter_detach_source(audioMeter);
-		obs_volmeter_destroy(audioMeter);
-	}
 }
 
 void TempestControlDeck::ActivateMode(const QString &modeId, bool beginCountdown)
@@ -240,26 +211,6 @@ void TempestControlDeck::BuildInterface()
 			       "font-size:22px; font-weight:700; letter-spacing:2px; }"));
 	layout->addWidget(countdownPreview);
 
-	QFormLayout *audioForm = new QFormLayout();
-	audioForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-	QWidget *audioPicker = new QWidget(body);
-	QHBoxLayout *audioPickerLayout = new QHBoxLayout(audioPicker);
-	audioPickerLayout->setContentsMargins(0, 0, 0, 0);
-	audioPickerLayout->setSpacing(6);
-	audioSourceCombo = new QComboBox(audioPicker);
-	audioSourceCombo->addItem(QStringLiteral("Waiting for OBS audio sources..."), QString());
-	refreshAudioButton = new QPushButton(QStringLiteral("Refresh"), audioPicker);
-	audioPickerLayout->addWidget(audioSourceCombo, 1);
-	audioPickerLayout->addWidget(refreshAudioButton);
-	audioForm->addRow(QStringLiteral("Reactive audio"), audioPicker);
-	audioLevelMeter = new QProgressBar(body);
-	audioLevelMeter->setRange(0, 1000);
-	audioLevelMeter->setValue(0);
-	audioLevelMeter->setTextVisible(false);
-	audioLevelMeter->setMaximumHeight(8);
-	audioForm->addRow(QStringLiteral("Signal level"), audioLevelMeter);
-	layout->addLayout(audioForm);
-
 	createSourceButton = new QPushButton(QStringLiteral("Create / Update Starting Soon Source"), body);
 	createSourceButton->setMinimumHeight(38);
 	createSourceButton->setProperty("class", "primary");
@@ -291,7 +242,6 @@ void TempestControlDeck::LoadState()
 	rotationSeconds->setValue(rotation > 0 ? rotation : 6);
 	int minutes = (int)config_get_int(config, ConfigSection, "CountdownMinutes");
 	countdownMinutes->setValue(minutes > 0 ? minutes : 10);
-	configuredAudioSourceUuid = ConfigString("AudioSourceUuid", "");
 	LoadModeState(activeModeId);
 }
 
@@ -302,11 +252,6 @@ void TempestControlDeck::SaveState()
 	config_set_string(config, ConfigSection, "OverlayMode", activeModeId.toUtf8().constData());
 	config_set_int(config, ConfigSection, "RotationSeconds", rotationSeconds->value());
 	config_set_int(config, ConfigSection, "CountdownMinutes", countdownMinutes->value());
-	QString audioUuid = audioSourceCombo->currentData().toString();
-	if (audioSourcesLoaded) {
-		configuredAudioSourceUuid = audioUuid;
-		config_set_string(config, ConfigSection, "AudioSourceUuid", audioUuid.toUtf8().constData());
-	}
 	config_save_safe(config, "tmp", nullptr);
 }
 
@@ -373,7 +318,6 @@ bool TempestControlDeck::EnsureOverlayDirectory()
 		return false;
 	}
 
-	telemetryPath = QDir(overlayDirectory).filePath(QStringLiteral("telemetry.json"));
 	UpdateOverlayPath();
 	return true;
 }
@@ -556,111 +500,6 @@ void TempestControlDeck::UpdateCountdownPreview()
 	seconds %= 60;
 	countdownPreview->setText(
 		QStringLiteral("%1:%2").arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0')));
-}
-
-void TempestControlDeck::AudioLevelCallback(void *param, const float magnitude[MAX_AUDIO_CHANNELS],
-					    const float peak[MAX_AUDIO_CHANNELS],
-					    const float inputPeak[MAX_AUDIO_CHANNELS])
-{
-	(void)magnitude;
-	(void)inputPeak;
-	auto *deck = static_cast<TempestControlDeck *>(param);
-	float peakDb = -96.0f;
-	for (size_t channel = 0; channel < MAX_AUDIO_CHANNELS; ++channel) {
-		if (std::isfinite(peak[channel]))
-			peakDb = std::max(peakDb, peak[channel]);
-	}
-	float normalized = std::clamp((peakDb + 55.0f) / 55.0f, 0.0f, 1.0f);
-	deck->audioLevel.store(std::pow(normalized, 0.72f), std::memory_order_relaxed);
-}
-
-void TempestControlDeck::RefreshAudioSources()
-{
-	struct AudioEntry {
-		QString name;
-		QString uuid;
-	};
-	std::vector<AudioEntry> entries;
-	obs_enum_sources(
-		[](void *param, obs_source_t *source) {
-			if (!(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO))
-				return true;
-			const char *name = obs_source_get_name(source);
-			const char *uuid = obs_source_get_uuid(source);
-			if (name && *name && uuid && *uuid)
-				static_cast<std::vector<AudioEntry> *>(param)->push_back(
-					{QString::fromUtf8(name), QString::fromUtf8(uuid)});
-			return true;
-		},
-		&entries);
-	std::sort(entries.begin(), entries.end(), [](const AudioEntry &a, const AudioEntry &b) {
-		return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
-	});
-
-	QString wanted = configuredAudioSourceUuid;
-	if (wanted.isEmpty())
-		wanted = audioSourceCombo->currentData().toString();
-	QSignalBlocker blocker(audioSourceCombo);
-	audioSourceCombo->clear();
-	audioSourceCombo->addItem(QStringLiteral("No audio reactivity"), QString());
-	for (const AudioEntry &entry : entries)
-		audioSourceCombo->addItem(entry.name, entry.uuid);
-	audioSourcesLoaded = true;
-
-	int selected = wanted.isEmpty() ? -1 : audioSourceCombo->findData(wanted);
-	if (selected < 0 && !entries.empty()) {
-		for (int i = 1; i < audioSourceCombo->count(); ++i) {
-			if (audioSourceCombo->itemText(i).contains(QStringLiteral("Desktop Audio"),
-								   Qt::CaseInsensitive)) {
-				selected = i;
-				break;
-			}
-		}
-		if (selected < 0)
-			selected = 1;
-	}
-	audioSourceCombo->setCurrentIndex(std::max(0, selected));
-	AttachAudioMeter();
-}
-
-void TempestControlDeck::AttachAudioMeter()
-{
-	if (!audioMeter)
-		return;
-	obs_volmeter_detach_source(audioMeter);
-	audioLevel.store(0.0f, std::memory_order_relaxed);
-	smoothedAudioLevel = 0.0f;
-
-	QString uuid = audioSourceCombo->currentData().toString();
-	if (uuid.isEmpty()) {
-		SaveState();
-		return;
-	}
-	OBSSourceAutoRelease source = obs_get_source_by_uuid(uuid.toUtf8().constData());
-	if (!source || !obs_volmeter_attach_source(audioMeter, source)) {
-		SetStatus(QStringLiteral("Unable to attach reactive telemetry to the selected audio source."), true);
-		return;
-	}
-	configuredAudioSourceUuid = uuid;
-	SaveState();
-	SetStatus(QStringLiteral("Reactive telemetry linked to %1.").arg(audioSourceCombo->currentText()));
-}
-
-void TempestControlDeck::WriteAudioTelemetry()
-{
-	float current = audioLevel.load(std::memory_order_relaxed);
-	smoothedAudioLevel = std::max(current, smoothedAudioLevel * 0.82f);
-	if (audioLevelMeter)
-		audioLevelMeter->setValue((int)(smoothedAudioLevel * 1000.0f));
-	if (telemetryPath.isEmpty())
-		return;
-
-	QFile file(telemetryPath);
-	if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
-		return;
-	QByteArray json = "{\"level\":" + QByteArray::number(smoothedAudioLevel, 'f', 4) +
-			  ",\"timestamp\":" + QByteArray::number(QDateTime::currentMSecsSinceEpoch()) + "}";
-	file.write(json);
 }
 
 void TempestControlDeck::ApplySourceSettings(obs_source_t *source)

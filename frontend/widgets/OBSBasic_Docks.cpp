@@ -20,6 +20,7 @@
 #include "OBSBasic.hpp"
 
 #include <docks/TempestControlDeck.hpp>
+#include <docks/TempestSignalReactor.hpp>
 #include <docks/TempestCommandMatrix.hpp>
 #include <docks/TempestMediaBay.hpp>
 #include <docks/TempestSequenceDirector.hpp>
@@ -72,6 +73,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	ui->sourcesDock->setFloating(false);
 	ui->mixerDock->setFloating(false);
 	tempestControlDeck->setFloating(false);
+	tempestSignalReactor->setFloating(false);
 	tempestCommandMatrix->setFloating(false);
 	tempestMediaBay->setFloating(false);
 	tempestSequenceDirector->setFloating(false);
@@ -82,7 +84,9 @@ void OBSBasic::ConfigureTempestCommandLayout()
 
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
-	tabifyDockWidget(tempestControlDeck, tempestSequenceDirector);
+	addDockWidget(Qt::RightDockWidgetArea, tempestSignalReactor);
+	tabifyDockWidget(tempestControlDeck, tempestSignalReactor);
+	tabifyDockWidget(tempestSignalReactor, tempestSequenceDirector);
 	tabifyDockWidget(tempestSequenceDirector, tempestAssetVault);
 	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
 	if (tempestStreamInfoDock)
@@ -95,6 +99,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	ui->sourcesDock->setVisible(false);
 	ui->mixerDock->setVisible(true);
 	tempestControlDeck->setVisible(true);
+	tempestSignalReactor->setVisible(true);
 	tempestMediaBay->setVisible(true);
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
@@ -130,6 +135,7 @@ void OBSBasic::OpenTempestDockManager()
 	const QVector<DockEntry> entries = {
 		{QStringLiteral("Transmission Matrix"), tempestCommandMatrix},
 		{QStringLiteral("Control Deck"), tempestControlDeck},
+		{QStringLiteral("Signal Reactor"), tempestSignalReactor},
 		{QStringLiteral("Signal Media Bay"), tempestMediaBay},
 		{QStringLiteral("Sequence Director"), tempestSequenceDirector},
 		{QStringLiteral("Asset Vault"), tempestAssetVault},
@@ -424,6 +430,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	ui->transitionsDock->setVisible(true);
 	controlsDock->setVisible(true);
 	tempestControlDeck->setVisible(true);
+	tempestSignalReactor->setVisible(true);
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
 	tempestHUDComposer->setVisible(true);
@@ -463,6 +470,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	controlsDock->setFeatures(mainFeatures);
 	statsDock->setFeatures(features);
 	tempestControlDeck->setFeatures(features);
+	tempestSignalReactor->setFeatures(features);
 	tempestCommandMatrix->setFeatures(features);
 	tempestMediaBay->setFeatures(features);
 	tempestSequenceDirector->setFeatures(features);

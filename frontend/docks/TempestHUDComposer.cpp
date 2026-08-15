@@ -36,7 +36,7 @@
 
 namespace {
 constexpr char ConfigSection[] = "TempestHUDComposer";
-constexpr int HudSchemaVersion = 2;
+constexpr int HudSchemaVersion = 3;
 
 QSize ElementSize(const QString &type)
 {
@@ -183,6 +183,10 @@ void TempestHUDComposer::BuildInterface()
 	reactionSelector->addItem(QStringLiteral("GLOW ONLY"), QStringLiteral("glow"));
 	reactionSelector->addItem(QStringLiteral("BREATHING CORE"), QStringLiteral("pulse"));
 	reactionSelector->addItem(QStringLiteral("PEAK GLITCH"), QStringLiteral("glitch"));
+	signalSelector = new QComboBox(root);
+	signalSelector->addItem(QStringLiteral("MASTER MIX"), QStringLiteral("master"));
+	signalSelector->addItem(QStringLiteral("DESKTOP ENERGY"), QStringLiteral("desktop"));
+	signalSelector->addItem(QStringLiteral("MICROPHONE / VOICE"), QStringLiteral("microphone"));
 	strengthField = new QDoubleSpinBox(root);
 	strengthField->setRange(0.0, 2.5);
 	strengthField->setSingleStep(0.1);
@@ -194,6 +198,7 @@ void TempestHUDComposer::BuildInterface()
 	form->addRow(QStringLiteral("Browser URL"), browserUrlField);
 	form->addRow(QStringLiteral("Accent color"), accentField);
 	form->addRow(QStringLiteral("Reaction"), reactionSelector);
+	form->addRow(QStringLiteral("Signal input"), signalSelector);
 	form->addRow(QStringLiteral("Strength"), strengthField);
 	layout->addLayout(form);
 	connect(typeSelector, &QComboBox::currentIndexChanged, this, [this]() { UpdateBrowserUrlAvailability(); });
@@ -224,7 +229,7 @@ void TempestHUDComposer::BuildInterface()
 
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Frame sources deploy canvas-sized and locked. Plates deploy unlocked; move and resize them with the normal OBS canvas controls. Reactive signal follows the Control Deck audio selector."),
+			"Frame sources deploy canvas-sized and locked. Plates deploy unlocked; move and resize them with the normal OBS canvas controls. Choose Master, Desktop, or Voice from the Signal Reactor for each element."),
 		root);
 	hint->setObjectName(QStringLiteral("hudHint"));
 	hint->setWordWrap(true);
@@ -246,6 +251,7 @@ void TempestHUDComposer::SeedStarterElements()
 	frame.primary = QStringLiteral("TEMPEST MAINFRAME");
 	frame.secondary = QStringLiteral("BROADCAST SIGNAL // ONLINE");
 	frame.reaction = QStringLiteral("signal");
+	frame.signal = QStringLiteral("master");
 	frame.strength = 1.1;
 
 	Element chat;
@@ -256,6 +262,7 @@ void TempestHUDComposer::SeedStarterElements()
 	chat.primary = QStringLiteral("CHANNEL RELAY");
 	chat.secondary = QStringLiteral("TWITCH LINK // FOUNDATION");
 	chat.reaction = QStringLiteral("glow");
+	chat.signal = QStringLiteral("microphone");
 	chat.strength = 0.8;
 
 	Element transmission;
@@ -265,6 +272,7 @@ void TempestHUDComposer::SeedStarterElements()
 	transmission.primary = QStringLiteral("TEMPEST MAINFRAME");
 	transmission.secondary = QStringLiteral("BROADCAST UPLINK // STANDBY");
 	transmission.reaction = QStringLiteral("pulse");
+	transmission.signal = QStringLiteral("microphone");
 
 	Element media;
 	media.id = QStringLiteral("now-playing");
@@ -274,6 +282,7 @@ void TempestHUDComposer::SeedStarterElements()
 	media.primary = QStringLiteral("SIGNAL MEDIA");
 	media.secondary = QStringLiteral("ASSET BUS // STANDBY");
 	media.reaction = QStringLiteral("signal");
+	media.signal = QStringLiteral("desktop");
 	media.ending = false;
 
 	Element radio;
@@ -284,6 +293,7 @@ void TempestHUDComposer::SeedStarterElements()
 	radio.primary = QStringLiteral("STORM HORIZON RADIO");
 	radio.secondary = QStringLiteral("●  LIVE");
 	radio.reaction = QStringLiteral("glow");
+	radio.signal = QStringLiteral("desktop");
 	radio.strength = 0.8;
 	radio.starting = false;
 	radio.brb = false;
@@ -314,6 +324,15 @@ void TempestHUDComposer::LoadElements()
 			element.browserUrl = object.value(QStringLiteral("browserUrl")).toString();
 			element.accent = object.value(QStringLiteral("accent")).toString(QStringLiteral("#45d9ff"));
 			element.reaction = object.value(QStringLiteral("reaction")).toString(QStringLiteral("signal"));
+			if (object.contains(QStringLiteral("signal"))) {
+				element.signal =
+					object.value(QStringLiteral("signal")).toString(QStringLiteral("master"));
+			} else if (element.type == QStringLiteral("media") || element.type == QStringLiteral("radio")) {
+				element.signal = QStringLiteral("desktop");
+			} else if (element.type == QStringLiteral("chat") ||
+				   element.id == QStringLiteral("transmission-plate")) {
+				element.signal = QStringLiteral("microphone");
+			}
 			element.strength = object.value(QStringLiteral("strength")).toDouble(1.0);
 			element.starting = object.value(QStringLiteral("starting")).toBool(true);
 			element.live = object.value(QStringLiteral("live")).toBool(true);
@@ -340,6 +359,7 @@ void TempestHUDComposer::LoadElements()
 			radio.primary = QStringLiteral("STORM HORIZON RADIO");
 			radio.secondary = QStringLiteral("●  LIVE");
 			radio.reaction = QStringLiteral("glow");
+			radio.signal = QStringLiteral("desktop");
 			radio.strength = 0.8;
 			radio.starting = false;
 			radio.brb = false;
@@ -368,6 +388,7 @@ void TempestHUDComposer::SaveElements()
 		object.insert(QStringLiteral("browserUrl"), element.browserUrl);
 		object.insert(QStringLiteral("accent"), element.accent);
 		object.insert(QStringLiteral("reaction"), element.reaction);
+		object.insert(QStringLiteral("signal"), element.signal);
 		object.insert(QStringLiteral("strength"), element.strength);
 		object.insert(QStringLiteral("starting"), element.starting);
 		object.insert(QStringLiteral("live"), element.live);
@@ -439,6 +460,7 @@ void TempestHUDComposer::LoadEditor(const Element &element)
 	browserUrlField->setText(element.browserUrl);
 	accentField->setText(element.accent);
 	reactionSelector->setCurrentIndex(std::max(0, reactionSelector->findData(element.reaction)));
+	signalSelector->setCurrentIndex(std::max(0, signalSelector->findData(element.signal)));
 	strengthField->setValue(element.strength);
 	startingVisible->setChecked(element.starting);
 	liveVisible->setChecked(element.live);
@@ -511,6 +533,7 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 	element.browserUrl = browserUrl;
 	element.accent = accent.toUpper();
 	element.reaction = reactionSelector->currentData().toString();
+	element.signal = signalSelector->currentData().toString();
 	element.strength = strengthField->value();
 	element.starting = startingVisible->isChecked();
 	element.live = liveVisible->isChecked();
@@ -606,6 +629,7 @@ QString TempestHUDComposer::BuildElementHtml(const Element &element) const
 	state.insert(QStringLiteral("secondary"), element.secondary);
 	state.insert(QStringLiteral("accent"), element.accent);
 	state.insert(QStringLiteral("reaction"), element.reaction);
+	state.insert(QStringLiteral("signal"), element.signal);
 	state.insert(QStringLiteral("strength"), element.strength);
 	QString json = QString::fromUtf8(QJsonDocument(state).toJson(QJsonDocument::Compact));
 	json.replace(QStringLiteral("</"), QStringLiteral("<\\/"));
@@ -636,7 +660,7 @@ body.frame-type .frame{display:block}body.frame-type .plate{display:none}body.ch
 <section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>MAINFRAME</b>CHAT RELAY FOUNDATION ONLINE</div><div class="msg"><b>CHANNEL LINK</b>ADD A TWITCH POPOUT CHAT OR OVERLAY URL IN HUD COMPOSER</div><div class="msg"><b>OPERATOR NOTE</b>THE CHAT TERMINAL WILL SWITCH TO THE REMOTE BROWSER FEED</div></main><footer class="chat-foot"><span>RELAY STANDBY</span><span>SIGNAL REACTIVE</span></footer></section>
 <script id="hud-state" type="application/json">{{STATE_JSON}}</script><script>
 const s=JSON.parse(document.getElementById('hud-state').textContent),root=document.documentElement,body=document.body;root.style.setProperty('--accent',s.accent||'#45d9ff');body.classList.add((s.type||'plate')+'-type');body.classList.add(s.reaction||'signal');for(const id of ['primary','framePrimary','chatPrimary'])document.getElementById(id).textContent=s.primary||'TEMPEST MAINFRAME';for(const id of ['secondary','frameSecondary','chatSecondary'])document.getElementById(id).textContent=s.secondary||'SIGNAL ELEMENT ONLINE';let level=0,phase=0;
-async function telemetry(){try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json();level=Math.max(Number(d.level)||0,level*.74)}}catch(_){level*=.82}phase+=.12;let react=level*Math.max(0,Number(s.strength)||0);if(s.reaction==='pulse')react=Math.max(react,.16+.12*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
+async function telemetry(){try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:(d.master??d.level);level=Math.max(Number(routed)||0,Number(d.pulse)||0,level*.74)}}catch(_){level*=.82}phase+=.12;let react=level*Math.max(0,Number(s.strength)||0);if(s.reaction==='pulse')react=Math.max(react,.16+.12*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
 </script></body></html>)TEMPEST");
 	html.replace(QStringLiteral("{{STATE_JSON}}"), json);
 	return html;

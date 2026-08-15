@@ -43,6 +43,7 @@ private:
 		QString browserUrl;
 		QString accent = QStringLiteral("#45d9ff");
 		QString reaction = QStringLiteral("signal");
+		QString signal = QStringLiteral("master");
 		double strength = 1.0;
 		bool starting = true;
 		bool live = true;
@@ -82,6 +83,7 @@ private:
 	QPointer<QLineEdit> browserUrlField;
 	QPointer<QLineEdit> accentField;
 	QPointer<QComboBox> reactionSelector;
+	QPointer<QComboBox> signalSelector;
 	QPointer<QDoubleSpinBox> strengthField;
 	QPointer<QCheckBox> startingVisible;
 	QPointer<QCheckBox> liveVisible;

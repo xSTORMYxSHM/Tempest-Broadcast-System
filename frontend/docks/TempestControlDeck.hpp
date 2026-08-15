@@ -3,17 +3,12 @@
 #include "OBSDock.hpp"
 
 #include <obs.h>
-#include <obs-audio-controls.h>
-
 #include <QString>
-
-#include <atomic>
 
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
-class QProgressBar;
 class QPushButton;
 class QSpinBox;
 class QTimer;
@@ -23,7 +18,6 @@ class TempestControlDeck : public OBSDock {
 
 public:
 	explicit TempestControlDeck(QWidget *parent = nullptr);
-	~TempestControlDeck() override;
 	void ActivateMode(const QString &modeId, bool beginCountdown = false);
 	void UpdateOverlayText(const QString &modeId, const QString &transmission, const QString &status,
 			       const QString &messages);
@@ -36,13 +30,8 @@ private slots:
 	void ResetCountdown();
 	void UpdateCountdownPreview();
 	void CreateOrUpdateSource();
-	void RefreshAudioSources();
-	void AttachAudioMeter();
-	void WriteAudioTelemetry();
 
 private:
-	static void AudioLevelCallback(void *param, const float magnitude[MAX_AUDIO_CHANNELS],
-				       const float peak[MAX_AUDIO_CHANNELS], const float inputPeak[MAX_AUDIO_CHANNELS]);
 	void BuildInterface();
 	void LoadState();
 	void SaveState();
@@ -67,26 +56,16 @@ private:
 	QLabel *countdownPreview = nullptr;
 	QLabel *outputPathLabel = nullptr;
 	QLabel *statusLabel = nullptr;
-	QComboBox *audioSourceCombo = nullptr;
-	QProgressBar *audioLevelMeter = nullptr;
-	QPushButton *refreshAudioButton = nullptr;
 	QPushButton *startCountdownButton = nullptr;
 	QPushButton *resetCountdownButton = nullptr;
 	QPushButton *createSourceButton = nullptr;
 	QTimer *renderDebounce = nullptr;
 	QTimer *clockTimer = nullptr;
-	QTimer *telemetryTimer = nullptr;
 
 	QString overlayDirectory;
 	QString overlayPath;
-	QString telemetryPath;
 	QString activeModeId;
-	QString configuredAudioSourceUuid;
 	qint64 countdownEndMs = 0;
 	bool countdownRunning = false;
-	bool audioSourcesLoaded = false;
 	quint64 renderRevision = 0;
-	obs_volmeter_t *audioMeter = nullptr;
-	std::atomic<float> audioLevel{0.0f};
-	float smoothedAudioLevel = 0.0f;
 };

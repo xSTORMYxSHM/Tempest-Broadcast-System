@@ -25,6 +25,7 @@
 #include "OBSBasicStats.hpp"
 #include "plugin-manager/PluginManager.hpp"
 #include <docks/TempestControlDeck.hpp>
+#include <docks/TempestSignalReactor.hpp>
 #include <docks/TempestCommandMatrix.hpp>
 #include <docks/TempestMediaBay.hpp>
 #include <docks/TempestSequenceDirector.hpp>
@@ -378,6 +379,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 
 	tempestControlDeck = new TempestControlDeck(this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
+	tempestSignalReactor = new TempestSignalReactor(this);
+	addDockWidget(Qt::RightDockWidgetArea, tempestSignalReactor);
+	tabifyDockWidget(tempestControlDeck, tempestSignalReactor);
 	tempestCommandMatrix = new TempestCommandMatrix(this, tempestControlDeck, this);
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	tempestCommandMatrix->setVisible(false);
@@ -386,7 +390,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
 	tempestSequenceDirector = new TempestSequenceDirector(this, tempestCommandMatrix, tempestControlDeck, this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestSequenceDirector);
-	tabifyDockWidget(tempestControlDeck, tempestSequenceDirector);
+	tabifyDockWidget(tempestSignalReactor, tempestSequenceDirector);
 	tempestCommandMatrix->SetSequenceDirector(tempestSequenceDirector);
 	tempestAssetVault = new TempestAssetVault(this, tempestSequenceDirector, tempestMediaBay, this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestAssetVault);
@@ -568,6 +572,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(controlsDock);
 	SETUP_DOCK(statsDock);
 	SETUP_DOCK(tempestControlDeck);
+	SETUP_DOCK(tempestSignalReactor);
 	SETUP_DOCK(tempestCommandMatrix);
 	SETUP_DOCK(tempestMediaBay);
 	SETUP_DOCK(tempestSequenceDirector);
@@ -1290,11 +1295,11 @@ void OBSBasic::OBSInit()
 		tempestEngineeringDockState = QByteArray::fromBase64(QByteArray(engineeringDockState));
 	const int commandLayoutVersion =
 		config_get_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion");
-	if (commandLayoutVersion < 6) {
+	if (commandLayoutVersion < 7) {
 		tempestCommandDockState.clear();
 		tempestEngineeringDockState.clear();
 		on_resetDocks_triggered(true);
-		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 6);
+		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 7);
 	}
 	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
 	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;
