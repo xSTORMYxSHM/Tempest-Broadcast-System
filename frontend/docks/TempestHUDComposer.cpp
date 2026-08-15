@@ -36,11 +36,14 @@
 
 namespace {
 constexpr char ConfigSection[] = "TempestHUDComposer";
+constexpr int HudSchemaVersion = 2;
 
 QSize ElementSize(const QString &type)
 {
 	if (type == QStringLiteral("chat"))
 		return {520, 680};
+	if (type == QStringLiteral("radio"))
+		return {680, 180};
 	if (type == QStringLiteral("media"))
 		return {640, 150};
 	if (type == QStringLiteral("lore"))
@@ -79,6 +82,28 @@ body:after{content:"RELAY ONLINE // TEMPEST CHANNEL";box-sizing:border-box;posit
 )TEMPESTCSS");
 	}
 	return css;
+}
+
+QString RemoteRadioCss(const QString &primary, const QString &secondary)
+{
+	return QStringLiteral(R"TEMPESTCSS(
+html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;background:transparent!important;overflow:hidden!important}
+body{display:flex!important;align-items:center!important;justify-content:center!important;font-family:"Segoe UI",Arial,sans-serif!important}
+.radio-player-widget{position:relative!important;box-sizing:border-box!important;width:620px!important;min-height:120px!important;margin:0!important;padding:40px 28px 18px!important;border:1px solid rgba(72,215,255,.42)!important;border-radius:22px!important;background:radial-gradient(circle at 15% 50%,rgba(0,210,255,.16),transparent 34%),radial-gradient(circle at 85% 50%,rgba(132,67,255,.17),transparent 38%),linear-gradient(135deg,rgba(5,13,23,.98),rgba(11,12,26,.98) 55%,rgba(18,8,31,.98))!important;box-shadow:0 0 10px rgba(0,210,255,.22),0 0 30px rgba(0,170,255,.1),inset 0 1px 0 rgba(255,255,255,.08),inset 0 0 28px rgba(0,0,0,.7)!important;color:#fff!important;overflow:hidden!important;animation:shrPanelGlow 5s ease-in-out infinite}
+.radio-player-widget:before{content:"%1";position:absolute;top:14px;left:28px;color:rgba(224,248,255,.96);font-size:11px;font-weight:700;letter-spacing:4px;text-shadow:0 0 6px rgba(0,220,255,.8),0 0 15px rgba(0,180,255,.35);white-space:nowrap}
+.radio-player-widget:after{content:"%2";position:absolute;top:15px;right:28px;color:#ff5879;font-size:9px;font-weight:700;letter-spacing:2px;text-shadow:0 0 5px rgba(255,40,85,1),0 0 12px rgba(255,40,85,.55);animation:shrLive 1.7s ease-in-out infinite}
+.radio-player-widget .now-playing-details,.radio-player-widget .radio-controls{background:transparent!important;border:0!important;color:#fff!important;min-width:0!important}
+.radio-player-widget .now-playing-details .now-playing-title{color:#fff!important;font-size:16px!important;font-weight:700!important;letter-spacing:.5px!important;text-shadow:0 0 8px rgba(0,205,255,.22)!important;text-overflow:clip!important;overflow:visible!important;white-space:normal!important;word-break:break-word!important}
+.radio-player-widget .now-playing-details .now-playing-artist{margin-top:4px!important;color:rgba(190,230,245,.76)!important;font-size:10px!important;letter-spacing:1.5px!important;text-transform:uppercase!important;text-overflow:clip!important;overflow:visible!important;white-space:normal!important}
+.radio-player-widget .now-playing-art,.radio-player-widget .now-playing-art img{border-radius:12px!important}.radio-player-widget .now-playing-art{overflow:hidden!important;box-shadow:0 0 10px rgba(0,210,255,.2)!important}
+.radio-player-widget .radio-controls .radio-control-play-button{color:#dffaff!important;background:rgba(0,190,255,.08)!important;border:1px solid rgba(0,215,255,.32)!important;border-radius:50%!important;box-shadow:0 0 10px rgba(0,210,255,.18),inset 0 0 10px rgba(0,210,255,.05)!important}
+.radio-player-widget .radio-controls .radio-control-play-button .icon{font-size:24px!important;filter:drop-shadow(0 0 5px rgba(0,220,255,.65))}
+.card,.card-body,.public-page,.page-minimal,main{background:transparent!important;border:0!important;box-shadow:none!important}
+@keyframes shrLive{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes shrPanelGlow{0%,100%{box-shadow:0 0 10px rgba(0,210,255,.2),0 0 30px rgba(0,170,255,.09),inset 0 1px 0 rgba(255,255,255,.08),inset 0 0 28px rgba(0,0,0,.7)!important}50%{box-shadow:0 0 16px rgba(0,220,255,.32),0 0 42px rgba(120,65,255,.14),inset 0 1px 0 rgba(255,255,255,.1),inset 0 0 28px rgba(0,0,0,.7)!important}}
+)TEMPESTCSS")
+		.arg(CssContent(primary.isEmpty() ? QStringLiteral("STORM HORIZON RADIO") : primary),
+		     CssContent(secondary.isEmpty() ? QStringLiteral("●  LIVE") : secondary));
 }
 } // namespace
 
@@ -141,15 +166,15 @@ void TempestHUDComposer::BuildInterface()
 	typeSelector = new QComboBox(root);
 	typeSelector->addItem(QStringLiteral("CANVAS FRAME"), QStringLiteral("frame"));
 	typeSelector->addItem(QStringLiteral("CHAT TERMINAL"), QStringLiteral("chat"));
+	typeSelector->addItem(QStringLiteral("STORM HORIZON RADIO"), QStringLiteral("radio"));
 	typeSelector->addItem(QStringLiteral("SIGNAL PLATE"), QStringLiteral("plate"));
 	typeSelector->addItem(QStringLiteral("NOW PLAYING PLATE"), QStringLiteral("media"));
 	typeSelector->addItem(QStringLiteral("LORE PANEL"), QStringLiteral("lore"));
 	primaryField = new QLineEdit(root);
 	secondaryField = new QLineEdit(root);
 	browserUrlField = new QLineEdit(root);
-	browserUrlField->setPlaceholderText(QStringLiteral("https://www.twitch.tv/popout/CHANNEL/chat?popout="));
 	browserUrlField->setToolTip(QStringLiteral(
-		"Chat Terminal only. Paste a Twitch popout chat or browser-overlay URL. Leave empty for the local standby renderer."));
+		"Chat Terminal: paste a Twitch chat URL. Storm Horizon Radio: paste the AzuraCast embed URL. Leave empty for a local standby renderer."));
 	accentField = new QLineEdit(root);
 	accentField->setPlaceholderText(QStringLiteral("#45d9ff"));
 	reactionSelector = new QComboBox(root);
@@ -165,7 +190,7 @@ void TempestHUDComposer::BuildInterface()
 	form->addRow(QStringLiteral("Element type"), typeSelector);
 	form->addRow(QStringLiteral("Primary text"), primaryField);
 	form->addRow(QStringLiteral("Secondary text"), secondaryField);
-	form->addRow(QStringLiteral("Chat browser URL"), browserUrlField);
+	form->addRow(QStringLiteral("Browser URL"), browserUrlField);
 	form->addRow(QStringLiteral("Accent color"), accentField);
 	form->addRow(QStringLiteral("Reaction"), reactionSelector);
 	form->addRow(QStringLiteral("Strength"), strengthField);
@@ -249,13 +274,27 @@ void TempestHUDComposer::SeedStarterElements()
 	media.secondary = QStringLiteral("ASSET BUS // STANDBY");
 	media.reaction = QStringLiteral("signal");
 	media.ending = false;
-	elements = {frame, chat, transmission, media};
+
+	Element radio;
+	radio.id = QStringLiteral("storm-horizon-radio");
+	radio.name = QStringLiteral("Storm Horizon Radio");
+	radio.sourceName = SuggestedSourceName(radio.name);
+	radio.type = QStringLiteral("radio");
+	radio.primary = QStringLiteral("STORM HORIZON RADIO");
+	radio.secondary = QStringLiteral("●  LIVE");
+	radio.reaction = QStringLiteral("glow");
+	radio.strength = 0.8;
+	radio.starting = false;
+	radio.brb = false;
+	radio.ending = false;
+	elements = {frame, chat, transmission, media, radio};
 }
 
 void TempestHUDComposer::LoadElements()
 {
 	config_t *config = App()->GetUserConfig();
 	const bool initialized = config_get_bool(config, ConfigSection, "Initialized");
+	const int schemaVersion = (int)config_get_int(config, ConfigSection, "SchemaVersion");
 	const char *raw = config_get_string(config, ConfigSection, "Elements");
 	const QJsonDocument document = QJsonDocument::fromJson(raw ? QByteArray(raw) : QByteArray());
 	if (document.isArray()) {
@@ -285,6 +324,28 @@ void TempestHUDComposer::LoadElements()
 	if (!initialized) {
 		SeedStarterElements();
 		config_set_bool(config, ConfigSection, "Initialized", true);
+		config_set_int(config, ConfigSection, "SchemaVersion", HudSchemaVersion);
+		SaveElements();
+	} else if (schemaVersion < HudSchemaVersion) {
+		const bool hasRadio = std::any_of(elements.cbegin(), elements.cend(), [](const Element &element) {
+			return element.type == QStringLiteral("radio");
+		});
+		if (!hasRadio) {
+			Element radio;
+			radio.id = QStringLiteral("storm-horizon-radio");
+			radio.name = QStringLiteral("Storm Horizon Radio");
+			radio.sourceName = SuggestedSourceName(radio.name);
+			radio.type = QStringLiteral("radio");
+			radio.primary = QStringLiteral("STORM HORIZON RADIO");
+			radio.secondary = QStringLiteral("●  LIVE");
+			radio.reaction = QStringLiteral("glow");
+			radio.strength = 0.8;
+			radio.starting = false;
+			radio.brb = false;
+			radio.ending = false;
+			elements.push_back(radio);
+		}
+		config_set_int(config, ConfigSection, "SchemaVersion", HudSchemaVersion);
 		SaveElements();
 	}
 	SetStatus(QStringLiteral("HUD LIBRARY READY // %1 ELEMENT%2")
@@ -317,6 +378,7 @@ void TempestHUDComposer::SaveElements()
 	config_t *config = App()->GetUserConfig();
 	config_set_string(config, ConfigSection, "Elements", json.constData());
 	config_set_bool(config, ConfigSection, "Initialized", true);
+	config_set_int(config, ConfigSection, "SchemaVersion", HudSchemaVersion);
 	config_save_safe(config, "tmp", nullptr);
 }
 
@@ -388,11 +450,17 @@ void TempestHUDComposer::UpdateBrowserUrlAvailability()
 {
 	if (!browserUrlField || !typeSelector)
 		return;
-	const bool chat = typeSelector->currentData().toString() == QStringLiteral("chat");
-	browserUrlField->setEnabled(chat);
+	const QString type = typeSelector->currentData().toString();
+	const bool chat = type == QStringLiteral("chat");
+	const bool radio = type == QStringLiteral("radio");
+	browserUrlField->setEnabled(chat || radio);
+	browserUrlField->setPlaceholderText(chat ? QStringLiteral("https://www.twitch.tv/popout/CHANNEL/chat?popout=")
+					    : radio ? QStringLiteral("https://radio.example.com/public/station/embed")
+						    : QString());
 	browserUrlField->setAccessibleDescription(
-		chat ? QStringLiteral("Optional Twitch popout chat or browser-overlay URL")
-		     : QStringLiteral("Available when Element type is Chat Terminal"));
+		chat    ? QStringLiteral("Optional Twitch popout chat or browser-overlay URL")
+		: radio ? QStringLiteral("Optional AzuraCast public player or embed URL")
+			: QStringLiteral("Available for Chat Terminal and Storm Horizon Radio elements"));
 }
 
 bool TempestHUDComposer::StoreEditor(Element &element)
@@ -412,7 +480,7 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 		const QUrl parsedUrl(browserUrl, QUrl::StrictMode);
 		if (!parsedUrl.isValid() || parsedUrl.host().isEmpty() ||
 		    (parsedUrl.scheme() != QStringLiteral("https") && parsedUrl.scheme() != QStringLiteral("http"))) {
-			SetStatus(QStringLiteral("CHAT BROWSER URL MUST USE HTTP OR HTTPS"), true);
+			SetStatus(QStringLiteral("BROWSER URL MUST USE HTTP OR HTTPS"), true);
 			return false;
 		}
 	}
@@ -482,9 +550,11 @@ void TempestHUDComposer::SaveElement()
 		return;
 	RefreshSelectedSource();
 	RebuildElementList(selectedId);
-	const bool remoteChat = element->type == QStringLiteral("chat") && !element->browserUrl.isEmpty();
-	SetStatus(remoteChat ? QStringLiteral("CHAT BROWSER LINKED // %1").arg(element->name.toUpper())
-			     : QStringLiteral("ELEMENT RENDERED // %1").arg(element->name.toUpper()));
+	const bool remoteBrowser =
+		(element->type == QStringLiteral("chat") || element->type == QStringLiteral("radio")) &&
+		!element->browserUrl.isEmpty();
+	SetStatus(remoteBrowser ? QStringLiteral("BROWSER ELEMENT LINKED // %1").arg(element->name.toUpper())
+				: QStringLiteral("ELEMENT RENDERED // %1").arg(element->name.toUpper()));
 }
 
 bool TempestHUDComposer::EnsureOutputDirectory()
@@ -581,14 +651,18 @@ bool TempestHUDComposer::ApplySourceSettings(obs_source_t *source, const Element
 		size = QSize((int)ovi.base_width, (int)ovi.base_height);
 	OBSDataAutoRelease settings = obs_data_create();
 	const QByteArray path = QDir::toNativeSeparators(ElementPath(element)).toUtf8();
-	const bool remoteChat = element.type == QStringLiteral("chat") && !element.browserUrl.trimmed().isEmpty();
-	const QByteArray css =
-		(remoteChat ? RemoteChatCss(element.browserUrl, element.primary, element.secondary, element.accent)
-			    : QStringLiteral("body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}"))
-			.append(QStringLiteral("/* hud-revision:%1 */").arg(renderRevision))
-			.toUtf8();
-	obs_data_set_bool(settings, "is_local_file", !remoteChat);
-	if (remoteChat)
+	const bool browserType = element.type == QStringLiteral("chat") || element.type == QStringLiteral("radio");
+	const bool remoteBrowser = browserType && !element.browserUrl.trimmed().isEmpty();
+	QString browserCss = QStringLiteral("body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}");
+	if (remoteBrowser) {
+		browserCss =
+			element.type == QStringLiteral("radio")
+				? RemoteRadioCss(element.primary, element.secondary)
+				: RemoteChatCss(element.browserUrl, element.primary, element.secondary, element.accent);
+	}
+	const QByteArray css = browserCss.append(QStringLiteral("/* hud-revision:%1 */").arg(renderRevision)).toUtf8();
+	obs_data_set_bool(settings, "is_local_file", !remoteBrowser);
+	if (remoteBrowser)
 		obs_data_set_string(settings, "url", element.browserUrl.toUtf8().constData());
 	else
 		obs_data_set_string(settings, "local_file", path.constData());
@@ -734,6 +808,8 @@ QString TempestHUDComposer::TypeLabel(const QString &type)
 		return QStringLiteral("FRAME");
 	if (type == QStringLiteral("chat"))
 		return QStringLiteral("CHAT");
+	if (type == QStringLiteral("radio"))
+		return QStringLiteral("RADIO");
 	if (type == QStringLiteral("media"))
 		return QStringLiteral("MEDIA");
 	if (type == QStringLiteral("lore"))
