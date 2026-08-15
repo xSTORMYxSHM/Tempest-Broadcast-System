@@ -101,14 +101,16 @@ Command mode replaces the conventional Scenes and Sources column with the native
 
 The matrix provides:
 
-- large Starting, Live, BRB, and Ending protocol controls,
+- a persistent **Basic** view containing only the dynamically refreshed two-column scene grid for direct routing,
+- a separate **Protocol** view containing the large Starting, Live, BRB, and Ending automation controls,
 - a saved OBS scene assignment for each protocol,
 - automatic assignment when a collection contains a single scene,
 - synchronization with the corresponding Control Deck overlay mode,
 - optional Starting Soon countdown activation,
 - optional isolation of the matching Tempest overlay source inside the routed scene,
-- a dynamically refreshed two-column scene grid for direct routing,
 - current-scene highlighting and protocol status feedback.
+
+The selected view is stored locally. Only one control surface is shown at a time, so scene destinations are not duplicated below the protocol controls.
 
 ## Signal Media Bay
 

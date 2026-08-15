@@ -13,6 +13,7 @@
 
 #include <obs.hpp>
 
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
@@ -30,6 +31,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -96,6 +98,10 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 	isolateOverlay->setChecked(!config_has_user_value(config, ConfigSection, "IsolateOverlay") ||
 				   config_get_bool(config, ConfigSection, "IsolateOverlay"));
 	startCountdown->setChecked(config_get_bool(config, ConfigSection, "StartCountdown"));
+	const char *savedView = config_get_string(config, ConfigSection, "ViewMode");
+	SetViewMode(savedView && QString::fromUtf8(savedView) == QStringLiteral("protocol") ? QStringLiteral("protocol")
+											    : QStringLiteral("basic"),
+		    false);
 	LoadActionConfigs();
 
 	connect(isolateOverlay, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
@@ -392,9 +398,57 @@ void TempestCommandMatrix::BuildInterface()
 		"tempest-mainframe OBS WebSocket vendor."));
 	layout->addWidget(routerLabel);
 
-	auto *protocolLabel = new QLabel(QStringLiteral("TRANSMISSION PROTOCOLS"), root);
+	auto *viewRow = new QHBoxLayout();
+	viewRow->setSpacing(6);
+	basicViewButton = new QPushButton(QStringLiteral("BASIC"), root);
+	protocolViewButton = new QPushButton(QStringLiteral("PROTOCOL"), root);
+	basicViewButton->setCheckable(true);
+	protocolViewButton->setCheckable(true);
+	basicViewButton->setAccessibleName(QStringLiteral("Basic scene routing view"));
+	protocolViewButton->setAccessibleName(QStringLiteral("Protocol automation view"));
+	auto *viewGroup = new QButtonGroup(root);
+	viewGroup->setExclusive(true);
+	viewGroup->addButton(basicViewButton);
+	viewGroup->addButton(protocolViewButton);
+	connect(basicViewButton, &QPushButton::clicked, this, [this]() { SetViewMode(QStringLiteral("basic")); });
+	connect(protocolViewButton, &QPushButton::clicked, this, [this]() { SetViewMode(QStringLiteral("protocol")); });
+	viewRow->addWidget(basicViewButton);
+	viewRow->addWidget(protocolViewButton);
+	layout->addLayout(viewRow);
+
+	viewStack = new QStackedWidget(root);
+	viewStack->setObjectName(QStringLiteral("tempestMatrixViews"));
+	layout->addWidget(viewStack, 1);
+
+	basicViewPage = new QWidget(viewStack);
+	auto *basicLayout = new QVBoxLayout(basicViewPage);
+	basicLayout->setContentsMargins(0, 0, 0, 0);
+	basicLayout->setSpacing(7);
+	auto *sceneLabel = new QLabel(QStringLiteral("DIRECT SCENE ROUTING"), basicViewPage);
+	sceneLabel->setObjectName(QStringLiteral("matrixSection"));
+	basicLayout->addWidget(sceneLabel);
+
+	auto *scroll = new QScrollArea(basicViewPage);
+	scroll->setWidgetResizable(true);
+	auto *sceneContainer = new QWidget(scroll);
+	sceneContainer->setStyleSheet(QStringLiteral("background: transparent;"));
+	sceneGrid = new QGridLayout(sceneContainer);
+	sceneGrid->setContentsMargins(0, 0, 0, 0);
+	sceneGrid->setHorizontalSpacing(6);
+	sceneGrid->setVerticalSpacing(6);
+	sceneGrid->setColumnStretch(0, 1);
+	sceneGrid->setColumnStretch(1, 1);
+	scroll->setWidget(sceneContainer);
+	basicLayout->addWidget(scroll, 1);
+	viewStack->addWidget(basicViewPage);
+
+	protocolViewPage = new QWidget(viewStack);
+	auto *protocolLayout = new QVBoxLayout(protocolViewPage);
+	protocolLayout->setContentsMargins(0, 0, 0, 0);
+	protocolLayout->setSpacing(7);
+	auto *protocolLabel = new QLabel(QStringLiteral("TRANSMISSION PROTOCOLS"), protocolViewPage);
 	protocolLabel->setObjectName(QStringLiteral("matrixSection"));
-	layout->addWidget(protocolLabel);
+	protocolLayout->addWidget(protocolLabel);
 
 	struct ProtocolDefinition {
 		const char *id;
@@ -417,18 +471,18 @@ void TempestCommandMatrix::BuildInterface()
 		protocol.id = QString::fromUtf8(definition.id);
 		protocol.label = QString::fromUtf8(definition.label);
 		protocol.sourceName = QString::fromUtf8(definition.sourceName);
-		protocol.button = new QPushButton(protocol.label, root);
+		protocol.button = new QPushButton(protocol.label, protocolViewPage);
 		protocol.button->setProperty("protocol", true);
 		connect(protocol.button, &QPushButton::clicked, this,
 			[this, id = protocol.id]() { ExecuteProtocol(id); });
 		protocolGrid->addWidget(protocol.button, index / 2, index % 2);
 		protocols.push_back(protocol);
 	}
-	layout->addLayout(protocolGrid);
+	protocolLayout->addLayout(protocolGrid);
 
-	auto *assignmentLabel = new QLabel(QStringLiteral("PROTOCOL SCENE ASSIGNMENTS"), root);
+	auto *assignmentLabel = new QLabel(QStringLiteral("PROTOCOL SCENE ASSIGNMENTS"), protocolViewPage);
 	assignmentLabel->setObjectName(QStringLiteral("matrixSection"));
-	layout->addWidget(assignmentLabel);
+	protocolLayout->addWidget(assignmentLabel);
 
 	auto *assignmentGrid = new QGridLayout();
 	assignmentGrid->setColumnStretch(1, 1);
@@ -436,43 +490,28 @@ void TempestCommandMatrix::BuildInterface()
 	assignmentGrid->setVerticalSpacing(5);
 	for (int index = 0; index < protocols.size(); ++index) {
 		ProtocolWidgets &protocol = protocols[index];
-		auto *label = new QLabel(protocol.label, root);
+		auto *label = new QLabel(protocol.label, protocolViewPage);
 		label->setObjectName(QStringLiteral("matrixSubtitle"));
-		protocol.sceneCombo = new QComboBox(root);
+		protocol.sceneCombo = new QComboBox(protocolViewPage);
 		protocol.sceneCombo->setAccessibleName(QStringLiteral("%1 scene assignment").arg(protocol.label));
 		connect(protocol.sceneCombo, &QComboBox::currentIndexChanged, this,
 			&TempestCommandMatrix::SaveAssignments);
 		assignmentGrid->addWidget(label, index, 0);
 		assignmentGrid->addWidget(protocol.sceneCombo, index, 1);
 	}
-	layout->addLayout(assignmentGrid);
+	protocolLayout->addLayout(assignmentGrid);
 
-	isolateOverlay = new QCheckBox(QStringLiteral("Isolate matching Tempest overlay"), root);
-	startCountdown = new QCheckBox(QStringLiteral("Start countdown with STARTING"), root);
-	layout->addWidget(isolateOverlay);
-	layout->addWidget(startCountdown);
+	isolateOverlay = new QCheckBox(QStringLiteral("Isolate matching Tempest overlay"), protocolViewPage);
+	startCountdown = new QCheckBox(QStringLiteral("Start countdown with STARTING"), protocolViewPage);
+	protocolLayout->addWidget(isolateOverlay);
+	protocolLayout->addWidget(startCountdown);
 
-	auto *configureActions = new QPushButton(QStringLiteral("CONFIGURE PROTOCOL ACTIONS"), root);
+	auto *configureActions = new QPushButton(QStringLiteral("CONFIGURE PROTOCOL ACTIONS"), protocolViewPage);
 	configureActions->setAccessibleName(QStringLiteral("Configure protocol actions"));
 	connect(configureActions, &QPushButton::clicked, this, &TempestCommandMatrix::OpenActionEditor);
-	layout->addWidget(configureActions);
-
-	auto *sceneLabel = new QLabel(QStringLiteral("DIRECT SCENE ROUTING"), root);
-	sceneLabel->setObjectName(QStringLiteral("matrixSection"));
-	layout->addWidget(sceneLabel);
-
-	auto *scroll = new QScrollArea(root);
-	scroll->setWidgetResizable(true);
-	auto *sceneContainer = new QWidget(scroll);
-	sceneContainer->setStyleSheet(QStringLiteral("background: transparent;"));
-	sceneGrid = new QGridLayout(sceneContainer);
-	sceneGrid->setContentsMargins(0, 0, 0, 0);
-	sceneGrid->setHorizontalSpacing(6);
-	sceneGrid->setVerticalSpacing(6);
-	sceneGrid->setColumnStretch(0, 1);
-	sceneGrid->setColumnStretch(1, 1);
-	scroll->setWidget(sceneContainer);
-	layout->addWidget(scroll, 1);
+	protocolLayout->addWidget(configureActions);
+	protocolLayout->addStretch(1);
+	viewStack->addWidget(protocolViewPage);
 
 	statusLabel = new QLabel(QStringLiteral("MATRIX SYNCHRONIZING"), root);
 	statusLabel->setObjectName(QStringLiteral("matrixStatus"));
@@ -480,6 +519,24 @@ void TempestCommandMatrix::BuildInterface()
 	layout->addWidget(statusLabel);
 
 	setWidget(root);
+}
+
+void TempestCommandMatrix::SetViewMode(const QString &mode, bool save)
+{
+	const bool protocolMode = mode == QStringLiteral("protocol");
+	if (viewStack)
+		viewStack->setCurrentWidget(protocolMode ? protocolViewPage : basicViewPage);
+	if (basicViewButton)
+		basicViewButton->setChecked(!protocolMode);
+	if (protocolViewButton)
+		protocolViewButton->setChecked(protocolMode);
+	if (save) {
+		config_t *config = App()->GetUserConfig();
+		config_set_string(config, ConfigSection, "ViewMode", protocolMode ? "protocol" : "basic");
+		config_save_safe(config, "tmp", nullptr);
+		SetStatus(protocolMode ? QStringLiteral("PROTOCOL AUTOMATION VIEW")
+				       : QStringLiteral("BASIC SCENE ROUTING VIEW"));
+	}
 }
 
 bool TempestCommandMatrix::EnumScene(void *data, obs_source_t *source)

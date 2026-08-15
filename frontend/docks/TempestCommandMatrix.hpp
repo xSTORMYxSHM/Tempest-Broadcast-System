@@ -15,6 +15,7 @@ class QComboBox;
 class QGridLayout;
 class QLabel;
 class QPushButton;
+class QStackedWidget;
 class QTimer;
 class OBSBasic;
 class TempestControlDeck;
@@ -106,6 +107,7 @@ private:
 	QVector<SourceInfo> EnumerateTransitions() const;
 	void SwitchScene(const QString &uuid, const QString &name);
 	void ApplyProtocolOverlay(obs_source_t *sceneSource, const QString &sourceName);
+	void SetViewMode(const QString &mode, bool save = true);
 	void UpdateActiveScene();
 	void SetStatus(const QString &message, bool error = false);
 	ProtocolWidgets *FindProtocol(const QString &id);
@@ -118,6 +120,11 @@ private:
 	QPointer<QLabel> currentSceneLabel;
 	QPointer<QLabel> statusLabel;
 	QPointer<QLabel> routerLabel;
+	QPointer<QPushButton> basicViewButton;
+	QPointer<QPushButton> protocolViewButton;
+	QPointer<QStackedWidget> viewStack;
+	QPointer<QWidget> basicViewPage;
+	QPointer<QWidget> protocolViewPage;
 	QPointer<QCheckBox> isolateOverlay;
 	QPointer<QCheckBox> startCountdown;
 	QPointer<QTimer> refreshTimer;
