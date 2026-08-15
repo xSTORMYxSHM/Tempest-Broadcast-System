@@ -145,6 +145,28 @@ void TempestSignalReactor::BuildInterface()
 	addChannel(QStringLiteral("DESKTOP ENERGY"), desktopSource, desktopSensitivity, desktopMeter);
 	addChannel(QStringLiteral("MICROPHONE / VOICE"), microphoneSource, microphoneSensitivity, microphoneMeter);
 
+	auto *beatFrame = new QFrame(root);
+	beatFrame->setObjectName(QStringLiteral("reactorChannel"));
+	auto *beatLayout = new QVBoxLayout(beatFrame);
+	beatLayout->setContentsMargins(8, 8, 8, 8);
+	beatLayout->setSpacing(6);
+	auto *beatLabel = new QLabel(QStringLiteral("MUSIC TRANSIENT / BEAT"), beatFrame);
+	beatLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	beatSensitivity = new QDoubleSpinBox(beatFrame);
+	beatSensitivity->setRange(0.50, 4.00);
+	beatSensitivity->setSingleStep(0.10);
+	beatSensitivity->setDecimals(1);
+	beatSensitivity->setPrefix(QStringLiteral("BEAT SENSITIVITY  "));
+	beatSensitivity->setAccessibleName(QStringLiteral("Music transient beat sensitivity"));
+	beatMeter = new QProgressBar(beatFrame);
+	beatMeter->setRange(0, 1000);
+	beatMeter->setTextVisible(false);
+	beatMeter->setAccessibleName(QStringLiteral("Music transient beat meter"));
+	beatLayout->addWidget(beatLabel);
+	beatLayout->addWidget(beatSensitivity);
+	beatLayout->addWidget(beatMeter);
+	layout->addWidget(beatFrame);
+
 	auto *masterForm = new QFormLayout();
 	smoothing = new QDoubleSpinBox(root);
 	smoothing->setRange(0.50, 0.98);
@@ -179,7 +201,7 @@ void TempestSignalReactor::BuildInterface()
 
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Desktop, microphone, and manual pulse energy are merged onto the master bus. Assign Pulse and Peak in Settings > Hotkeys, or call tempest-mainframe / TriggerSignal after enabling the OBS WebSocket server."),
+			"Desktop and microphone energy feed the master bus. The Beat bus extracts fast music transients from Desktop Energy. Assign Pulse and Peak in Settings > Hotkeys, or call tempest-mainframe / TriggerSignal after enabling the OBS WebSocket server."),
 		root);
 	hint->setObjectName(QStringLiteral("reactorHint"));
 	hint->setWordWrap(true);
@@ -197,6 +219,7 @@ void TempestSignalReactor::BuildInterface()
 	connect(reactorEnabled, &QCheckBox::toggled, this, &TempestSignalReactor::SaveState);
 	connect(desktopSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(microphoneSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(beatSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(smoothing, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerPulse(0.65f, QStringLiteral("dock")); });
 	connect(peakButton, &QPushButton::clicked, this, [this]() { TriggerPulse(1.0f, QStringLiteral("dock")); });
@@ -274,9 +297,11 @@ void TempestSignalReactor::LoadState()
 				   config_get_bool(config, ConfigSection, "Enabled"));
 	const double desktopGain = config_get_double(config, ConfigSection, "DesktopSensitivity");
 	const double microphoneGain = config_get_double(config, ConfigSection, "MicrophoneSensitivity");
+	const double savedBeatSensitivity = config_get_double(config, ConfigSection, "BeatSensitivity");
 	const double savedSmoothing = config_get_double(config, ConfigSection, "Smoothing");
 	desktopSensitivity->setValue(desktopGain > 0.0 ? desktopGain : 1.0);
 	microphoneSensitivity->setValue(microphoneGain > 0.0 ? microphoneGain : 1.2);
+	beatSensitivity->setValue(savedBeatSensitivity > 0.0 ? savedBeatSensitivity : 1.8);
 	smoothing->setValue(savedSmoothing >= 0.50 ? savedSmoothing : 0.82);
 	const char *desktopUuid = config_get_string(config, ConfigSection, "DesktopSourceUuid");
 	const char *microphoneUuid = config_get_string(config, ConfigSection, "MicrophoneSourceUuid");
@@ -297,6 +322,7 @@ void TempestSignalReactor::SaveState()
 	config_set_bool(config, ConfigSection, "Enabled", reactorEnabled->isChecked());
 	config_set_double(config, ConfigSection, "DesktopSensitivity", desktopSensitivity->value());
 	config_set_double(config, ConfigSection, "MicrophoneSensitivity", microphoneSensitivity->value());
+	config_set_double(config, ConfigSection, "BeatSensitivity", beatSensitivity->value());
 	config_set_double(config, ConfigSection, "Smoothing", smoothing->value());
 	if (audioSourcesLoaded) {
 		configuredDesktopUuid = desktopSource->currentData().toString();
@@ -459,29 +485,42 @@ void TempestSignalReactor::UpdateControlBridgeState()
 void TempestSignalReactor::PublishTelemetry()
 {
 	const float decay = (float)smoothing->value();
-	auto processChannel = [decay](SignalChannel &channel, double sensitivity) {
-		const float input =
-			std::clamp(channel.rawLevel.load(std::memory_order_relaxed) * (float)sensitivity, 0.0f, 1.5f);
+	auto processChannel = [decay](SignalChannel &channel, float input) {
 		channel.smoothedLevel = std::max(input, channel.smoothedLevel * decay);
 		return channel.smoothedLevel;
 	};
-	float desktop = processChannel(desktopChannel, desktopSensitivity->value());
-	float microphone = processChannel(microphoneChannel, microphoneSensitivity->value());
+	const float desktopInput =
+		std::clamp(desktopChannel.rawLevel.load(std::memory_order_relaxed) * (float)desktopSensitivity->value(),
+			   0.0f, 1.5f);
+	const float microphoneInput = std::clamp(microphoneChannel.rawLevel.load(std::memory_order_relaxed) *
+							 (float)microphoneSensitivity->value(),
+						 0.0f, 1.5f);
+	float desktop = processChannel(desktopChannel, desktopInput);
+	float microphone = processChannel(microphoneChannel, microphoneInput);
+	beatBaseline += (desktopInput - beatBaseline) * 0.055f;
+	const float transient = std::max(0.0f, desktopInput - beatBaseline);
+	beatLevel = std::max(transient * (float)beatSensitivity->value() * 2.6f, beatLevel * 0.68f);
+	float beat = std::clamp(beatLevel, 0.0f, 1.5f);
 	manualPulse *= decay;
 	if (!reactorEnabled->isChecked()) {
 		desktop = 0.0f;
 		microphone = 0.0f;
+		beat = 0.0f;
+		beatBaseline = 0.0f;
+		beatLevel = 0.0f;
 		manualPulse = 0.0f;
 	}
 	const float master = std::clamp(std::max({desktop, microphone, manualPulse}), 0.0f, 1.5f);
 	desktopMeter->setValue((int)(std::min(desktop, 1.0f) * 1000.0f));
 	microphoneMeter->setValue((int)(std::min(microphone, 1.0f) * 1000.0f));
+	beatMeter->setValue((int)(std::min(beat, 1.0f) * 1000.0f));
 	masterMeter->setValue((int)(std::min(master, 1.0f) * 1000.0f));
 	statusLabel->setStyleSheet(QStringLiteral("color:#45d9ff;"));
-	statusLabel->setText(QStringLiteral("MASTER %1% // DESKTOP %2% // VOICE %3%")
+	statusLabel->setText(QStringLiteral("MASTER %1% // DESKTOP %2% // VOICE %3% // BEAT %4%")
 				     .arg(qRound(master * 100.0f), 3)
 				     .arg(qRound(desktop * 100.0f), 3)
-				     .arg(qRound(microphone * 100.0f), 3));
+				     .arg(qRound(microphone * 100.0f), 3)
+				     .arg(qRound(beat * 100.0f), 3));
 
 	if (telemetryPath.isEmpty() && !EnsureOutputDirectory())
 		return;
@@ -490,6 +529,7 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("master"), master);
 	telemetry.insert(QStringLiteral("desktop"), desktop);
 	telemetry.insert(QStringLiteral("microphone"), microphone);
+	telemetry.insert(QStringLiteral("beat"), beat);
 	telemetry.insert(QStringLiteral("pulse"), manualPulse);
 	telemetry.insert(QStringLiteral("timestamp"), QDateTime::currentMSecsSinceEpoch());
 	QSaveFile file(telemetryPath);

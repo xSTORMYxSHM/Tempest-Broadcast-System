@@ -82,14 +82,15 @@ protected:
 		QPainter painter(this);
 		painter.setRenderHint(QPainter::Antialiasing);
 		painter.fillRect(rect(), QColor(QStringLiteral("#050d16")));
-		const double breathing = reaction == QStringLiteral("pulse") ? idle * (1.0 + 0.45 * std::sin(phase)) : 0.0;
+		const double breathing = reaction == QStringLiteral("pulse") ? idle * (1.0 + 0.45 * std::sin(phase))
+									     : 0.0;
 		double react = std::max(envelope * strength, breathing);
 		if (reaction == QStringLiteral("glow"))
 			react *= 0.68;
 		react = std::clamp(react, 0.0, 1.8);
 		const int shift = reaction == QStringLiteral("glitch") && react > 0.62
-				  ? (int)std::round(std::sin(phase * 11.0) * react * 5.0)
-				  : 0;
+					  ? (int)std::round(std::sin(phase * 11.0) * react * 5.0)
+					  : 0;
 		QRectF panel = rect().adjusted(14 + shift, 14, -14 + shift, -14);
 		for (int width = 12; width >= 4; width -= 4) {
 			QColor glow = accent;
@@ -124,7 +125,8 @@ protected:
 		painter.setPen(QColor(QStringLiteral("#748fa4")));
 		painter.setFont(QFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold));
 		painter.drawText(QRectF(panel.left() + 90, panel.top() + 25, panel.width() - 125, 18),
-				 Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("REACTION LAB // %1 BUS").arg(signal.toUpper()));
+				 Qt::AlignLeft | Qt::AlignVCenter,
+				 QStringLiteral("REACTION LAB // %1 BUS").arg(signal.toUpper()));
 		painter.setPen(QColor(QStringLiteral("#d8fbff")));
 		painter.setFont(QFont(QStringLiteral("Segoe UI"), 13, QFont::Bold));
 		painter.drawText(QRectF(panel.left() + 90, panel.top() + 48, panel.width() - 125, 30),
@@ -157,10 +159,11 @@ private:
 			QFile file(telemetryPath);
 			if (file.open(QIODevice::ReadOnly)) {
 				const QJsonObject data = QJsonDocument::fromJson(file.readAll()).object();
-				const QString key = signal == QStringLiteral("desktop")
-						    ? QStringLiteral("desktop")
-						    : signal == QStringLiteral("microphone") ? QStringLiteral("microphone")
-										  : QStringLiteral("master");
+				const QString key = signal == QStringLiteral("desktop") ? QStringLiteral("desktop")
+						    : signal == QStringLiteral("microphone")
+							    ? QStringLiteral("microphone")
+						    : signal == QStringLiteral("beat") ? QStringLiteral("beat")
+										       : QStringLiteral("master");
 				raw = data.value(key).toDouble(data.value(QStringLiteral("level")).toDouble());
 				raw = std::max(raw, data.value(QStringLiteral("pulse")).toDouble());
 			}
@@ -194,7 +197,7 @@ private:
 
 namespace {
 constexpr char ConfigSection[] = "TempestHUDComposer";
-constexpr int HudSchemaVersion = 4;
+constexpr int HudSchemaVersion = 5;
 
 QSize ElementSize(const QString &type)
 {
@@ -357,6 +360,7 @@ void TempestHUDComposer::BuildInterface()
 	signalSelector->addItem(QStringLiteral("MASTER MIX"), QStringLiteral("master"));
 	signalSelector->addItem(QStringLiteral("DESKTOP ENERGY"), QStringLiteral("desktop"));
 	signalSelector->addItem(QStringLiteral("MICROPHONE / VOICE"), QStringLiteral("microphone"));
+	signalSelector->addItem(QStringLiteral("MUSIC TRANSIENT / BEAT"), QStringLiteral("beat"));
 	strengthField = new QDoubleSpinBox(root);
 	strengthField->setRange(0.0, 2.5);
 	strengthField->setSingleStep(0.1);
@@ -903,7 +907,7 @@ body.frame-type .frame{display:block}body.frame-type .plate{display:none}body.ch
 <section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>MAINFRAME</b>CHAT RELAY FOUNDATION ONLINE</div><div class="msg"><b>CHANNEL LINK</b>ADD A TWITCH POPOUT CHAT OR OVERLAY URL IN HUD COMPOSER</div><div class="msg"><b>OPERATOR NOTE</b>THE CHAT TERMINAL WILL SWITCH TO THE REMOTE BROWSER FEED</div></main><footer class="chat-foot"><span>RELAY STANDBY</span><span>SIGNAL REACTIVE</span></footer></section>
 <script id="hud-state" type="application/json">{{STATE_JSON}}</script><script>
 const s=JSON.parse(document.getElementById('hud-state').textContent),root=document.documentElement,body=document.body;root.style.setProperty('--accent',s.accent||'#45d9ff');body.classList.add((s.type||'plate')+'-type');body.classList.add(s.reaction||'signal');for(const id of ['primary','framePrimary','chatPrimary'])document.getElementById(id).textContent=s.primary||'TEMPEST MAINFRAME';for(const id of ['secondary','frameSecondary','chatSecondary'])document.getElementById(id).textContent=s.secondary||'SIGNAL ELEMENT ONLINE';let level=0,phase=0;
-async function telemetry(){let raw=0;try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:(d.master??d.level);raw=Math.max(Number(routed)||0,Number(d.pulse)||0)}}catch(_){}const threshold=Math.min(.95,Math.max(0,Number(s.threshold)||0)),target=Math.min(1.5,Math.max(0,(raw-threshold)/Math.max(.001,1-threshold))),attack=Math.min(1,Math.max(.05,Number(s.attack)||.55)),decay=Math.min(.98,Math.max(.5,Number(s.decay)||.82));if(target>level)level+=(target-level)*attack;else level*=decay;phase+=.12;let react=level*Math.max(0,Number(s.strength)||0),idle=Math.min(.5,Math.max(0,Number(s.idle)||0));if(s.reaction==='pulse')react=Math.max(react,idle+idle*.45*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
+async function telemetry(){let raw=0;try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:channel==='beat'?d.beat:(d.master??d.level);raw=Math.max(Number(routed)||0,Number(d.pulse)||0)}}catch(_){}const threshold=Math.min(.95,Math.max(0,Number(s.threshold)||0)),target=Math.min(1.5,Math.max(0,(raw-threshold)/Math.max(.001,1-threshold))),attack=Math.min(1,Math.max(.05,Number(s.attack)||.55)),decay=Math.min(.98,Math.max(.5,Number(s.decay)||.82));if(target>level)level+=(target-level)*attack;else level*=decay;phase+=.12;let react=level*Math.max(0,Number(s.strength)||0),idle=Math.min(.5,Math.max(0,Number(s.idle)||0));if(s.reaction==='pulse')react=Math.max(react,idle+idle*.45*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
 </script></body></html>)TEMPEST");
 	html.replace(QStringLiteral("{{STATE_JSON}}"), json);
 	return html;

@@ -66,9 +66,11 @@ private:
 	QPointer<QComboBox> microphoneSource;
 	QPointer<QDoubleSpinBox> desktopSensitivity;
 	QPointer<QDoubleSpinBox> microphoneSensitivity;
+	QPointer<QDoubleSpinBox> beatSensitivity;
 	QPointer<QDoubleSpinBox> smoothing;
 	QPointer<QProgressBar> desktopMeter;
 	QPointer<QProgressBar> microphoneMeter;
+	QPointer<QProgressBar> beatMeter;
 	QPointer<QProgressBar> masterMeter;
 	QPointer<QLabel> statusLabel;
 	QPointer<QLabel> controlLabel;
@@ -83,6 +85,8 @@ private:
 	QString configuredMicrophoneUuid;
 	QString telemetryPath;
 	float manualPulse = 0.0f;
+	float beatBaseline = 0.0f;
+	float beatLevel = 0.0f;
 	bool audioSourcesLoaded = false;
 	bool loadingState = false;
 	bool webSocketReady = false;
