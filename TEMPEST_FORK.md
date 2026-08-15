@@ -94,3 +94,20 @@ The default 1920x1080 workspace is headed by the native **Mainframe Command Nexu
 - one-click access to the full conventional OBS frontend in Engineering mode.
 
 Each workspace stores its dock layout independently. Plugins and advanced dialogs remain available in Engineering mode while Command mode presents the Tempest-first operating surface.
+
+## Transmission Command Matrix
+
+Command mode replaces the conventional Scenes and Sources column with the native **Transmission Command Matrix**. Engineering mode retains those original OBS docks.
+
+The matrix provides:
+
+- large Starting, Live, BRB, and Ending protocol controls,
+- a saved OBS scene assignment for each protocol,
+- automatic assignment when a collection contains a single scene,
+- synchronization with the corresponding Control Deck overlay mode,
+- optional Starting Soon countdown activation,
+- optional isolation of the matching Tempest overlay source inside the routed scene,
+- a dynamically refreshed two-column scene grid for direct routing,
+- current-scene highlighting and protocol status feedback.
+
+Protocol and scene switching uses the native OBS scene and transition system. It requires no WebSocket bridge, browser control server, macro plugin, or external automation utility.

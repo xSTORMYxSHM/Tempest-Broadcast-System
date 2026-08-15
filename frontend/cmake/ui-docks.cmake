@@ -5,4 +5,6 @@ target_sources(
     docks/OBSDock.hpp
     docks/TempestControlDeck.cpp
     docks/TempestControlDeck.hpp
+    docks/TempestCommandMatrix.cpp
+    docks/TempestCommandMatrix.hpp
 )

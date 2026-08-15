@@ -143,6 +143,19 @@ TempestControlDeck::~TempestControlDeck()
 	}
 }
 
+void TempestControlDeck::ActivateMode(const QString &modeId, bool beginCountdown)
+{
+	if (!overlayMode)
+		return;
+	const int index = overlayMode->findData(modeId);
+	if (index < 0)
+		return;
+	overlayMode->setCurrentIndex(index);
+	if (beginCountdown)
+		StartCountdown();
+	raise();
+}
+
 void TempestControlDeck::BuildInterface()
 {
 	QWidget *body = new QWidget(this);

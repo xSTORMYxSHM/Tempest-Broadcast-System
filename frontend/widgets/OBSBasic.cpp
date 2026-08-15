@@ -25,6 +25,7 @@
 #include "OBSBasicStats.hpp"
 #include "plugin-manager/PluginManager.hpp"
 #include <docks/TempestControlDeck.hpp>
+#include <docks/TempestCommandMatrix.hpp>
 #include "TempestMainframeBar.hpp"
 
 #include <obs-module.h>
@@ -371,6 +372,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 
 	tempestControlDeck = new TempestControlDeck(this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
+	tempestCommandMatrix = new TempestCommandMatrix(this, tempestControlDeck, this);
+	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
+	tempestCommandMatrix->setVisible(false);
 
 	startingDockLayout = saveState();
 
@@ -543,6 +547,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(controlsDock);
 	SETUP_DOCK(statsDock);
 	SETUP_DOCK(tempestControlDeck);
+	SETUP_DOCK(tempestCommandMatrix);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -1257,6 +1262,14 @@ void OBSBasic::OBSInit()
 		config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestEngineeringDockState");
 	if (engineeringDockState && *engineeringDockState)
 		tempestEngineeringDockState = QByteArray::fromBase64(QByteArray(engineeringDockState));
+	const int commandLayoutVersion =
+		config_get_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion");
+	if (commandLayoutVersion < 2) {
+		tempestCommandDockState.clear();
+		tempestEngineeringDockState.clear();
+		on_resetDocks_triggered(true);
+		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 2);
+	}
 	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
 	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;
 	SetTempestWorkspace(commandWorkspace, true);

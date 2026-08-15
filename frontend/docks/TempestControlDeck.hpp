@@ -24,6 +24,7 @@ class TempestControlDeck : public OBSDock {
 public:
 	explicit TempestControlDeck(QWidget *parent = nullptr);
 	~TempestControlDeck() override;
+	void ActivateMode(const QString &modeId, bool beginCountdown = false);
 
 private slots:
 	void ChangeOverlayMode(int index);

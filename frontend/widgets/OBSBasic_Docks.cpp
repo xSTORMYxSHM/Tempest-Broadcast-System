@@ -20,6 +20,7 @@
 #include "OBSBasic.hpp"
 
 #include <docks/TempestControlDeck.hpp>
+#include <docks/TempestCommandMatrix.hpp>
 #include "TempestMainframeBar.hpp"
 
 #include <qt-wrappers.hpp>
@@ -54,14 +55,15 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	ui->sourcesDock->setFloating(false);
 	ui->mixerDock->setFloating(false);
 	tempestControlDeck->setFloating(false);
+	tempestCommandMatrix->setFloating(false);
 
-	addDockWidget(Qt::LeftDockWidgetArea, ui->scenesDock);
-	splitDockWidget(ui->scenesDock, ui->sourcesDock, Qt::Vertical);
+	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
 	addDockWidget(Qt::BottomDockWidgetArea, ui->mixerDock);
 
-	ui->scenesDock->setVisible(true);
-	ui->sourcesDock->setVisible(true);
+	tempestCommandMatrix->setVisible(true);
+	ui->scenesDock->setVisible(false);
+	ui->sourcesDock->setVisible(false);
 	ui->mixerDock->setVisible(true);
 	tempestControlDeck->setVisible(true);
 	ui->transitionsDock->setVisible(false);
@@ -71,7 +73,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	const int leftWidth = std::clamp(width() * 15 / 100, 260, 320);
 	const int commandWidth = std::clamp(width() * 20 / 100, 350, 430);
 	const int mixerHeight = std::clamp(height() * 24 / 100, 210, 280);
-	resizeDocks({ui->scenesDock, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
+	resizeDocks({tempestCommandMatrix, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
 	resizeDocks({ui->mixerDock}, {mixerHeight}, Qt::Vertical);
 }
 
@@ -170,6 +172,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	ui->transitionsDock->setVisible(true);
 	controlsDock->setVisible(true);
 	tempestControlDeck->setVisible(true);
+	tempestCommandMatrix->setVisible(false);
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
 
@@ -201,6 +204,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	controlsDock->setFeatures(mainFeatures);
 	statsDock->setFeatures(features);
 	tempestControlDeck->setFeatures(features);
+	tempestCommandMatrix->setFeatures(features);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--)
 		extraDocks[i]->setFeatures(features);
