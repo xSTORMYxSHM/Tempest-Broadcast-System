@@ -2,6 +2,7 @@
 
 #include "TempestControlDeck.hpp"
 #include "TempestMediaBay.hpp"
+#include "TempestSequenceDirector.hpp"
 
 #include <OBSApp.hpp>
 #ifdef TEMPEST_WEBSOCKET_AVAILABLE
@@ -117,8 +118,22 @@ TempestCommandMatrix::~TempestCommandMatrix()
 							"RouteScene");
 		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
 							"SetOverlayState");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"RunSequence");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"ControlSequence");
 	}
 #endif
+}
+
+void TempestCommandMatrix::SetSequenceDirector(TempestSequenceDirector *director)
+{
+	sequenceDirector = director;
+}
+
+void TempestCommandMatrix::RunProtocol(const QString &protocolId)
+{
+	ExecuteProtocol(protocolId.toLower());
 }
 
 void TempestCommandMatrix::RegisterHotkeys()
@@ -195,7 +210,12 @@ void TempestCommandMatrix::RegisterExternalControls()
 	const bool sceneReady = obs_websocket_vendor_register_request(vendor, "RouteScene", WebSocketRouteScene, this);
 	const bool overlayReady =
 		obs_websocket_vendor_register_request(vendor, "SetOverlayState", WebSocketSetOverlayState, this);
-	webSocketReady = protocolReady && sceneReady && overlayReady;
+	const bool sequenceReady = sequenceDirector && obs_websocket_vendor_register_request(
+							       vendor, "RunSequence", WebSocketRunSequence, this);
+	const bool sequenceControlReady =
+		sequenceDirector &&
+		obs_websocket_vendor_register_request(vendor, "ControlSequence", WebSocketControlSequence, this);
+	webSocketReady = protocolReady && sceneReady && overlayReady && sequenceReady && sequenceControlReady;
 #endif
 	SetRouterState();
 }
@@ -269,6 +289,47 @@ void TempestCommandMatrix::WebSocketSetOverlayState(obs_data_t *request, obs_dat
 		},
 		Qt::QueuedConnection);
 	SetRouterResponse(response, true, "overlay state queued");
+}
+
+void TempestCommandMatrix::WebSocketRunSequence(obs_data_t *request, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	const QString sequenceId = QString::fromUtf8(obs_data_get_string(request, "sequence")).toLower();
+	if (!IsProtocolId(sequenceId)) {
+		SetRouterResponse(response, false, "sequence must be starting, live, brb, or ending");
+		return;
+	}
+	QPointer<TempestSequenceDirector> guarded(matrix->sequenceDirector);
+	QMetaObject::invokeMethod(
+		matrix,
+		[guarded, sequenceId]() {
+			if (guarded)
+				guarded->RunSequence(sequenceId);
+		},
+		Qt::QueuedConnection);
+	SetRouterResponse(response, true, "sequence command queued");
+}
+
+void TempestCommandMatrix::WebSocketControlSequence(obs_data_t *request, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	const QString action = QString::fromUtf8(obs_data_get_string(request, "action")).toLower();
+	static const QStringList actions = {QStringLiteral("hold"),       QStringLiteral("resume"),
+					    QStringLiteral("togglehold"), QStringLiteral("next"),
+					    QStringLiteral("restart"),    QStringLiteral("stop")};
+	if (!actions.contains(action)) {
+		SetRouterResponse(response, false, "action must be hold, resume, toggleHold, next, restart, or stop");
+		return;
+	}
+	QPointer<TempestSequenceDirector> guarded(matrix->sequenceDirector);
+	QMetaObject::invokeMethod(
+		matrix,
+		[guarded, action]() {
+			if (guarded)
+				guarded->ControlSequence(action);
+		},
+		Qt::QueuedConnection);
+	SetRouterResponse(response, true, "sequence control queued");
 }
 
 void TempestCommandMatrix::SetRouterState()

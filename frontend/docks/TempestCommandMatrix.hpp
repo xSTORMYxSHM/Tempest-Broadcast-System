@@ -18,6 +18,7 @@ class QPushButton;
 class QTimer;
 class OBSBasic;
 class TempestControlDeck;
+class TempestSequenceDirector;
 
 class TempestCommandMatrix : public OBSDock {
 	Q_OBJECT
@@ -28,6 +29,8 @@ public:
 	void RegisterHotkeys();
 	void UnregisterHotkeys();
 	void RegisterExternalControls();
+	void SetSequenceDirector(TempestSequenceDirector *director);
+	void RunProtocol(const QString &protocolId);
 
 private slots:
 	void RefreshScenes();
@@ -75,6 +78,8 @@ private:
 	static void WebSocketRunProtocol(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketRouteScene(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketSetOverlayState(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketRunSequence(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketControlSequence(obs_data_t *request, obs_data_t *response, void *data);
 
 	void BuildInterface();
 	QVector<SceneInfo> EnumerateScenes() const;
@@ -105,6 +110,7 @@ private:
 
 	QPointer<OBSBasic> main;
 	QPointer<TempestControlDeck> controlDeck;
+	QPointer<TempestSequenceDirector> sequenceDirector;
 	QPointer<QGridLayout> sceneGrid;
 	QPointer<QLabel> currentSceneLabel;
 	QPointer<QLabel> statusLabel;

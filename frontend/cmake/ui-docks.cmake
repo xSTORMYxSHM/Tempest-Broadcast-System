@@ -9,4 +9,6 @@ target_sources(
     docks/TempestCommandMatrix.hpp
     docks/TempestMediaBay.cpp
     docks/TempestMediaBay.hpp
+    docks/TempestSequenceDirector.cpp
+    docks/TempestSequenceDirector.hpp
 )

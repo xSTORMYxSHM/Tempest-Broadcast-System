@@ -20,6 +20,7 @@
 #include "OBSBasic.hpp"
 
 #include <docks/TempestCommandMatrix.hpp>
+#include <docks/TempestSequenceDirector.hpp>
 #include <widgets/OBSBasicStats.hpp>
 
 void OBSBasic::InitHotkeys()
@@ -285,12 +286,16 @@ void OBSBasic::CreateHotkeys()
 		tempestCommandMatrix->RegisterHotkeys();
 		tempestCommandMatrix->RegisterExternalControls();
 	}
+	if (tempestSequenceDirector)
+		tempestSequenceDirector->RegisterHotkeys();
 }
 
 void OBSBasic::ClearHotkeys()
 {
 	if (tempestCommandMatrix)
 		tempestCommandMatrix->UnregisterHotkeys();
+	if (tempestSequenceDirector)
+		tempestSequenceDirector->UnregisterHotkeys();
 	obs_hotkey_pair_unregister(streamingHotkeys);
 	obs_hotkey_pair_unregister(recordingHotkeys);
 	obs_hotkey_pair_unregister(pauseHotkeys);

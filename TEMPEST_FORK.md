@@ -124,6 +124,21 @@ The bay provides:
 
 This makes a fractal visualizer, avatar sequence, or intro playlist controllable from the same Tempest workstation surface used to route the broadcast.
 
+## Mainframe Sequence Director
+
+The **Mainframe Sequence Director** shares the right-side Command workspace bay with the Tempest Control Deck. It stores independent editable cue stacks for Starting, Live, BRB, and Ending.
+
+Each timestamped cue can independently:
+
+- control a Media Source, VLC Video Source, or Image Slide Show;
+- show, hide, or toggle a named video source in the active scene, including grouped scene items;
+- write transmission, status, and lore lines to the matching Control Deck overlay; and
+- hand off into any Starting, Live, BRB, or Ending protocol after its other actions complete.
+
+The transport provides run/restart, hold/resume, next-cue, and stop controls with a live sequence clock and progress display. Cue stacks are saved locally in the isolated TBS configuration. The initial Starting stack contains three safe lore cues based on the First Storm, archive recovery, and the Mainframe's preservation question; it contains no media, visibility, or protocol handoff actions until the operator assigns them.
+
+The Director registers native hotkeys for running each of the four stacks plus hold/resume, next cue, restart, and stop. These can be assigned to Stream Deck buttons under **Settings > Hotkeys** by filtering for `Tempest Mainframe`.
+
 Protocol and scene switching uses the native OBS scene and transition system. It requires no WebSocket bridge, browser control server, macro plugin, or external automation utility.
 
 ### Protocol action automation
@@ -159,6 +174,8 @@ Send an OBS WebSocket `CallVendorRequest` with one of these vendor request types
 - `RunProtocol` — `{ "protocol": "starting|live|brb|ending" }`
 - `RouteScene` — `{ "sceneUuid": "..." }` or `{ "sceneName": "..." }`
 - `SetOverlayState` — `{ "mode": "starting|live|brb|ending", "transmission": "...", "status": "...", "messages": "line one\nline two", "startCountdown": false }`
+- `RunSequence` — `{ "sequence": "starting|live|brb|ending" }`
+- `ControlSequence` — `{ "action": "hold|resume|toggleHold|next|restart|stop" }`
 
 For example, the request data passed to `CallVendorRequest` is:
 

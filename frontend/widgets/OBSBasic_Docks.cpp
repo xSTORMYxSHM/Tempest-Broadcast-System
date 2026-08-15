@@ -22,6 +22,7 @@
 #include <docks/TempestControlDeck.hpp>
 #include <docks/TempestCommandMatrix.hpp>
 #include <docks/TempestMediaBay.hpp>
+#include <docks/TempestSequenceDirector.hpp>
 #include "TempestMainframeBar.hpp"
 
 #include <qt-wrappers.hpp>
@@ -58,9 +59,11 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestControlDeck->setFloating(false);
 	tempestCommandMatrix->setFloating(false);
 	tempestMediaBay->setFloating(false);
+	tempestSequenceDirector->setFloating(false);
 
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
+	tabifyDockWidget(tempestControlDeck, tempestSequenceDirector);
 	addDockWidget(Qt::BottomDockWidgetArea, ui->mixerDock);
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
 
@@ -70,6 +73,8 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	ui->mixerDock->setVisible(true);
 	tempestControlDeck->setVisible(true);
 	tempestMediaBay->setVisible(true);
+	tempestSequenceDirector->setVisible(true);
+	tempestControlDeck->raise();
 	ui->transitionsDock->setVisible(false);
 	controlsDock->setVisible(false);
 	statsDock->setVisible(false);
@@ -177,6 +182,8 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	ui->transitionsDock->setVisible(true);
 	controlsDock->setVisible(true);
 	tempestControlDeck->setVisible(true);
+	tempestSequenceDirector->setVisible(true);
+	tempestControlDeck->raise();
 	tempestCommandMatrix->setVisible(false);
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
@@ -213,6 +220,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	tempestControlDeck->setFeatures(features);
 	tempestCommandMatrix->setFeatures(features);
 	tempestMediaBay->setFeatures(features);
+	tempestSequenceDirector->setFeatures(features);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--)
 		extraDocks[i]->setFeatures(features);
