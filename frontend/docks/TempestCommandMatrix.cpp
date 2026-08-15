@@ -44,7 +44,7 @@
 #include <QStringList>
 #include <QTabWidget>
 #include <QTimer>
-#include <QToolBar>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -437,9 +437,11 @@ void TempestCommandMatrix::BuildInterface()
 		QCheckBox { color: #748fa4; spacing: 7px; }
 		QScrollArea { border: none; background: transparent; }
 		QListView#matrixSourceTree { border: 1px solid #153b52; background: #07131e; color: #bdf6ff; }
-		QToolBar#matrixSourceToolbar { border: none; background: #07131e; spacing: 3px; }
-		QToolBar#matrixSourceToolbar QToolButton { min-width: 28px; min-height: 28px; border: 1px solid #153b52; background: #0d2230; }
-		QToolBar#matrixSourceToolbar QToolButton:hover { border-color: #45d9ff; background: #0c456b; }
+		QWidget#matrixSourceToolbar { border: none; background: #07131e; }
+		QWidget#matrixSourceToolbar QToolButton { min-width: 0; min-height: 30px; border: 1px solid #153b52; border-radius: 3px; background: #0d2230; color: #bdf6ff; }
+		QWidget#matrixSourceToolbar QToolButton:hover { border-color: #45d9ff; background: #0c456b; }
+		QWidget#matrixSourceToolbar QToolButton:pressed { border-color: #45d9ff; background: #073c5f; }
+		QWidget#matrixSourceToolbar QToolButton:disabled { color: #40596b; border-color: #102c3d; background: #091722; }
 		QWidget#matrixSourceInspector { border: 1px solid #153b52; background: #06101a; }
 		QWidget#matrixSourceInspector QLabel { border: none; background: transparent; }
 		QLabel#matrixInspectorSource { color: #bdf6ff; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
@@ -554,22 +556,31 @@ void TempestCommandMatrix::BuildInterface()
 		[this](const QItemSelection &, const QItemSelection &) { UpdateSourceInspector(); });
 	sourcePaneLayout->addWidget(sourceTree, 1);
 
-	auto *sourceToolbar = new QToolBar(sourcePane);
+	auto *sourceToolbar = new QWidget(sourcePane);
 	sourceToolbar->setObjectName(QStringLiteral("matrixSourceToolbar"));
 	sourceToolbar->setAccessibleName(QStringLiteral("Transmission Matrix source controls"));
-	sourceToolbar->setIconSize(QSize(16, 16));
-	sourceToolbar->setFloatable(false);
-	auto addSourceAction = [this, sourceToolbar](const char *objectName) {
-		if (QAction *action = main ? main->findChild<QAction *>(QString::fromUtf8(objectName)) : nullptr)
-			sourceToolbar->addAction(action);
+	auto *sourceToolbarLayout = new QHBoxLayout(sourceToolbar);
+	sourceToolbarLayout->setContentsMargins(0, 0, 0, 0);
+	sourceToolbarLayout->setSpacing(4);
+	auto addSourceAction = [this, sourceToolbar, sourceToolbarLayout](const char *objectName,
+									  const QString &accessibleName) {
+		QAction *action = main ? main->findChild<QAction *>(QString::fromUtf8(objectName)) : nullptr;
+		if (!action)
+			return;
+		auto *button = new QToolButton(sourceToolbar);
+		button->setDefaultAction(action);
+		button->setAccessibleName(accessibleName);
+		button->setIconSize(QSize(16, 16));
+		button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+		button->setAutoRaise(false);
+		button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		sourceToolbarLayout->addWidget(button, 1);
 	};
-	addSourceAction("actionAddSource");
-	addSourceAction("actionRemoveSource");
-	sourceToolbar->addSeparator();
-	addSourceAction("actionSourceProperties");
-	sourceToolbar->addSeparator();
-	addSourceAction("actionSourceUp");
-	addSourceAction("actionSourceDown");
+	addSourceAction("actionAddSource", QStringLiteral("Add source"));
+	addSourceAction("actionRemoveSource", QStringLiteral("Remove selected source"));
+	addSourceAction("actionSourceProperties", QStringLiteral("Open selected source properties"));
+	addSourceAction("actionSourceUp", QStringLiteral("Move selected source up"));
+	addSourceAction("actionSourceDown", QStringLiteral("Move selected source down"));
 	sourcePaneLayout->addWidget(sourceToolbar);
 
 	sourceInspectorPanel = new QWidget(sourcePane);
