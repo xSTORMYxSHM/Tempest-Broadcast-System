@@ -9,12 +9,22 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
+#include <QGroupBox>
 #include <QLabel>
+#include <QLineEdit>
+#include <QProcess>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSpinBox>
+#include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -30,6 +40,21 @@ struct OverlayVisibilityContext {
 QString ConfigKey(const QString &protocolId)
 {
 	return QStringLiteral("Protocol_%1_SceneUuid").arg(protocolId);
+}
+
+QString ActionConfigKey(const QString &protocolId, const char *field)
+{
+	return QStringLiteral("Action_%1_%2").arg(protocolId, QString::fromUtf8(field));
+}
+
+void SetComboData(QComboBox *combo, const QString &value, const QString &unavailableLabel = {})
+{
+	int index = combo->findData(value);
+	if (index < 0 && !value.isEmpty()) {
+		combo->addItem(unavailableLabel.isEmpty() ? QStringLiteral("Unavailable source") : unavailableLabel, value);
+		index = combo->count() - 1;
+	}
+	combo->setCurrentIndex(std::max(index, 0));
 }
 } // namespace
 
@@ -50,6 +75,7 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 	isolateOverlay->setChecked(!config_has_user_value(config, ConfigSection, "IsolateOverlay") ||
 				   config_get_bool(config, ConfigSection, "IsolateOverlay"));
 	startCountdown->setChecked(config_get_bool(config, ConfigSection, "StartCountdown"));
+	LoadActionConfigs();
 
 	connect(isolateOverlay, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
 	connect(startCountdown, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
@@ -156,6 +182,11 @@ void TempestCommandMatrix::BuildInterface()
 	layout->addWidget(isolateOverlay);
 	layout->addWidget(startCountdown);
 
+	auto *configureActions = new QPushButton(QStringLiteral("CONFIGURE PROTOCOL ACTIONS"), root);
+	configureActions->setAccessibleName(QStringLiteral("Configure protocol actions"));
+	connect(configureActions, &QPushButton::clicked, this, &TempestCommandMatrix::OpenActionEditor);
+	layout->addWidget(configureActions);
+
 	auto *sceneLabel = new QLabel(QStringLiteral("DIRECT SCENE ROUTING"), root);
 	sceneLabel->setObjectName(QStringLiteral("matrixSection"));
 	layout->addWidget(sceneLabel);
@@ -188,6 +219,16 @@ bool TempestCommandMatrix::EnumScene(void *data, obs_source_t *source)
 	const char *name = obs_source_get_name(source);
 	if (uuid && name)
 		scenes->push_back({QString::fromUtf8(uuid), QString::fromUtf8(name)});
+	return true;
+}
+
+bool TempestCommandMatrix::EnumSource(void *data, obs_source_t *source)
+{
+	auto *sources = static_cast<QVector<SourceInfo> *>(data);
+	const char *uuid = obs_source_get_uuid(source);
+	const char *name = obs_source_get_name(source);
+	if (uuid && name)
+		sources->push_back({QString::fromUtf8(uuid), QString::fromUtf8(name)});
 	return true;
 }
 
@@ -318,17 +359,95 @@ void TempestCommandMatrix::ExecuteProtocol(const QString &protocolId)
 		return;
 	}
 
+	const ProtocolActionConfig config = actionConfigs.value(protocolId);
+	const quint64 revision = ++executionRevision;
+
+	if (!config.transitionUuid.isEmpty()) {
+		OBSSourceAutoRelease transition = obs_get_source_by_uuid(config.transitionUuid.toUtf8().constData());
+		if (transition && obs_source_get_type(transition) == OBS_SOURCE_TYPE_TRANSITION) {
+			main->SetTransitionDuration(config.transitionDuration);
+			main->SetCurrentTransition(config.transitionUuid);
+		}
+	}
+	ApplyAudioAction(config.audioSourceAUuid, config.audioActionA);
+	ApplyAudioAction(config.audioSourceBUuid, config.audioActionB);
+	ApplyRecordingAction(config.recordingAction);
+	const bool launchFailed = config.launchEnabled && !LaunchConfiguredProgram(config);
+
+	if (config.delayMs > 0) {
+		SetStatus(QStringLiteral("%1 ARMED // ROUTING IN %2 MS%3")
+				  .arg(protocol->label)
+				  .arg(config.delayMs)
+				  .arg(launchFailed ? QStringLiteral(" // PROGRAM FAILED") : QString()));
+		QTimer::singleShot(config.delayMs, this, [this, protocolId, uuid, revision, launchFailed]() {
+			CompleteProtocolRoute(protocolId, uuid, revision, launchFailed);
+		});
+		return;
+	}
+	CompleteProtocolRoute(protocolId, uuid, revision, launchFailed);
+}
+
+void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, const QString &sceneUuid,
+						 quint64 revision, bool launchFailed)
+{
+	if (revision != executionRevision)
+		return;
+	ProtocolWidgets *protocol = FindProtocol(protocolId);
+	if (!protocol)
+		return;
+
+	OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(sceneUuid.toUtf8().constData());
+	if (!sceneSource || obs_source_get_type(sceneSource) != OBS_SOURCE_TYPE_SCENE) {
+		SetStatus(QStringLiteral("The assigned %1 scene became unavailable.").arg(protocol->label), true);
+		RefreshScenes();
+		return;
+	}
 	if (isolateOverlay->isChecked())
 		ApplyProtocolOverlay(sceneSource.Get(), protocol->sourceName);
 	controlDeck->ActivateMode(protocol->id,
 				  protocol->id == QStringLiteral("starting") && startCountdown->isChecked());
 	main->SetCurrentScene(OBSSource(sceneSource.Get()));
-	SetStatus(QStringLiteral("%1 PROTOCOL // %2").arg(protocol->label, obs_source_get_name(sceneSource)));
+	SetStatus(QStringLiteral("%1 PROTOCOL // %2%3")
+			  .arg(protocol->label, obs_source_get_name(sceneSource),
+			       launchFailed ? QStringLiteral(" // PROGRAM FAILED") : QString()),
+		  launchFailed);
 	UpdateActiveScene();
+}
+
+void TempestCommandMatrix::ApplyAudioAction(const QString &sourceUuid, const QString &action)
+{
+	if (sourceUuid.isEmpty() || action == QStringLiteral("keep"))
+		return;
+	if (action != QStringLiteral("mute") && action != QStringLiteral("unmute"))
+		return;
+	OBSSourceAutoRelease source = obs_get_source_by_uuid(sourceUuid.toUtf8().constData());
+	if (!source || !(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO))
+		return;
+	obs_source_set_muted(source, action == QStringLiteral("mute"));
+}
+
+void TempestCommandMatrix::ApplyRecordingAction(const QString &action)
+{
+	if (action == QStringLiteral("start") && !main->RecordingActive())
+		main->StartRecording();
+	else if (action == QStringLiteral("stop") && main->RecordingActive())
+		main->StopRecording();
+}
+
+bool TempestCommandMatrix::LaunchConfiguredProgram(const ProtocolActionConfig &config)
+{
+	if (!config.launchEnabled)
+		return true;
+	const QFileInfo program(config.programPath);
+	if (!program.isFile())
+		return false;
+	return QProcess::startDetached(program.absoluteFilePath(), QProcess::splitCommand(config.programArguments),
+				       program.absolutePath());
 }
 
 void TempestCommandMatrix::SwitchScene(const QString &uuid, const QString &name)
 {
+	++executionRevision;
 	OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(uuid.toUtf8().constData());
 	if (!sceneSource || obs_source_get_type(sceneSource) != OBS_SOURCE_TYPE_SCENE) {
 		SetStatus(QStringLiteral("Scene route unavailable: %1").arg(name), true);
@@ -338,6 +457,278 @@ void TempestCommandMatrix::SwitchScene(const QString &uuid, const QString &name)
 	main->SetCurrentScene(OBSSource(sceneSource.Get()));
 	SetStatus(QStringLiteral("DIRECT ROUTE // %1").arg(name));
 	UpdateActiveScene();
+}
+
+QVector<TempestCommandMatrix::SourceInfo> TempestCommandMatrix::EnumerateAudioSources() const
+{
+	QVector<SourceInfo> sources;
+	obs_enum_sources(
+		[](void *data, obs_source_t *source) {
+			if (!(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO))
+				return true;
+			return EnumSource(data, source);
+		},
+		&sources);
+	std::sort(sources.begin(), sources.end(), [](const SourceInfo &a, const SourceInfo &b) {
+		return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+	});
+	return sources;
+}
+
+QVector<TempestCommandMatrix::SourceInfo> TempestCommandMatrix::EnumerateTransitions() const
+{
+	QVector<SourceInfo> sources;
+	obs_enum_sources(
+		[](void *data, obs_source_t *source) {
+			if (obs_source_get_type(source) != OBS_SOURCE_TYPE_TRANSITION)
+				return true;
+			return EnumSource(data, source);
+		},
+		&sources);
+	return sources;
+}
+
+void TempestCommandMatrix::LoadActionConfigs()
+{
+	config_t *config = App()->GetUserConfig();
+	for (const ProtocolWidgets &protocol : protocols) {
+		ProtocolActionConfig actions;
+		auto stringValue = [&](const char *field) {
+			const QByteArray key = ActionConfigKey(protocol.id, field).toUtf8();
+			return QString::fromUtf8(config_get_string(config, ConfigSection, key.constData()));
+		};
+		auto intValue = [&](const char *field, int fallback) {
+			const QByteArray key = ActionConfigKey(protocol.id, field).toUtf8();
+			return config_has_user_value(config, ConfigSection, key.constData())
+				       ? static_cast<int>(config_get_int(config, ConfigSection, key.constData()))
+				       : fallback;
+		};
+		actions.delayMs = intValue("DelayMs", 0);
+		actions.transitionUuid = stringValue("TransitionUuid");
+		actions.transitionDuration = intValue("TransitionDuration", 300);
+		actions.audioSourceAUuid = stringValue("AudioSourceAUuid");
+		actions.audioActionA = stringValue("AudioActionA");
+		if (actions.audioActionA.isEmpty())
+			actions.audioActionA = QStringLiteral("keep");
+		actions.audioSourceBUuid = stringValue("AudioSourceBUuid");
+		actions.audioActionB = stringValue("AudioActionB");
+		if (actions.audioActionB.isEmpty())
+			actions.audioActionB = QStringLiteral("keep");
+		actions.recordingAction = stringValue("RecordingAction");
+		if (actions.recordingAction.isEmpty())
+			actions.recordingAction = QStringLiteral("keep");
+		const QByteArray enabledKey = ActionConfigKey(protocol.id, "LaunchEnabled").toUtf8();
+		actions.launchEnabled = config_get_bool(config, ConfigSection, enabledKey.constData());
+		actions.programPath = stringValue("ProgramPath");
+		actions.programArguments = stringValue("ProgramArguments");
+		actionConfigs.insert(protocol.id, actions);
+	}
+}
+
+void TempestCommandMatrix::SaveActionConfigs()
+{
+	config_t *config = App()->GetUserConfig();
+	for (const ProtocolWidgets &protocol : protocols) {
+		const ProtocolActionConfig actions = actionConfigs.value(protocol.id);
+		auto setString = [&](const char *field, const QString &value) {
+			const QByteArray key = ActionConfigKey(protocol.id, field).toUtf8();
+			config_set_string(config, ConfigSection, key.constData(), value.toUtf8().constData());
+		};
+		auto setInt = [&](const char *field, int value) {
+			const QByteArray key = ActionConfigKey(protocol.id, field).toUtf8();
+			config_set_int(config, ConfigSection, key.constData(), value);
+		};
+		setInt("DelayMs", actions.delayMs);
+		setString("TransitionUuid", actions.transitionUuid);
+		setInt("TransitionDuration", actions.transitionDuration);
+		setString("AudioSourceAUuid", actions.audioSourceAUuid);
+		setString("AudioActionA", actions.audioActionA);
+		setString("AudioSourceBUuid", actions.audioSourceBUuid);
+		setString("AudioActionB", actions.audioActionB);
+		setString("RecordingAction", actions.recordingAction);
+		const QByteArray enabledKey = ActionConfigKey(protocol.id, "LaunchEnabled").toUtf8();
+		config_set_bool(config, ConfigSection, enabledKey.constData(), actions.launchEnabled);
+		setString("ProgramPath", actions.programPath);
+		setString("ProgramArguments", actions.programArguments);
+	}
+	config_save_safe(config, "tmp", nullptr);
+}
+
+void TempestCommandMatrix::OpenActionEditor()
+{
+	struct EditorFields {
+		QString protocolId;
+		QSpinBox *delay = nullptr;
+		QComboBox *transition = nullptr;
+		QSpinBox *transitionDuration = nullptr;
+		QComboBox *audioSourceA = nullptr;
+		QComboBox *audioActionA = nullptr;
+		QComboBox *audioSourceB = nullptr;
+		QComboBox *audioActionB = nullptr;
+		QComboBox *recordingAction = nullptr;
+		QCheckBox *launchEnabled = nullptr;
+		QLineEdit *programPath = nullptr;
+		QLineEdit *programArguments = nullptr;
+	};
+
+	const QVector<SourceInfo> audioSources = EnumerateAudioSources();
+	const QVector<SourceInfo> transitions = EnumerateTransitions();
+	QDialog dialog(this);
+	dialog.setObjectName(QStringLiteral("tempestProtocolActionEditor"));
+	dialog.setWindowTitle(QStringLiteral("Tempest Protocol Actions"));
+	dialog.resize(720, 760);
+	dialog.setStyleSheet(QStringLiteral(R"(
+		QDialog { background: #07131e; color: #bdf6ff; }
+		QTabWidget::pane { border: 1px solid #1f506d; }
+		QTabBar::tab { background: #0d2230; color: #748fa4; padding: 9px 18px; border: 1px solid #1f506d; }
+		QTabBar::tab:selected { color: #bdf6ff; background: #073c5f; border-color: #45d9ff; }
+		QGroupBox { border: 1px solid #1f506d; margin-top: 12px; padding-top: 10px; color: #45d9ff; font-weight: 700; }
+		QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
+		QLabel, QCheckBox { color: #9eb7c8; }
+		QComboBox, QSpinBox, QLineEdit { min-height: 28px; background: #06101a; border: 1px solid #1f506d; color: #bdf6ff; padding: 0 6px; }
+		QPushButton { min-height: 30px; border: 1px solid #1f506d; background: #0d2230; color: #bdf6ff; padding: 0 12px; font-weight: 700; }
+		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
+	)"));
+
+	auto *dialogLayout = new QVBoxLayout(&dialog);
+	auto *intro = new QLabel(
+		QStringLiteral("Each protocol can prepare the workstation, then route its assigned scene. "
+			       "KEEP leaves the current OBS state untouched."),
+		&dialog);
+	intro->setWordWrap(true);
+	dialogLayout->addWidget(intro);
+	auto *tabs = new QTabWidget(&dialog);
+	tabs->setObjectName(QStringLiteral("protocolActionTabs"));
+	dialogLayout->addWidget(tabs, 1);
+
+	QVector<EditorFields> editors;
+	for (const ProtocolWidgets &protocol : protocols) {
+		const ProtocolActionConfig actions = actionConfigs.value(protocol.id);
+		EditorFields fields;
+		fields.protocolId = protocol.id;
+		auto *page = new QWidget(tabs);
+		auto *pageLayout = new QVBoxLayout(page);
+
+		auto *routeGroup = new QGroupBox(QStringLiteral("ROUTING SEQUENCE"), page);
+		auto *routeForm = new QFormLayout(routeGroup);
+		fields.delay = new QSpinBox(routeGroup);
+		fields.delay->setObjectName(protocol.id + QStringLiteral("DelayMs"));
+		fields.delay->setRange(0, 10000);
+		fields.delay->setSingleStep(100);
+		fields.delay->setSuffix(QStringLiteral(" ms"));
+		fields.delay->setValue(actions.delayMs);
+		routeForm->addRow(QStringLiteral("Delay before scene route"), fields.delay);
+
+		fields.transition = new QComboBox(routeGroup);
+		fields.transition->setObjectName(protocol.id + QStringLiteral("Transition"));
+		fields.transition->addItem(QStringLiteral("Keep current transition"), QString());
+		for (const SourceInfo &transition : transitions)
+			fields.transition->addItem(transition.name, transition.uuid);
+		SetComboData(fields.transition, actions.transitionUuid, QStringLiteral("Unavailable transition"));
+		routeForm->addRow(QStringLiteral("Transition"), fields.transition);
+
+		fields.transitionDuration = new QSpinBox(routeGroup);
+		fields.transitionDuration->setRange(50, 20000);
+		fields.transitionDuration->setSingleStep(50);
+		fields.transitionDuration->setSuffix(QStringLiteral(" ms"));
+		fields.transitionDuration->setValue(actions.transitionDuration);
+		routeForm->addRow(QStringLiteral("Transition duration"), fields.transitionDuration);
+		pageLayout->addWidget(routeGroup);
+
+		auto addAudioSourceItems = [&](QComboBox *combo) {
+			combo->addItem(QStringLiteral("No source selected"), QString());
+			for (const SourceInfo &source : audioSources)
+				combo->addItem(source.name, source.uuid);
+		};
+		auto addAudioActionItems = [](QComboBox *combo) {
+			combo->addItem(QStringLiteral("KEEP"), QStringLiteral("keep"));
+			combo->addItem(QStringLiteral("MUTE"), QStringLiteral("mute"));
+			combo->addItem(QStringLiteral("UNMUTE"), QStringLiteral("unmute"));
+		};
+		auto *audioGroup = new QGroupBox(QStringLiteral("AUDIO SOURCE STATES"), page);
+		auto *audioGrid = new QGridLayout(audioGroup);
+		audioGrid->addWidget(new QLabel(QStringLiteral("Source"), audioGroup), 0, 0);
+		audioGrid->addWidget(new QLabel(QStringLiteral("Action"), audioGroup), 0, 1);
+		fields.audioSourceA = new QComboBox(audioGroup);
+		fields.audioActionA = new QComboBox(audioGroup);
+		fields.audioSourceB = new QComboBox(audioGroup);
+		fields.audioActionB = new QComboBox(audioGroup);
+		addAudioSourceItems(fields.audioSourceA);
+		addAudioSourceItems(fields.audioSourceB);
+		addAudioActionItems(fields.audioActionA);
+		addAudioActionItems(fields.audioActionB);
+		SetComboData(fields.audioSourceA, actions.audioSourceAUuid);
+		SetComboData(fields.audioSourceB, actions.audioSourceBUuid);
+		SetComboData(fields.audioActionA, actions.audioActionA);
+		SetComboData(fields.audioActionB, actions.audioActionB);
+		audioGrid->addWidget(fields.audioSourceA, 1, 0);
+		audioGrid->addWidget(fields.audioActionA, 1, 1);
+		audioGrid->addWidget(fields.audioSourceB, 2, 0);
+		audioGrid->addWidget(fields.audioActionB, 2, 1);
+		pageLayout->addWidget(audioGroup);
+
+		auto *outputGroup = new QGroupBox(QStringLiteral("RECORDING AND PROGRAM"), page);
+		auto *outputForm = new QFormLayout(outputGroup);
+		fields.recordingAction = new QComboBox(outputGroup);
+		fields.recordingAction->addItem(QStringLiteral("KEEP"), QStringLiteral("keep"));
+		fields.recordingAction->addItem(QStringLiteral("START RECORDING"), QStringLiteral("start"));
+		fields.recordingAction->addItem(QStringLiteral("STOP RECORDING"), QStringLiteral("stop"));
+		SetComboData(fields.recordingAction, actions.recordingAction);
+		outputForm->addRow(QStringLiteral("Recording"), fields.recordingAction);
+		fields.launchEnabled = new QCheckBox(QStringLiteral("Launch an external program"), outputGroup);
+		fields.launchEnabled->setChecked(actions.launchEnabled);
+		outputForm->addRow(QString(), fields.launchEnabled);
+
+		auto *programRow = new QWidget(outputGroup);
+		auto *programLayout = new QHBoxLayout(programRow);
+		programLayout->setContentsMargins(0, 0, 0, 0);
+		fields.programPath = new QLineEdit(actions.programPath, programRow);
+		fields.programPath->setPlaceholderText(QStringLiteral("C:\\Path\\To\\Program.exe"));
+		auto *browse = new QPushButton(QStringLiteral("BROWSE"), programRow);
+		programLayout->addWidget(fields.programPath, 1);
+		programLayout->addWidget(browse);
+		connect(browse, &QPushButton::clicked, &dialog, [&dialog, path = fields.programPath]() {
+			const QString selected = QFileDialog::getOpenFileName(
+				&dialog, QStringLiteral("Select program"), path->text(),
+				QStringLiteral("Programs (*.exe *.com);;All files (*.*)"));
+			if (!selected.isEmpty())
+				path->setText(selected);
+		});
+		outputForm->addRow(QStringLiteral("Program"), programRow);
+		fields.programArguments = new QLineEdit(actions.programArguments, outputGroup);
+		fields.programArguments->setPlaceholderText(QStringLiteral("Optional command-line arguments"));
+		outputForm->addRow(QStringLiteral("Arguments"), fields.programArguments);
+		pageLayout->addWidget(outputGroup);
+		pageLayout->addStretch(1);
+
+		tabs->addTab(page, protocol.label);
+		editors.push_back(fields);
+	}
+
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+	dialogLayout->addWidget(buttons);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+
+	for (const EditorFields &fields : editors) {
+		ProtocolActionConfig actions;
+		actions.delayMs = fields.delay->value();
+		actions.transitionUuid = fields.transition->currentData().toString();
+		actions.transitionDuration = fields.transitionDuration->value();
+		actions.audioSourceAUuid = fields.audioSourceA->currentData().toString();
+		actions.audioActionA = fields.audioActionA->currentData().toString();
+		actions.audioSourceBUuid = fields.audioSourceB->currentData().toString();
+		actions.audioActionB = fields.audioActionB->currentData().toString();
+		actions.recordingAction = fields.recordingAction->currentData().toString();
+		actions.launchEnabled = fields.launchEnabled->isChecked();
+		actions.programPath = fields.programPath->text().trimmed();
+		actions.programArguments = fields.programArguments->text();
+		actionConfigs.insert(fields.protocolId, actions);
+	}
+	SaveActionConfigs();
+	SetStatus(QStringLiteral("PROTOCOL ACTIONS SAVED // MATRIX READY"));
 }
 
 bool TempestCommandMatrix::SetOverlayVisibility(obs_scene_t *, obs_sceneitem_t *item, void *data)

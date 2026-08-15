@@ -111,3 +111,15 @@ The matrix provides:
 - current-scene highlighting and protocol status feedback.
 
 Protocol and scene switching uses the native OBS scene and transition system. It requires no WebSocket bridge, browser control server, macro plugin, or external automation utility.
+
+### Protocol action automation
+
+The matrix's **Configure Protocol Actions** editor stores an independent native action sequence for each Starting, Live, BRB, and Ending command. A protocol can:
+
+- wait up to ten seconds before routing its assigned scene;
+- select an OBS transition and duration;
+- mute, unmute, or preserve two chosen audio sources;
+- start, stop, or preserve local recording; and
+- optionally launch a chosen local executable with arguments.
+
+Actions default to **KEEP** or disabled, so adding the feature does not alter existing audio, recording, or application state. A direct scene route or newer protocol command cancels any older delayed route. Program launching uses Qt's detached process API directly and does not invoke a command shell.

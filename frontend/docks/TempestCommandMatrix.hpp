@@ -34,6 +34,25 @@ private:
 		QString name;
 	};
 
+	struct SourceInfo {
+		QString uuid;
+		QString name;
+	};
+
+	struct ProtocolActionConfig {
+		int delayMs = 0;
+		QString transitionUuid;
+		int transitionDuration = 300;
+		QString audioSourceAUuid;
+		QString audioActionA = QStringLiteral("keep");
+		QString audioSourceBUuid;
+		QString audioActionB = QStringLiteral("keep");
+		QString recordingAction = QStringLiteral("keep");
+		bool launchEnabled = false;
+		QString programPath;
+		QString programArguments;
+	};
+
 	struct ProtocolWidgets {
 		QString id;
 		QString label;
@@ -43,6 +62,7 @@ private:
 	};
 
 	static bool EnumScene(void *data, obs_source_t *source);
+	static bool EnumSource(void *data, obs_source_t *source);
 	static bool SetOverlayVisibility(obs_scene_t *scene, obs_sceneitem_t *item, void *data);
 
 	void BuildInterface();
@@ -50,6 +70,16 @@ private:
 	void RebuildSceneGrid(const QVector<SceneInfo> &scenes);
 	void RebuildAssignments(const QVector<SceneInfo> &scenes);
 	void ExecuteProtocol(const QString &protocolId);
+	void CompleteProtocolRoute(const QString &protocolId, const QString &sceneUuid, quint64 revision,
+				   bool launchFailed = false);
+	void ApplyAudioAction(const QString &sourceUuid, const QString &action);
+	void ApplyRecordingAction(const QString &action);
+	bool LaunchConfiguredProgram(const ProtocolActionConfig &config);
+	void OpenActionEditor();
+	void LoadActionConfigs();
+	void SaveActionConfigs();
+	QVector<SourceInfo> EnumerateAudioSources() const;
+	QVector<SourceInfo> EnumerateTransitions() const;
 	void SwitchScene(const QString &uuid, const QString &name);
 	void ApplyProtocolOverlay(obs_source_t *sceneSource, const QString &sourceName);
 	void UpdateActiveScene();
@@ -66,6 +96,8 @@ private:
 	QPointer<QTimer> refreshTimer;
 	QVector<ProtocolWidgets> protocols;
 	QHash<QString, QString> configuredSceneUuids;
+	QHash<QString, ProtocolActionConfig> actionConfigs;
 	QHash<QString, QPointer<QPushButton>> sceneButtons;
 	QString sceneFingerprint;
+	quint64 executionRevision = 0;
 };
