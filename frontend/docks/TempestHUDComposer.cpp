@@ -25,6 +25,7 @@
 #include <QSaveFile>
 #include <QSignalBlocker>
 #include <QSize>
+#include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -45,6 +46,39 @@ QSize ElementSize(const QString &type)
 	if (type == QStringLiteral("lore"))
 		return {760, 250};
 	return {720, 170};
+}
+
+QString CssContent(QString value)
+{
+	value.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+	value.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+	value.replace(QStringLiteral("\r"), QString());
+	value.replace(QStringLiteral("\n"), QStringLiteral("\\A "));
+	return value;
+}
+
+QString RemoteChatCss(const QString &browserUrl, const QString &primary, const QString &secondary,
+		      const QString &accent)
+{
+	const QUrl url(browserUrl);
+	const bool twitch = url.host().endsWith(QStringLiteral("twitch.tv"), Qt::CaseInsensitive);
+	QString css =
+		QStringLiteral(R"TEMPESTCSS(
+html,body{background:transparent!important;margin:0!important;overflow:hidden!important}
+body{box-sizing:border-box!important;border:1px solid %1!important;box-shadow:inset 0 0 22px color-mix(in srgb,%1 34%,transparent),0 0 12px color-mix(in srgb,%1 28%,transparent)!important;padding:76px 12px 34px!important}
+body:before{content:"%2\A %3";white-space:pre;box-sizing:border-box;position:fixed;z-index:2147483647;left:0;right:0;top:0;height:68px;padding:14px 18px;color:%1;background:linear-gradient(110deg,rgba(4,14,23,.97),rgba(5,28,44,.92));border-bottom:1px solid color-mix(in srgb,%1 52%,transparent);font:700 16px/1.35 "Segoe UI",Arial,sans-serif;letter-spacing:.16em;pointer-events:none;text-shadow:0 0 12px %1}
+body:after{content:"RELAY ONLINE // TEMPEST CHANNEL";box-sizing:border-box;position:fixed;z-index:2147483647;left:0;right:0;bottom:0;height:28px;padding:7px 14px;color:%1;background:rgba(4,14,23,.96);border-top:1px solid color-mix(in srgb,%1 38%,transparent);font:700 9px/1 "Segoe UI",Arial,sans-serif;letter-spacing:.18em;pointer-events:none}
+)TEMPESTCSS")
+			.arg(accent, CssContent(primary.isEmpty() ? QStringLiteral("CHANNEL RELAY") : primary),
+			     CssContent(secondary.isEmpty() ? QStringLiteral("TWITCH CHAT // ONLINE") : secondary));
+	if (twitch) {
+		css += QStringLiteral(R"TEMPESTCSS(
+.stream-chat-header,.chat-input{display:none!important}
+.chat-shell,.chat-room,.chat-room__content,.chat-scrollable-area__message-container{background:transparent!important}
+.chat-shell{height:100%!important}
+)TEMPESTCSS");
+	}
+	return css;
 }
 } // namespace
 
@@ -112,6 +146,10 @@ void TempestHUDComposer::BuildInterface()
 	typeSelector->addItem(QStringLiteral("LORE PANEL"), QStringLiteral("lore"));
 	primaryField = new QLineEdit(root);
 	secondaryField = new QLineEdit(root);
+	browserUrlField = new QLineEdit(root);
+	browserUrlField->setPlaceholderText(QStringLiteral("https://www.twitch.tv/popout/CHANNEL/chat?popout="));
+	browserUrlField->setToolTip(QStringLiteral(
+		"Chat Terminal only. Paste a Twitch popout chat or browser-overlay URL. Leave empty for the local standby renderer."));
 	accentField = new QLineEdit(root);
 	accentField->setPlaceholderText(QStringLiteral("#45d9ff"));
 	reactionSelector = new QComboBox(root);
@@ -127,10 +165,12 @@ void TempestHUDComposer::BuildInterface()
 	form->addRow(QStringLiteral("Element type"), typeSelector);
 	form->addRow(QStringLiteral("Primary text"), primaryField);
 	form->addRow(QStringLiteral("Secondary text"), secondaryField);
+	form->addRow(QStringLiteral("Chat browser URL"), browserUrlField);
 	form->addRow(QStringLiteral("Accent color"), accentField);
 	form->addRow(QStringLiteral("Reaction"), reactionSelector);
 	form->addRow(QStringLiteral("Strength"), strengthField);
 	layout->addLayout(form);
+	connect(typeSelector, &QComboBox::currentIndexChanged, this, [this]() { UpdateBrowserUrlAvailability(); });
 
 	auto *protocolLabel = new QLabel(QStringLiteral("VISIBLE IN PROTOCOL"), root);
 	protocolLabel->setObjectName(QStringLiteral("hudSubtitle"));
@@ -231,6 +271,7 @@ void TempestHUDComposer::LoadElements()
 			element.type = object.value(QStringLiteral("type")).toString(QStringLiteral("plate"));
 			element.primary = object.value(QStringLiteral("primary")).toString();
 			element.secondary = object.value(QStringLiteral("secondary")).toString();
+			element.browserUrl = object.value(QStringLiteral("browserUrl")).toString();
 			element.accent = object.value(QStringLiteral("accent")).toString(QStringLiteral("#45d9ff"));
 			element.reaction = object.value(QStringLiteral("reaction")).toString(QStringLiteral("signal"));
 			element.strength = object.value(QStringLiteral("strength")).toDouble(1.0);
@@ -262,6 +303,7 @@ void TempestHUDComposer::SaveElements()
 		object.insert(QStringLiteral("type"), element.type);
 		object.insert(QStringLiteral("primary"), element.primary);
 		object.insert(QStringLiteral("secondary"), element.secondary);
+		object.insert(QStringLiteral("browserUrl"), element.browserUrl);
 		object.insert(QStringLiteral("accent"), element.accent);
 		object.insert(QStringLiteral("reaction"), element.reaction);
 		object.insert(QStringLiteral("strength"), element.strength);
@@ -331,6 +373,7 @@ void TempestHUDComposer::LoadEditor(const Element &element)
 	typeSelector->setCurrentIndex(std::max(0, typeSelector->findData(element.type)));
 	primaryField->setText(element.primary);
 	secondaryField->setText(element.secondary);
+	browserUrlField->setText(element.browserUrl);
 	accentField->setText(element.accent);
 	reactionSelector->setCurrentIndex(std::max(0, reactionSelector->findData(element.reaction)));
 	strengthField->setValue(element.strength);
@@ -338,6 +381,18 @@ void TempestHUDComposer::LoadEditor(const Element &element)
 	liveVisible->setChecked(element.live);
 	brbVisible->setChecked(element.brb);
 	endingVisible->setChecked(element.ending);
+	UpdateBrowserUrlAvailability();
+}
+
+void TempestHUDComposer::UpdateBrowserUrlAvailability()
+{
+	if (!browserUrlField || !typeSelector)
+		return;
+	const bool chat = typeSelector->currentData().toString() == QStringLiteral("chat");
+	browserUrlField->setEnabled(chat);
+	browserUrlField->setAccessibleDescription(
+		chat ? QStringLiteral("Optional Twitch popout chat or browser-overlay URL")
+		     : QStringLiteral("Available when Element type is Chat Terminal"));
 }
 
 bool TempestHUDComposer::StoreEditor(Element &element)
@@ -351,6 +406,15 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 	if (!QRegularExpression(QStringLiteral("^#[0-9A-Fa-f]{6}$")).match(accent).hasMatch()) {
 		SetStatus(QStringLiteral("ACCENT MUST USE #RRGGBB FORMAT"), true);
 		return false;
+	}
+	const QString browserUrl = browserUrlField->text().trimmed();
+	if (!browserUrl.isEmpty()) {
+		const QUrl parsedUrl(browserUrl, QUrl::StrictMode);
+		if (!parsedUrl.isValid() || parsedUrl.host().isEmpty() ||
+		    (parsedUrl.scheme() != QStringLiteral("https") && parsedUrl.scheme() != QStringLiteral("http"))) {
+			SetStatus(QStringLiteral("CHAT BROWSER URL MUST USE HTTP OR HTTPS"), true);
+			return false;
+		}
 	}
 	const QString newSourceName = SuggestedSourceName(name);
 	if (newSourceName != element.sourceName) {
@@ -375,6 +439,7 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 	element.type = typeSelector->currentData().toString();
 	element.primary = primaryField->text().trimmed();
 	element.secondary = secondaryField->text().trimmed();
+	element.browserUrl = browserUrl;
 	element.accent = accent.toUpper();
 	element.reaction = reactionSelector->currentData().toString();
 	element.strength = strengthField->value();
@@ -417,7 +482,9 @@ void TempestHUDComposer::SaveElement()
 		return;
 	RefreshSelectedSource();
 	RebuildElementList(selectedId);
-	SetStatus(QStringLiteral("ELEMENT RENDERED // %1").arg(element->name.toUpper()));
+	const bool remoteChat = element->type == QStringLiteral("chat") && !element->browserUrl.isEmpty();
+	SetStatus(remoteChat ? QStringLiteral("CHAT BROWSER LINKED // %1").arg(element->name.toUpper())
+			     : QStringLiteral("ELEMENT RENDERED // %1").arg(element->name.toUpper()));
 }
 
 bool TempestHUDComposer::EnsureOutputDirectory()
@@ -495,7 +562,7 @@ body.frame-type .frame{display:block}body.frame-type .plate{display:none}body.ch
 <body><div class="scan"></div>
 <div class="frame"><i class="corner c1"></i><i class="corner c2"></i><i class="corner c3"></i><i class="corner c4"></i><div class="frame-meta" id="framePrimary"></div><div class="frame-state" id="frameSecondary"></div></div>
 <section class="plate"><div class="core"></div><div class="copy"><div class="kicker">TEMPEST MAINFRAME // SIGNAL ELEMENT</div><div class="primary" id="primary"></div><div class="secondary" id="secondary"></div></div><div class="meter"><i></i></div></section>
-<section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>MAINFRAME</b>CHAT RELAY FOUNDATION ONLINE</div><div class="msg"><b>CHANNEL LINK</b>TWITCH AUTHENTICATION WILL ARRIVE IN THE CHAT RELAY PHASE</div><div class="msg"><b>OPERATOR NOTE</b>MOVE, RESIZE, CROP, GROUP, OR LOCK THIS PANEL IN OBS</div></main><footer class="chat-foot"><span>RELAY STANDBY</span><span>SIGNAL REACTIVE</span></footer></section>
+<section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>MAINFRAME</b>CHAT RELAY FOUNDATION ONLINE</div><div class="msg"><b>CHANNEL LINK</b>ADD A TWITCH POPOUT CHAT OR OVERLAY URL IN HUD COMPOSER</div><div class="msg"><b>OPERATOR NOTE</b>THE CHAT TERMINAL WILL SWITCH TO THE REMOTE BROWSER FEED</div></main><footer class="chat-foot"><span>RELAY STANDBY</span><span>SIGNAL REACTIVE</span></footer></section>
 <script id="hud-state" type="application/json">{{STATE_JSON}}</script><script>
 const s=JSON.parse(document.getElementById('hud-state').textContent),root=document.documentElement,body=document.body;root.style.setProperty('--accent',s.accent||'#45d9ff');body.classList.add((s.type||'plate')+'-type');body.classList.add(s.reaction||'signal');for(const id of ['primary','framePrimary','chatPrimary'])document.getElementById(id).textContent=s.primary||'TEMPEST MAINFRAME';for(const id of ['secondary','frameSecondary','chatSecondary'])document.getElementById(id).textContent=s.secondary||'SIGNAL ELEMENT ONLINE';let level=0,phase=0;
 async function telemetry(){try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json();level=Math.max(Number(d.level)||0,level*.74)}}catch(_){level*=.82}phase+=.12;let react=level*Math.max(0,Number(s.strength)||0);if(s.reaction==='pulse')react=Math.max(react,.16+.12*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
@@ -514,12 +581,17 @@ bool TempestHUDComposer::ApplySourceSettings(obs_source_t *source, const Element
 		size = QSize((int)ovi.base_width, (int)ovi.base_height);
 	OBSDataAutoRelease settings = obs_data_create();
 	const QByteArray path = QDir::toNativeSeparators(ElementPath(element)).toUtf8();
+	const bool remoteChat = element.type == QStringLiteral("chat") && !element.browserUrl.trimmed().isEmpty();
 	const QByteArray css =
-		QStringLiteral("body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}/* hud-revision:%1 */")
-			.arg(renderRevision)
+		(remoteChat ? RemoteChatCss(element.browserUrl, element.primary, element.secondary, element.accent)
+			    : QStringLiteral("body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}"))
+			.append(QStringLiteral("/* hud-revision:%1 */").arg(renderRevision))
 			.toUtf8();
-	obs_data_set_bool(settings, "is_local_file", true);
-	obs_data_set_string(settings, "local_file", path.constData());
+	obs_data_set_bool(settings, "is_local_file", !remoteChat);
+	if (remoteChat)
+		obs_data_set_string(settings, "url", element.browserUrl.toUtf8().constData());
+	else
+		obs_data_set_string(settings, "local_file", path.constData());
 	obs_data_set_int(settings, "width", size.width());
 	obs_data_set_int(settings, "height", size.height());
 	obs_data_set_bool(settings, "shutdown", false);

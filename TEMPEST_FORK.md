@@ -164,15 +164,15 @@ The native **Mainframe HUD Composer** creates transparent reactive visual elemen
 The initial local HUD library contains:
 
 - a canvas-sized **Signal Frame** with reactive rails, corners, glow, and transmission labels;
-- a movable **Chat Terminal** shell prepared for the later Twitch relay phase;
+- a movable **Chat Terminal** that can load a Twitch popout chat or browser-overlay URL;
 - an editable **Transmission Plate**; and
 - an editable **Now Playing** plate for future Media Bay state.
 
-Custom signal plates can be added from the same dock. Each definition stores its element type, primary and secondary text, accent color, reaction mode, reaction strength, and independent Starting, Live, BRB, and Ending visibility. Reaction modes include signal pulse, glow, breathing core, and peak glitch. All elements use the Control Deck's existing local audio telemetry and require no additional audio capture plugin.
+Custom signal plates can be added from the same dock. Each definition stores its element type, primary and secondary text, optional chat browser URL, accent color, reaction mode, reaction strength, and independent Starting, Live, BRB, and Ending visibility. Reaction modes include signal pulse, glow, breathing core, and peak glitch. All local elements use the Control Deck's existing audio telemetry and require no additional audio capture plugin.
 
 Definitions and renderer files are created locally without modifying a scene. **Add Selected to Current Scene** deliberately creates or reuses one named Browser Source, while **Deploy All HUD Elements** adds the complete library to the active scene. New plates deploy unlocked at practical starting positions. The full-canvas frame deploys locked so its transparent center does not intercept normal canvas selection; it can be unlocked through the standard Sources list.
 
-When a Starting, Live, BRB, or Ending protocol routes a scene, the Command Matrix applies the visibility switches saved for each HUD element found in that scene. The Chat Terminal currently renders a local relay-ready foundation only and does not connect to Twitch or display real messages until the separate authenticated Chat Relay phase is built.
+When a Starting, Live, BRB, or Ending protocol routes a scene, the Command Matrix applies the visibility switches saved for each HUD element found in that scene. The Chat Terminal uses its local relay-ready standby renderer when its browser URL is empty. Adding an HTTP or HTTPS Twitch popout chat or browser-overlay URL switches the same OBS Browser Source to the remote chat feed and applies Tempest header, footer, border, transparency, and Twitch chat cleanup CSS. The URL is stored only in the local TBS configuration.
 
 ### Protocol action automation
 

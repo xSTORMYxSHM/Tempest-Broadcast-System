@@ -40,6 +40,7 @@ private:
 		QString type = QStringLiteral("plate");
 		QString primary;
 		QString secondary;
+		QString browserUrl;
 		QString accent = QStringLiteral("#45d9ff");
 		QString reaction = QStringLiteral("signal");
 		double strength = 1.0;
@@ -55,6 +56,7 @@ private:
 	void SeedStarterElements();
 	void RebuildElementList(const QString &selectedId = {});
 	void LoadEditor(const Element &element);
+	void UpdateBrowserUrlAvailability();
 	bool StoreEditor(Element &element);
 	bool EnsureOutputDirectory();
 	bool RenderElement(const Element &element);
@@ -77,6 +79,7 @@ private:
 	QPointer<QComboBox> typeSelector;
 	QPointer<QLineEdit> primaryField;
 	QPointer<QLineEdit> secondaryField;
+	QPointer<QLineEdit> browserUrlField;
 	QPointer<QLineEdit> accentField;
 	QPointer<QComboBox> reactionSelector;
 	QPointer<QDoubleSpinBox> strengthField;
