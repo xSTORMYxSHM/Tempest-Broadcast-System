@@ -13,4 +13,6 @@ target_sources(
     docks/TempestSequenceDirector.hpp
     docks/TempestAssetVault.cpp
     docks/TempestAssetVault.hpp
+    docks/TempestHUDComposer.cpp
+    docks/TempestHUDComposer.hpp
 )

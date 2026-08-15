@@ -24,6 +24,7 @@
 #include <docks/TempestMediaBay.hpp>
 #include <docks/TempestSequenceDirector.hpp>
 #include <docks/TempestAssetVault.hpp>
+#include <docks/TempestHUDComposer.hpp>
 #include "TempestMainframeBar.hpp"
 
 #include <qt-wrappers.hpp>
@@ -62,11 +63,13 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestMediaBay->setFloating(false);
 	tempestSequenceDirector->setFloating(false);
 	tempestAssetVault->setFloating(false);
+	tempestHUDComposer->setFloating(false);
 
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
 	tabifyDockWidget(tempestControlDeck, tempestSequenceDirector);
 	tabifyDockWidget(tempestSequenceDirector, tempestAssetVault);
+	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
 	addDockWidget(Qt::BottomDockWidgetArea, ui->mixerDock);
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
 
@@ -78,6 +81,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestMediaBay->setVisible(true);
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
+	tempestHUDComposer->setVisible(true);
 	tempestControlDeck->raise();
 	ui->transitionsDock->setVisible(false);
 	controlsDock->setVisible(false);
@@ -188,6 +192,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	tempestControlDeck->setVisible(true);
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
+	tempestHUDComposer->setVisible(true);
 	tempestControlDeck->raise();
 	tempestCommandMatrix->setVisible(false);
 	statsDock->setVisible(false);
@@ -197,8 +202,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 
 	resizeDocks(bottomDocks, {bottomDocksHeight, bottomDocksHeight, bottomDocksHeight, bottomDocksHeight},
 		    Qt::Vertical);
-	resizeDocks(bottomDocks, {cx * 37 / 100, cx * 13 / 100, cx * 14 / 100, cx * 22 / 100},
-		    Qt::Horizontal);
+	resizeDocks(bottomDocks, {cx * 37 / 100, cx * 13 / 100, cx * 14 / 100, cx * 22 / 100}, Qt::Horizontal);
 
 	int sideDockWidth = std::min(width() * 30 / 100, 280);
 	resizeDocks({ui->scenesDock, ui->sourcesDock}, {sideDockWidth, sideDockWidth}, Qt::Horizontal);
@@ -227,6 +231,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	tempestMediaBay->setFeatures(features);
 	tempestSequenceDirector->setFeatures(features);
 	tempestAssetVault->setFeatures(features);
+	tempestHUDComposer->setFeatures(features);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--)
 		extraDocks[i]->setFeatures(features);

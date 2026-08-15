@@ -61,6 +61,7 @@ class TempestCommandMatrix;
 class TempestMediaBay;
 class TempestSequenceDirector;
 class TempestAssetVault;
+class TempestHUDComposer;
 class TempestMainframeBar;
 class QToolBar;
 class VolumeControl;
@@ -455,6 +456,7 @@ private:
 	QPointer<TempestMediaBay> tempestMediaBay;
 	QPointer<TempestSequenceDirector> tempestSequenceDirector;
 	QPointer<TempestAssetVault> tempestAssetVault;
+	QPointer<TempestHUDComposer> tempestHUDComposer;
 	QPointer<QToolBar> tempestCommandToolbar;
 	QPointer<TempestMainframeBar> tempestMainframeBar;
 	QByteArray tempestCommandDockState;

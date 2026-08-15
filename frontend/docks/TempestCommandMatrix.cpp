@@ -1,6 +1,7 @@
 #include "TempestCommandMatrix.hpp"
 
 #include "TempestControlDeck.hpp"
+#include "TempestHUDComposer.hpp"
 #include "TempestMediaBay.hpp"
 #include "TempestSequenceDirector.hpp"
 
@@ -129,6 +130,11 @@ TempestCommandMatrix::~TempestCommandMatrix()
 void TempestCommandMatrix::SetSequenceDirector(TempestSequenceDirector *director)
 {
 	sequenceDirector = director;
+}
+
+void TempestCommandMatrix::SetHUDComposer(TempestHUDComposer *composer)
+{
+	hudComposer = composer;
 }
 
 void TempestCommandMatrix::RunProtocol(const QString &protocolId)
@@ -671,6 +677,8 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 		ApplyProtocolOverlay(sceneSource.Get(), protocol->sourceName);
 	controlDeck->ActivateMode(protocol->id,
 				  protocol->id == QStringLiteral("starting") && startCountdown->isChecked());
+	if (hudComposer)
+		hudComposer->ApplyProtocolVisibility(sceneSource, protocol->id);
 	main->SetCurrentScene(OBSSource(sceneSource.Get()));
 	SetStatus(QStringLiteral("%1 PROTOCOL // %2%3")
 			  .arg(protocol->label, obs_source_get_name(sceneSource),

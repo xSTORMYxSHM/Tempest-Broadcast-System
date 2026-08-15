@@ -29,6 +29,7 @@
 #include <docks/TempestMediaBay.hpp>
 #include <docks/TempestSequenceDirector.hpp>
 #include <docks/TempestAssetVault.hpp>
+#include <docks/TempestHUDComposer.hpp>
 #include "TempestMainframeBar.hpp"
 
 #include <obs-module.h>
@@ -381,14 +382,17 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	tempestMediaBay = new TempestMediaBay(this);
 	addDockWidget(Qt::BottomDockWidgetArea, tempestMediaBay);
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
-	tempestSequenceDirector =
-		new TempestSequenceDirector(this, tempestCommandMatrix, tempestControlDeck, this);
+	tempestSequenceDirector = new TempestSequenceDirector(this, tempestCommandMatrix, tempestControlDeck, this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestSequenceDirector);
 	tabifyDockWidget(tempestControlDeck, tempestSequenceDirector);
 	tempestCommandMatrix->SetSequenceDirector(tempestSequenceDirector);
 	tempestAssetVault = new TempestAssetVault(this, tempestSequenceDirector, tempestMediaBay, this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestAssetVault);
 	tabifyDockWidget(tempestSequenceDirector, tempestAssetVault);
+	tempestHUDComposer = new TempestHUDComposer(this, this);
+	addDockWidget(Qt::RightDockWidgetArea, tempestHUDComposer);
+	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
+	tempestCommandMatrix->SetHUDComposer(tempestHUDComposer);
 	tempestControlDeck->raise();
 
 	startingDockLayout = saveState();
@@ -566,6 +570,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(tempestMediaBay);
 	SETUP_DOCK(tempestSequenceDirector);
 	SETUP_DOCK(tempestAssetVault);
+	SETUP_DOCK(tempestHUDComposer);
 #undef SETUP_DOCK
 
 	// Register shortcuts for Undo/Redo
@@ -1282,11 +1287,11 @@ void OBSBasic::OBSInit()
 		tempestEngineeringDockState = QByteArray::fromBase64(QByteArray(engineeringDockState));
 	const int commandLayoutVersion =
 		config_get_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion");
-	if (commandLayoutVersion < 5) {
+	if (commandLayoutVersion < 6) {
 		tempestCommandDockState.clear();
 		tempestEngineeringDockState.clear();
 		on_resetDocks_triggered(true);
-		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 5);
+		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 6);
 	}
 	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
 	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;

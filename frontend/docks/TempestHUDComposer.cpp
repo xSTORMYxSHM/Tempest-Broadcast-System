@@ -1,0 +1,689 @@
+#include "TempestHUDComposer.hpp"
+
+#include <OBSApp.hpp>
+#include <utility/platform.hpp>
+#include <widgets/OBSBasic.hpp>
+
+#include <obs.hpp>
+
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDir>
+#include <QDoubleSpinBox>
+#include <QFileInfo>
+#include <QFormLayout>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QSaveFile>
+#include <QSignalBlocker>
+#include <QSize>
+#include <QUuid>
+#include <QVBoxLayout>
+
+#include <algorithm>
+#include <cstring>
+
+#include "moc_TempestHUDComposer.cpp"
+
+namespace {
+constexpr char ConfigSection[] = "TempestHUDComposer";
+
+QSize ElementSize(const QString &type)
+{
+	if (type == QStringLiteral("chat"))
+		return {520, 680};
+	if (type == QStringLiteral("media"))
+		return {640, 150};
+	if (type == QStringLiteral("lore"))
+		return {760, 250};
+	return {720, 170};
+}
+} // namespace
+
+TempestHUDComposer::TempestHUDComposer(OBSBasic *main, QWidget *parent) : OBSDock(parent), main(main)
+{
+	setObjectName(QStringLiteral("tempestHUDComposer"));
+	setWindowTitle(QStringLiteral("Mainframe HUD Composer"));
+	setMinimumWidth(390);
+	BuildInterface();
+	EnsureOutputDirectory();
+	LoadElements();
+	RebuildElementList();
+	for (const Element &element : elements)
+		RenderElement(element);
+}
+
+void TempestHUDComposer::BuildInterface()
+{
+	auto *root = new QWidget(this);
+	root->setObjectName(QStringLiteral("tempestHUDRoot"));
+	root->setStyleSheet(QStringLiteral(R"(
+		QWidget#tempestHUDRoot { background: #07131e; }
+		QLabel#hudTitle { color: #45d9ff; font-size: 15px; font-weight: 700; letter-spacing: 2px; }
+		QLabel#hudSubtitle { color: #748fa4; font-size: 10px; letter-spacing: 1px; }
+		QLabel#hudHint { color: #748fa4; font-size: 10px; padding: 6px; border: 1px solid #183a50; background: #06101a; }
+		QLabel#hudStatus { color: #45d9ff; font-size: 10px; }
+		QComboBox, QLineEdit, QListWidget, QDoubleSpinBox { background: #06101a; border: 1px solid #1f506d; color: #bdf6ff; }
+		QComboBox, QLineEdit, QDoubleSpinBox { min-height: 29px; padding: 0 7px; }
+		QListWidget::item { min-height: 37px; border-bottom: 1px solid #102c3e; padding: 4px; }
+		QListWidget::item:selected { background: #073c5f; border: 1px solid #45d9ff; }
+		QPushButton { min-height: 31px; border: 1px solid #1f506d; background: #0d2230; color: #bdf6ff; font-weight: 700; padding: 0 8px; }
+		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
+		QPushButton:disabled { color: #40576a; border-color: #172d3d; background: #091721; }
+		QCheckBox { color: #9eb7c8; }
+	)"));
+	auto *layout = new QVBoxLayout(root);
+	layout->setContentsMargins(10, 10, 10, 10);
+	layout->setSpacing(7);
+
+	auto *title = new QLabel(QStringLiteral("HUD COMPOSER"), root);
+	title->setObjectName(QStringLiteral("hudTitle"));
+	auto *subtitle = new QLabel(QStringLiteral("Movable reactive frame and signal plates"), root);
+	subtitle->setObjectName(QStringLiteral("hudSubtitle"));
+	layout->addWidget(title);
+	layout->addWidget(subtitle);
+
+	elementList = new QListWidget(root);
+	elementList->setObjectName(QStringLiteral("tempestHUDElementList"));
+	elementList->setAccessibleName(QStringLiteral("Tempest HUD elements"));
+	connect(elementList, &QListWidget::currentRowChanged, this, &TempestHUDComposer::SelectElement);
+	layout->addWidget(elementList, 1);
+
+	auto *newButton = new QPushButton(QStringLiteral("NEW ELEMENT"), root);
+	connect(newButton, &QPushButton::clicked, this, &TempestHUDComposer::NewElement);
+	layout->addWidget(newButton);
+
+	auto *form = new QFormLayout();
+	nameField = new QLineEdit(root);
+	nameField->setPlaceholderText(QStringLiteral("Element and OBS source name"));
+	typeSelector = new QComboBox(root);
+	typeSelector->addItem(QStringLiteral("CANVAS FRAME"), QStringLiteral("frame"));
+	typeSelector->addItem(QStringLiteral("CHAT TERMINAL"), QStringLiteral("chat"));
+	typeSelector->addItem(QStringLiteral("SIGNAL PLATE"), QStringLiteral("plate"));
+	typeSelector->addItem(QStringLiteral("NOW PLAYING PLATE"), QStringLiteral("media"));
+	typeSelector->addItem(QStringLiteral("LORE PANEL"), QStringLiteral("lore"));
+	primaryField = new QLineEdit(root);
+	secondaryField = new QLineEdit(root);
+	accentField = new QLineEdit(root);
+	accentField->setPlaceholderText(QStringLiteral("#45d9ff"));
+	reactionSelector = new QComboBox(root);
+	reactionSelector->addItem(QStringLiteral("SIGNAL PULSE"), QStringLiteral("signal"));
+	reactionSelector->addItem(QStringLiteral("GLOW ONLY"), QStringLiteral("glow"));
+	reactionSelector->addItem(QStringLiteral("BREATHING CORE"), QStringLiteral("pulse"));
+	reactionSelector->addItem(QStringLiteral("PEAK GLITCH"), QStringLiteral("glitch"));
+	strengthField = new QDoubleSpinBox(root);
+	strengthField->setRange(0.0, 2.5);
+	strengthField->setSingleStep(0.1);
+	strengthField->setDecimals(1);
+	form->addRow(QStringLiteral("Element name"), nameField);
+	form->addRow(QStringLiteral("Element type"), typeSelector);
+	form->addRow(QStringLiteral("Primary text"), primaryField);
+	form->addRow(QStringLiteral("Secondary text"), secondaryField);
+	form->addRow(QStringLiteral("Accent color"), accentField);
+	form->addRow(QStringLiteral("Reaction"), reactionSelector);
+	form->addRow(QStringLiteral("Strength"), strengthField);
+	layout->addLayout(form);
+
+	auto *protocolLabel = new QLabel(QStringLiteral("VISIBLE IN PROTOCOL"), root);
+	protocolLabel->setObjectName(QStringLiteral("hudSubtitle"));
+	layout->addWidget(protocolLabel);
+	auto *protocols = new QGridLayout();
+	startingVisible = new QCheckBox(QStringLiteral("STARTING"), root);
+	liveVisible = new QCheckBox(QStringLiteral("LIVE"), root);
+	brbVisible = new QCheckBox(QStringLiteral("BRB"), root);
+	endingVisible = new QCheckBox(QStringLiteral("ENDING"), root);
+	protocols->addWidget(startingVisible, 0, 0);
+	protocols->addWidget(liveVisible, 0, 1);
+	protocols->addWidget(brbVisible, 1, 0);
+	protocols->addWidget(endingVisible, 1, 1);
+	layout->addLayout(protocols);
+
+	saveButton = new QPushButton(QStringLiteral("SAVE / RENDER ELEMENT"), root);
+	addButton = new QPushButton(QStringLiteral("ADD SELECTED TO CURRENT SCENE"), root);
+	auto *deployButton = new QPushButton(QStringLiteral("DEPLOY ALL HUD ELEMENTS"), root);
+	connect(saveButton, &QPushButton::clicked, this, &TempestHUDComposer::SaveElement);
+	connect(addButton, &QPushButton::clicked, this, &TempestHUDComposer::AddSelectedToScene);
+	connect(deployButton, &QPushButton::clicked, this, &TempestHUDComposer::DeployStarterHud);
+	layout->addWidget(saveButton);
+	layout->addWidget(addButton);
+	layout->addWidget(deployButton);
+
+	auto *hint = new QLabel(
+		QStringLiteral(
+			"Frame sources deploy canvas-sized and locked. Plates deploy unlocked; move and resize them with the normal OBS canvas controls. Reactive signal follows the Control Deck audio selector."),
+		root);
+	hint->setObjectName(QStringLiteral("hudHint"));
+	hint->setWordWrap(true);
+	layout->addWidget(hint);
+	statusLabel = new QLabel(QStringLiteral("HUD LIBRARY INITIALIZING"), root);
+	statusLabel->setObjectName(QStringLiteral("hudStatus"));
+	statusLabel->setWordWrap(true);
+	layout->addWidget(statusLabel);
+	setWidget(root);
+}
+
+void TempestHUDComposer::SeedStarterElements()
+{
+	Element frame;
+	frame.id = QStringLiteral("signal-frame");
+	frame.name = QStringLiteral("Signal Frame");
+	frame.sourceName = SuggestedSourceName(frame.name);
+	frame.type = QStringLiteral("frame");
+	frame.primary = QStringLiteral("TEMPEST MAINFRAME");
+	frame.secondary = QStringLiteral("BROADCAST SIGNAL // ONLINE");
+	frame.reaction = QStringLiteral("signal");
+	frame.strength = 1.1;
+
+	Element chat;
+	chat.id = QStringLiteral("chat-terminal");
+	chat.name = QStringLiteral("Chat Terminal");
+	chat.sourceName = SuggestedSourceName(chat.name);
+	chat.type = QStringLiteral("chat");
+	chat.primary = QStringLiteral("CHANNEL RELAY");
+	chat.secondary = QStringLiteral("TWITCH LINK // FOUNDATION");
+	chat.reaction = QStringLiteral("glow");
+	chat.strength = 0.8;
+
+	Element transmission;
+	transmission.id = QStringLiteral("transmission-plate");
+	transmission.name = QStringLiteral("Transmission Plate");
+	transmission.sourceName = SuggestedSourceName(transmission.name);
+	transmission.primary = QStringLiteral("TEMPEST MAINFRAME");
+	transmission.secondary = QStringLiteral("BROADCAST UPLINK // STANDBY");
+	transmission.reaction = QStringLiteral("pulse");
+
+	Element media;
+	media.id = QStringLiteral("now-playing");
+	media.name = QStringLiteral("Now Playing");
+	media.sourceName = SuggestedSourceName(media.name);
+	media.type = QStringLiteral("media");
+	media.primary = QStringLiteral("SIGNAL MEDIA");
+	media.secondary = QStringLiteral("ASSET BUS // STANDBY");
+	media.reaction = QStringLiteral("signal");
+	media.ending = false;
+	elements = {frame, chat, transmission, media};
+}
+
+void TempestHUDComposer::LoadElements()
+{
+	config_t *config = App()->GetUserConfig();
+	const bool initialized = config_get_bool(config, ConfigSection, "Initialized");
+	const char *raw = config_get_string(config, ConfigSection, "Elements");
+	const QJsonDocument document = QJsonDocument::fromJson(raw ? QByteArray(raw) : QByteArray());
+	if (document.isArray()) {
+		for (const QJsonValue &value : document.array()) {
+			const QJsonObject object = value.toObject();
+			Element element;
+			element.id = object.value(QStringLiteral("id")).toString();
+			element.name = object.value(QStringLiteral("name")).toString();
+			if (element.id.isEmpty() || element.name.isEmpty())
+				continue;
+			element.sourceName =
+				object.value(QStringLiteral("sourceName")).toString(SuggestedSourceName(element.name));
+			element.type = object.value(QStringLiteral("type")).toString(QStringLiteral("plate"));
+			element.primary = object.value(QStringLiteral("primary")).toString();
+			element.secondary = object.value(QStringLiteral("secondary")).toString();
+			element.accent = object.value(QStringLiteral("accent")).toString(QStringLiteral("#45d9ff"));
+			element.reaction = object.value(QStringLiteral("reaction")).toString(QStringLiteral("signal"));
+			element.strength = object.value(QStringLiteral("strength")).toDouble(1.0);
+			element.starting = object.value(QStringLiteral("starting")).toBool(true);
+			element.live = object.value(QStringLiteral("live")).toBool(true);
+			element.brb = object.value(QStringLiteral("brb")).toBool(true);
+			element.ending = object.value(QStringLiteral("ending")).toBool(true);
+			elements.push_back(element);
+		}
+	}
+	if (!initialized) {
+		SeedStarterElements();
+		config_set_bool(config, ConfigSection, "Initialized", true);
+		SaveElements();
+	}
+	SetStatus(QStringLiteral("HUD LIBRARY READY // %1 ELEMENT%2")
+			  .arg(elements.size())
+			  .arg(elements.size() == 1 ? QString() : QStringLiteral("S")));
+}
+
+void TempestHUDComposer::SaveElements()
+{
+	QJsonArray array;
+	for (const Element &element : elements) {
+		QJsonObject object;
+		object.insert(QStringLiteral("id"), element.id);
+		object.insert(QStringLiteral("sourceName"), element.sourceName);
+		object.insert(QStringLiteral("name"), element.name);
+		object.insert(QStringLiteral("type"), element.type);
+		object.insert(QStringLiteral("primary"), element.primary);
+		object.insert(QStringLiteral("secondary"), element.secondary);
+		object.insert(QStringLiteral("accent"), element.accent);
+		object.insert(QStringLiteral("reaction"), element.reaction);
+		object.insert(QStringLiteral("strength"), element.strength);
+		object.insert(QStringLiteral("starting"), element.starting);
+		object.insert(QStringLiteral("live"), element.live);
+		object.insert(QStringLiteral("brb"), element.brb);
+		object.insert(QStringLiteral("ending"), element.ending);
+		array.append(object);
+	}
+	const QByteArray json = QJsonDocument(array).toJson(QJsonDocument::Compact);
+	config_t *config = App()->GetUserConfig();
+	config_set_string(config, ConfigSection, "Elements", json.constData());
+	config_set_bool(config, ConfigSection, "Initialized", true);
+	config_save_safe(config, "tmp", nullptr);
+}
+
+void TempestHUDComposer::RebuildElementList(const QString &selectedId)
+{
+	QString wanted = selectedId;
+	if (wanted.isEmpty() && SelectedElement())
+		wanted = SelectedElement()->id;
+	QSignalBlocker blocker(elementList);
+	elementList->clear();
+	for (int index = 0; index < elements.size(); ++index) {
+		const Element &element = elements[index];
+		auto *item = new QListWidgetItem(
+			QStringLiteral("%1 // %2\n%3").arg(TypeLabel(element.type), element.name, element.sourceName),
+			elementList);
+		item->setData(Qt::UserRole, index);
+		if (element.id == wanted)
+			elementList->setCurrentItem(item);
+	}
+	if (elementList->currentRow() < 0 && elementList->count() > 0)
+		elementList->setCurrentRow(0);
+	SelectElement();
+}
+
+TempestHUDComposer::Element *TempestHUDComposer::SelectedElement()
+{
+	if (!elementList || !elementList->currentItem())
+		return nullptr;
+	const int index = elementList->currentItem()->data(Qt::UserRole).toInt();
+	return index >= 0 && index < elements.size() ? &elements[index] : nullptr;
+}
+
+const TempestHUDComposer::Element *TempestHUDComposer::SelectedElement() const
+{
+	if (!elementList || !elementList->currentItem())
+		return nullptr;
+	const int index = elementList->currentItem()->data(Qt::UserRole).toInt();
+	return index >= 0 && index < elements.size() ? &elements[index] : nullptr;
+}
+
+void TempestHUDComposer::SelectElement()
+{
+	Element *element = SelectedElement();
+	const bool available = element != nullptr;
+	saveButton->setEnabled(available);
+	addButton->setEnabled(available);
+	if (element)
+		LoadEditor(*element);
+}
+
+void TempestHUDComposer::LoadEditor(const Element &element)
+{
+	nameField->setText(element.name);
+	typeSelector->setCurrentIndex(std::max(0, typeSelector->findData(element.type)));
+	primaryField->setText(element.primary);
+	secondaryField->setText(element.secondary);
+	accentField->setText(element.accent);
+	reactionSelector->setCurrentIndex(std::max(0, reactionSelector->findData(element.reaction)));
+	strengthField->setValue(element.strength);
+	startingVisible->setChecked(element.starting);
+	liveVisible->setChecked(element.live);
+	brbVisible->setChecked(element.brb);
+	endingVisible->setChecked(element.ending);
+}
+
+bool TempestHUDComposer::StoreEditor(Element &element)
+{
+	const QString name = nameField->text().trimmed();
+	if (name.isEmpty()) {
+		SetStatus(QStringLiteral("ELEMENT NAME IS REQUIRED"), true);
+		return false;
+	}
+	const QString accent = accentField->text().trimmed();
+	if (!QRegularExpression(QStringLiteral("^#[0-9A-Fa-f]{6}$")).match(accent).hasMatch()) {
+		SetStatus(QStringLiteral("ACCENT MUST USE #RRGGBB FORMAT"), true);
+		return false;
+	}
+	const QString newSourceName = SuggestedSourceName(name);
+	if (newSourceName != element.sourceName) {
+		for (const Element &candidate : elements) {
+			if (candidate.id != element.id &&
+			    candidate.sourceName.compare(newSourceName, Qt::CaseInsensitive) == 0) {
+				SetStatus(QStringLiteral("HUD ELEMENT NAME ALREADY EXISTS // %1").arg(name), true);
+				return false;
+			}
+		}
+		OBSSourceAutoRelease collision = obs_get_source_by_name(newSourceName.toUtf8().constData());
+		if (collision) {
+			SetStatus(QStringLiteral("SOURCE NAME ALREADY EXISTS // %1").arg(newSourceName), true);
+			return false;
+		}
+		OBSSourceAutoRelease source = obs_get_source_by_name(element.sourceName.toUtf8().constData());
+		if (source)
+			obs_source_set_name(source, newSourceName.toUtf8().constData());
+		element.sourceName = newSourceName;
+	}
+	element.name = name;
+	element.type = typeSelector->currentData().toString();
+	element.primary = primaryField->text().trimmed();
+	element.secondary = secondaryField->text().trimmed();
+	element.accent = accent.toUpper();
+	element.reaction = reactionSelector->currentData().toString();
+	element.strength = strengthField->value();
+	element.starting = startingVisible->isChecked();
+	element.live = liveVisible->isChecked();
+	element.brb = brbVisible->isChecked();
+	element.ending = endingVisible->isChecked();
+	return true;
+}
+
+void TempestHUDComposer::NewElement()
+{
+	Element element;
+	element.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	int suffix = 1;
+	do {
+		element.name = QStringLiteral("New Signal Plate%1")
+				       .arg(suffix == 1 ? QString() : QStringLiteral(" %1").arg(suffix));
+		element.sourceName = SuggestedSourceName(element.name);
+		++suffix;
+	} while (std::any_of(elements.cbegin(), elements.cend(), [&element](const Element &candidate) {
+		return candidate.sourceName.compare(element.sourceName, Qt::CaseInsensitive) == 0;
+	}));
+	element.primary = QStringLiteral("TEMPEST MAINFRAME");
+	element.secondary = QStringLiteral("NEW SIGNAL ELEMENT");
+	elements.push_back(element);
+	SaveElements();
+	RebuildElementList(element.id);
+	SetStatus(QStringLiteral("NEW ELEMENT DEFINITION CREATED"));
+}
+
+void TempestHUDComposer::SaveElement()
+{
+	Element *element = SelectedElement();
+	if (!element || !StoreEditor(*element))
+		return;
+	const QString selectedId = element->id;
+	SaveElements();
+	if (!RenderElement(*element))
+		return;
+	RefreshSelectedSource();
+	RebuildElementList(selectedId);
+	SetStatus(QStringLiteral("ELEMENT RENDERED // %1").arg(element->name.toUpper()));
+}
+
+bool TempestHUDComposer::EnsureOutputDirectory()
+{
+	if (!outputDirectory.isEmpty())
+		return true;
+	char path[1024];
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system/control-deck") <= 0) {
+		SetStatus(QStringLiteral("HUD OUTPUT DIRECTORY COULD NOT BE RESOLVED"), true);
+		return false;
+	}
+	outputDirectory = QString::fromUtf8(path);
+	if (!QDir().mkpath(outputDirectory)) {
+		SetStatus(QStringLiteral("HUD OUTPUT DIRECTORY COULD NOT BE CREATED"), true);
+		return false;
+	}
+	return true;
+}
+
+QString TempestHUDComposer::ElementPath(const Element &element) const
+{
+	return QDir(outputDirectory).filePath(QStringLiteral("hud-%1.html").arg(SafeFileId(element.id)));
+}
+
+bool TempestHUDComposer::RenderElement(const Element &element)
+{
+	if (!EnsureOutputDirectory())
+		return false;
+	QSaveFile file(ElementPath(element));
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+		SetStatus(QStringLiteral("HUD RENDER FAILED // %1").arg(file.errorString()), true);
+		return false;
+	}
+	const QByteArray html = BuildElementHtml(element).toUtf8();
+	if (file.write(html) != html.size() || !file.commit()) {
+		SetStatus(QStringLiteral("HUD SAVE FAILED // %1").arg(file.errorString()), true);
+		return false;
+	}
+	++renderRevision;
+	return true;
+}
+
+QString TempestHUDComposer::BuildElementHtml(const Element &element) const
+{
+	QJsonObject state;
+	state.insert(QStringLiteral("type"), element.type);
+	state.insert(QStringLiteral("primary"), element.primary);
+	state.insert(QStringLiteral("secondary"), element.secondary);
+	state.insert(QStringLiteral("accent"), element.accent);
+	state.insert(QStringLiteral("reaction"), element.reaction);
+	state.insert(QStringLiteral("strength"), element.strength);
+	QString json = QString::fromUtf8(QJsonDocument(state).toJson(QJsonDocument::Compact));
+	json.replace(QStringLiteral("</"), QStringLiteral("<\\/"));
+
+	QString html = QString::fromUtf8(R"TEMPEST(<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--accent:#45d9ff;--ice:#d8fbff;--muted:#7895a8;--panel:rgba(4,14,23,.88);--react:0;--glow:10px;--shift:0px}
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;color:var(--ice);font-family:"Segoe UI",Arial,sans-serif}body{padding:8px}
+.scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(69,217,255,.025) 0,rgba(69,217,255,.025) 1px,transparent 1px,transparent 5px);opacity:calc(.22 + var(--react)*.45)}
+.frame{display:none;position:absolute;inset:20px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--accent) 42%,transparent),0 0 var(--glow) color-mix(in srgb,var(--accent) 24%,transparent)}
+.frame:before,.frame:after{content:"";position:absolute;left:8%;right:8%;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);transform:translateX(var(--shift))}.frame:before{top:-1px}.frame:after{bottom:-1px;transform:translateX(calc(var(--shift)*-1))}
+.corner{position:absolute;width:82px;height:82px;border-color:var(--accent);filter:drop-shadow(0 0 var(--glow) var(--accent))}.c1{left:-4px;top:-4px;border-left:4px solid;border-top:4px solid}.c2{right:-4px;top:-4px;border-right:4px solid;border-top:4px solid}.c3{left:-4px;bottom:-4px;border-left:4px solid;border-bottom:4px solid}.c4{right:-4px;bottom:-4px;border-right:4px solid;border-bottom:4px solid}
+.frame-meta{position:absolute;left:110px;top:22px;color:var(--accent);font-size:18px;letter-spacing:.28em;font-weight:700}.frame-state{position:absolute;right:110px;bottom:24px;color:var(--muted);font-size:14px;letter-spacing:.2em}
+.plate{position:absolute;inset:8px;display:flex;align-items:center;gap:18px;padding:22px 28px;background:linear-gradient(110deg,var(--panel),rgba(5,28,44,.72));border:1px solid color-mix(in srgb,var(--accent) 58%,transparent);clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--accent) 34%,transparent);transform:translateX(var(--shift))}
+.core{flex:0 0 54px;width:54px;height:54px;border:2px solid var(--accent);transform:rotate(45deg) scale(calc(.82 + var(--react)*.25));box-shadow:0 0 var(--glow) var(--accent);position:relative}.core:after{content:"";position:absolute;inset:12px;background:var(--accent);opacity:calc(.25 + var(--react)*.65)}
+.copy{min-width:0;flex:1}.kicker{color:var(--accent);font-size:12px;letter-spacing:.34em;margin-bottom:8px}.primary{font-size:28px;font-weight:800;letter-spacing:.12em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 var(--glow) color-mix(in srgb,var(--accent) 60%,transparent)}.secondary{margin-top:8px;color:var(--muted);font-size:13px;letter-spacing:.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meter{height:76px;width:8px;display:flex;align-items:flex-end;background:rgba(69,217,255,.08)}.meter i{display:block;width:100%;height:calc(12% + var(--react)*88%);background:var(--accent);box-shadow:0 0 var(--glow) var(--accent)}
+.chat-shell{display:none;position:absolute;inset:8px;background:linear-gradient(145deg,rgba(4,14,23,.93),rgba(4,27,43,.84));border:1px solid color-mix(in srgb,var(--accent) 58%,transparent);clip-path:polygon(0 0,calc(100% - 32px) 0,100% 32px,100% 100%,0 100%);box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--accent) 35%,transparent)}
+.chat-head{height:92px;padding:20px 24px;border-bottom:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}.chat-head b{display:block;color:var(--accent);font-size:20px;letter-spacing:.23em}.chat-head span{display:block;margin-top:9px;color:var(--muted);font-size:12px;letter-spacing:.16em}
+.chat-body{position:absolute;left:18px;right:18px;top:112px;bottom:62px;display:flex;flex-direction:column;justify-content:flex-end;gap:14px}.msg{padding:13px 15px;border-left:2px solid var(--accent);background:rgba(69,217,255,.045);color:#9bb5c7;font-size:15px;line-height:1.35}.msg b{display:block;color:var(--accent);font-size:10px;letter-spacing:.18em;margin-bottom:5px}.chat-foot{position:absolute;left:22px;right:22px;bottom:20px;color:var(--accent);font-size:10px;letter-spacing:.2em;display:flex;justify-content:space-between}
+body.frame-type .frame{display:block}body.frame-type .plate{display:none}body.chat-type .plate{display:none}body.chat-type .chat-shell{display:block}body.media-type .core{border-radius:50%;transform:rotate(0) scale(calc(.82 + var(--react)*.25))}body.media-type .core:after{border-radius:50%}body.lore-type .plate{align-items:flex-start;padding-top:30px}body.lore-type .primary{white-space:normal;font-size:24px}body.lore-type .secondary{white-space:normal;line-height:1.55}
+@keyframes breathe{50%{opacity:.58}}body.pulse .core{animation:breathe 1.6s ease-in-out infinite}
+</style></head>
+<body><div class="scan"></div>
+<div class="frame"><i class="corner c1"></i><i class="corner c2"></i><i class="corner c3"></i><i class="corner c4"></i><div class="frame-meta" id="framePrimary"></div><div class="frame-state" id="frameSecondary"></div></div>
+<section class="plate"><div class="core"></div><div class="copy"><div class="kicker">TEMPEST MAINFRAME // SIGNAL ELEMENT</div><div class="primary" id="primary"></div><div class="secondary" id="secondary"></div></div><div class="meter"><i></i></div></section>
+<section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>MAINFRAME</b>CHAT RELAY FOUNDATION ONLINE</div><div class="msg"><b>CHANNEL LINK</b>TWITCH AUTHENTICATION WILL ARRIVE IN THE CHAT RELAY PHASE</div><div class="msg"><b>OPERATOR NOTE</b>MOVE, RESIZE, CROP, GROUP, OR LOCK THIS PANEL IN OBS</div></main><footer class="chat-foot"><span>RELAY STANDBY</span><span>SIGNAL REACTIVE</span></footer></section>
+<script id="hud-state" type="application/json">{{STATE_JSON}}</script><script>
+const s=JSON.parse(document.getElementById('hud-state').textContent),root=document.documentElement,body=document.body;root.style.setProperty('--accent',s.accent||'#45d9ff');body.classList.add((s.type||'plate')+'-type');body.classList.add(s.reaction||'signal');for(const id of ['primary','framePrimary','chatPrimary'])document.getElementById(id).textContent=s.primary||'TEMPEST MAINFRAME';for(const id of ['secondary','frameSecondary','chatSecondary'])document.getElementById(id).textContent=s.secondary||'SIGNAL ELEMENT ONLINE';let level=0,phase=0;
+async function telemetry(){try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json();level=Math.max(Number(d.level)||0,level*.74)}}catch(_){level*=.82}phase+=.12;let react=level*Math.max(0,Number(s.strength)||0);if(s.reaction==='pulse')react=Math.max(react,.16+.12*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
+</script></body></html>)TEMPEST");
+	html.replace(QStringLiteral("{{STATE_JSON}}"), json);
+	return html;
+}
+
+bool TempestHUDComposer::ApplySourceSettings(obs_source_t *source, const Element &element)
+{
+	if (!source || !EnsureOutputDirectory())
+		return false;
+	obs_video_info ovi{};
+	QSize size = element.type == QStringLiteral("frame") ? QSize(1920, 1080) : ElementSize(element.type);
+	if (element.type == QStringLiteral("frame") && obs_get_video_info(&ovi))
+		size = QSize((int)ovi.base_width, (int)ovi.base_height);
+	OBSDataAutoRelease settings = obs_data_create();
+	const QByteArray path = QDir::toNativeSeparators(ElementPath(element)).toUtf8();
+	const QByteArray css =
+		QStringLiteral("body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}/* hud-revision:%1 */")
+			.arg(renderRevision)
+			.toUtf8();
+	obs_data_set_bool(settings, "is_local_file", true);
+	obs_data_set_string(settings, "local_file", path.constData());
+	obs_data_set_int(settings, "width", size.width());
+	obs_data_set_int(settings, "height", size.height());
+	obs_data_set_bool(settings, "shutdown", false);
+	obs_data_set_bool(settings, "restart_when_active", false);
+	obs_data_set_bool(settings, "reroute_audio", false);
+	obs_data_set_string(settings, "css", css.constData());
+	obs_source_update(source, settings);
+	return true;
+}
+
+bool TempestHUDComposer::EnsureElementInScene(Element &element, obs_scene_t *scene, bool applyDefaultTransform)
+{
+	if (!scene || !RenderElement(element))
+		return false;
+	OBSSourceAutoRelease source = obs_get_source_by_name(element.sourceName.toUtf8().constData());
+	if (source && strcmp(obs_source_get_unversioned_id(source), "browser_source") != 0) {
+		SetStatus(QStringLiteral("NON-BROWSER SOURCE USES HUD NAME // %1").arg(element.sourceName), true);
+		return false;
+	}
+	if (!source) {
+		const char *sourceType = obs_get_latest_input_type_id("browser_source");
+		if (!sourceType) {
+			SetStatus(QStringLiteral("OBS BROWSER SOURCE MODULE IS UNAVAILABLE"), true);
+			return false;
+		}
+		OBSDataAutoRelease settings = obs_data_create();
+		source = obs_source_create(sourceType, element.sourceName.toUtf8().constData(), settings, nullptr);
+		if (!source) {
+			SetStatus(QStringLiteral("HUD SOURCE CREATION FAILED // %1").arg(element.name), true);
+			return false;
+		}
+	}
+	ApplySourceSettings(source, element);
+	obs_sceneitem_t *item = obs_scene_find_source_recursive(scene, element.sourceName.toUtf8().constData());
+	if (!item) {
+		item = obs_scene_add(scene, source);
+		if (item && applyDefaultTransform)
+			ApplyDefaultTransform(item, element);
+	}
+	return item != nullptr;
+}
+
+void TempestHUDComposer::ApplyDefaultTransform(obs_sceneitem_t *item, const Element &element) const
+{
+	if (!item)
+		return;
+	obs_video_info ovi{};
+	const int canvasWidth = obs_get_video_info(&ovi) ? (int)ovi.base_width : 1920;
+	const int canvasHeight = ovi.base_height ? (int)ovi.base_height : 1080;
+	const QSize size = element.type == QStringLiteral("frame") ? QSize(canvasWidth, canvasHeight)
+								   : ElementSize(element.type);
+	vec2 position{};
+	if (element.type == QStringLiteral("frame")) {
+		position = {0.0f, 0.0f};
+		obs_sceneitem_set_locked(item, true);
+	} else if (element.type == QStringLiteral("chat")) {
+		position = {(float)(canvasWidth - size.width() - 60), 120.0f};
+	} else if (element.type == QStringLiteral("media")) {
+		position = {60.0f, (float)(canvasHeight - size.height() - 60)};
+	} else if (element.type == QStringLiteral("lore")) {
+		position = {(float)((canvasWidth - size.width()) / 2), (float)(canvasHeight - size.height() - 90)};
+	} else {
+		position = {60.0f, 70.0f};
+	}
+	obs_sceneitem_set_pos(item, &position);
+}
+
+void TempestHUDComposer::AddSelectedToScene()
+{
+	Element *element = SelectedElement();
+	OBSScene scene = main ? main->GetCurrentScene() : nullptr;
+	if (!element || !scene) {
+		SetStatus(QStringLiteral("NO ACTIVE SCENE FOR HUD ELEMENT"), true);
+		return;
+	}
+	if (!StoreEditor(*element))
+		return;
+	SaveElements();
+	if (!EnsureElementInScene(*element, scene, true))
+		return;
+	main->SaveProject();
+	SetStatus(QStringLiteral("HUD ELEMENT LINKED // %1").arg(element->name.toUpper()));
+}
+
+void TempestHUDComposer::DeployStarterHud()
+{
+	OBSScene scene = main ? main->GetCurrentScene() : nullptr;
+	if (!scene) {
+		SetStatus(QStringLiteral("NO ACTIVE SCENE FOR HUD DEPLOYMENT"), true);
+		return;
+	}
+	int deployed = 0;
+	for (Element &element : elements) {
+		if (EnsureElementInScene(element, scene, true))
+			++deployed;
+	}
+	main->SaveProject();
+	SetStatus(QStringLiteral("HUD DEPLOYED // %1 OF %2 ELEMENTS").arg(deployed).arg(elements.size()),
+		  deployed != elements.size());
+}
+
+void TempestHUDComposer::RefreshSelectedSource()
+{
+	Element *element = SelectedElement();
+	if (!element)
+		return;
+	OBSSourceAutoRelease source = obs_get_source_by_name(element->sourceName.toUtf8().constData());
+	if (source && strcmp(obs_source_get_unversioned_id(source), "browser_source") == 0)
+		ApplySourceSettings(source, *element);
+}
+
+bool TempestHUDComposer::VisibleForProtocol(const Element &element, const QString &protocolId) const
+{
+	if (protocolId == QStringLiteral("starting"))
+		return element.starting;
+	if (protocolId == QStringLiteral("live"))
+		return element.live;
+	if (protocolId == QStringLiteral("brb"))
+		return element.brb;
+	if (protocolId == QStringLiteral("ending"))
+		return element.ending;
+	return true;
+}
+
+void TempestHUDComposer::ApplyProtocolVisibility(obs_source_t *sceneSource, const QString &protocolId)
+{
+	obs_scene_t *scene = sceneSource ? obs_scene_from_source(sceneSource) : nullptr;
+	if (!scene)
+		return;
+	for (const Element &element : elements) {
+		obs_sceneitem_t *item = obs_scene_find_source_recursive(scene, element.sourceName.toUtf8().constData());
+		if (item)
+			obs_sceneitem_set_visible(item, VisibleForProtocol(element, protocolId));
+	}
+}
+
+QString TempestHUDComposer::TypeLabel(const QString &type)
+{
+	if (type == QStringLiteral("frame"))
+		return QStringLiteral("FRAME");
+	if (type == QStringLiteral("chat"))
+		return QStringLiteral("CHAT");
+	if (type == QStringLiteral("media"))
+		return QStringLiteral("MEDIA");
+	if (type == QStringLiteral("lore"))
+		return QStringLiteral("LORE");
+	return QStringLiteral("PLATE");
+}
+
+QString TempestHUDComposer::SafeFileId(const QString &id)
+{
+	QString safe = id;
+	safe.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_-]")), QStringLiteral("-"));
+	return safe;
+}
+
+QString TempestHUDComposer::SuggestedSourceName(const QString &name)
+{
+	return QStringLiteral("Tempest HUD // %1").arg(name.trimmed());
+}
+
+void TempestHUDComposer::SetStatus(const QString &message, bool error)
+{
+	statusLabel->setText(message);
+	statusLabel->setStyleSheet(QStringLiteral("color:%1;background:transparent;")
+					   .arg(error ? QStringLiteral("#ff799c") : QStringLiteral("#45d9ff")));
+}

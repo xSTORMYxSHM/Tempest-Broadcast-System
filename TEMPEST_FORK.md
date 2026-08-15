@@ -155,6 +155,23 @@ The Vault provides:
 
 Folder selection and rescanning are read-only operations. TBS creates or changes the Asset Bus only when **Load / Preview on Asset Bus** or **Add to Current Sequence** is pressed. The bus is added to the current scene once and reused for later assets, avoiding a separate OBS source for every indexed video. Asset cues retain their own file path, so the Director loads the correct video onto the bus immediately before executing that cue.
 
+## Mainframe HUD Composer
+
+The native **Mainframe HUD Composer** creates transparent reactive visual elements that remain ordinary OBS Browser Sources. Every deployed element can be selected, moved, resized, cropped, grouped, hidden, and locked with the standard OBS canvas and Sources controls; the graphic is not baked into the background video.
+
+The initial local HUD library contains:
+
+- a canvas-sized **Signal Frame** with reactive rails, corners, glow, and transmission labels;
+- a movable **Chat Terminal** shell prepared for the later Twitch relay phase;
+- an editable **Transmission Plate**; and
+- an editable **Now Playing** plate for future Media Bay state.
+
+Custom signal plates can be added from the same dock. Each definition stores its element type, primary and secondary text, accent color, reaction mode, reaction strength, and independent Starting, Live, BRB, and Ending visibility. Reaction modes include signal pulse, glow, breathing core, and peak glitch. All elements use the Control Deck's existing local audio telemetry and require no additional audio capture plugin.
+
+Definitions and renderer files are created locally without modifying a scene. **Add Selected to Current Scene** deliberately creates or reuses one named Browser Source, while **Deploy All HUD Elements** adds the complete library to the active scene. New plates deploy unlocked at practical starting positions. The full-canvas frame deploys locked so its transparent center does not intercept normal canvas selection; it can be unlocked through the standard Sources list.
+
+When a Starting, Live, BRB, or Ending protocol routes a scene, the Command Matrix applies the visibility switches saved for each HUD element found in that scene. The Chat Terminal currently renders a local relay-ready foundation only and does not connect to Twitch or display real messages until the separate authenticated Chat Relay phase is built.
+
 ### Protocol action automation
 
 The matrix's **Configure Protocol Actions** editor stores an independent native action sequence for each Starting, Live, BRB, and Ending command. A protocol can:

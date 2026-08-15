@@ -18,6 +18,7 @@ class QPushButton;
 class QTimer;
 class OBSBasic;
 class TempestControlDeck;
+class TempestHUDComposer;
 class TempestSequenceDirector;
 
 class TempestCommandMatrix : public OBSDock {
@@ -30,6 +31,7 @@ public:
 	void UnregisterHotkeys();
 	void RegisterExternalControls();
 	void SetSequenceDirector(TempestSequenceDirector *director);
+	void SetHUDComposer(TempestHUDComposer *composer);
 	void RunProtocol(const QString &protocolId);
 
 private slots:
@@ -110,6 +112,7 @@ private:
 
 	QPointer<OBSBasic> main;
 	QPointer<TempestControlDeck> controlDeck;
+	QPointer<TempestHUDComposer> hudComposer;
 	QPointer<TempestSequenceDirector> sequenceDirector;
 	QPointer<QGridLayout> sceneGrid;
 	QPointer<QLabel> currentSceneLabel;
