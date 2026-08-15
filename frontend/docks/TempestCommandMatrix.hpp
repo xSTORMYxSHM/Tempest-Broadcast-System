@@ -52,6 +52,8 @@ private:
 		QString audioActionA = QStringLiteral("keep");
 		QString audioSourceBUuid;
 		QString audioActionB = QStringLiteral("keep");
+		QString mediaSourceUuid;
+		QString mediaAction = QStringLiteral("keep");
 		QString recordingAction = QStringLiteral("keep");
 		bool launchEnabled = false;
 		QString programPath;
@@ -82,6 +84,7 @@ private:
 	void CompleteProtocolRoute(const QString &protocolId, const QString &sceneUuid, quint64 revision,
 				   bool launchFailed = false);
 	void ApplyAudioAction(const QString &sourceUuid, const QString &action);
+	void ApplyMediaAction(const QString &sourceUuid, const QString &action);
 	void ApplyRecordingAction(const QString &action);
 	bool LaunchConfiguredProgram(const ProtocolActionConfig &config);
 	void OpenActionEditor();
@@ -92,6 +95,7 @@ private:
 	void EmitRouterEvent(const char *eventName, obs_data_t *eventData);
 	void SetRouterState();
 	QVector<SourceInfo> EnumerateAudioSources() const;
+	QVector<SourceInfo> EnumerateMediaSources() const;
 	QVector<SourceInfo> EnumerateTransitions() const;
 	void SwitchScene(const QString &uuid, const QString &name);
 	void ApplyProtocolOverlay(obs_source_t *sceneSource, const QString &sourceName);

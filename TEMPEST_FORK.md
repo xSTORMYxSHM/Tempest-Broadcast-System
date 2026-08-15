@@ -110,6 +110,20 @@ The matrix provides:
 - a dynamically refreshed two-column scene grid for direct routing,
 - current-scene highlighting and protocol status feedback.
 
+## Signal Media Bay
+
+The native **Signal Media Bay** sits beside the Audio Mixer in the Command workspace and is also available from the Docks menu. It discovers every OBS source that exposes controllable-media transport, including Media Source, VLC Video Source, and Image Slide Show inputs.
+
+The bay provides:
+
+- a persistent source selector that follows source additions, removals, and renames;
+- play/pause, restart, stop, previous, and next transport controls;
+- live playback state, elapsed time, total duration, and seeking;
+- safe empty-state guidance when a scene collection has no controllable media; and
+- native OBS media control with no browser bridge or external player.
+
+This makes a fractal visualizer, avatar sequence, or intro playlist controllable from the same Tempest workstation surface used to route the broadcast.
+
 Protocol and scene switching uses the native OBS scene and transition system. It requires no WebSocket bridge, browser control server, macro plugin, or external automation utility.
 
 ### Protocol action automation
@@ -119,6 +133,7 @@ The matrix's **Configure Protocol Actions** editor stores an independent native 
 - wait up to ten seconds before routing its assigned scene;
 - select an OBS transition and duration;
 - mute, unmute, or preserve two chosen audio sources;
+- play, pause, restart, stop, move to the previous or next item, or preserve a chosen media source;
 - start, stop, or preserve local recording; and
 - optionally launch a chosen local executable with arguments.
 

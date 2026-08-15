@@ -58,6 +58,7 @@ class OBSMissingFiles;
 class OBSProjector;
 class TempestControlDeck;
 class TempestCommandMatrix;
+class TempestMediaBay;
 class TempestMainframeBar;
 class QToolBar;
 class VolumeControl;
@@ -449,6 +450,7 @@ private:
 	QPointer<OBSDock> mixerDock;
 	QPointer<TempestControlDeck> tempestControlDeck;
 	QPointer<TempestCommandMatrix> tempestCommandMatrix;
+	QPointer<TempestMediaBay> tempestMediaBay;
 	QPointer<QToolBar> tempestCommandToolbar;
 	QPointer<TempestMainframeBar> tempestMainframeBar;
 	QByteArray tempestCommandDockState;

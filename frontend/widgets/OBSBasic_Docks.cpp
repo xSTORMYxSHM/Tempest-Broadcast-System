@@ -21,6 +21,7 @@
 
 #include <docks/TempestControlDeck.hpp>
 #include <docks/TempestCommandMatrix.hpp>
+#include <docks/TempestMediaBay.hpp>
 #include "TempestMainframeBar.hpp"
 
 #include <qt-wrappers.hpp>
@@ -56,16 +57,19 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	ui->mixerDock->setFloating(false);
 	tempestControlDeck->setFloating(false);
 	tempestCommandMatrix->setFloating(false);
+	tempestMediaBay->setFloating(false);
 
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
 	addDockWidget(Qt::BottomDockWidgetArea, ui->mixerDock);
+	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
 
 	tempestCommandMatrix->setVisible(true);
 	ui->scenesDock->setVisible(false);
 	ui->sourcesDock->setVisible(false);
 	ui->mixerDock->setVisible(true);
 	tempestControlDeck->setVisible(true);
+	tempestMediaBay->setVisible(true);
 	ui->transitionsDock->setVisible(false);
 	controlsDock->setVisible(false);
 	statsDock->setVisible(false);
@@ -75,6 +79,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	const int mixerHeight = std::clamp(height() * 24 / 100, 210, 280);
 	resizeDocks({tempestCommandMatrix, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
 	resizeDocks({ui->mixerDock}, {mixerHeight}, Qt::Vertical);
+	resizeDocks({ui->mixerDock, tempestMediaBay}, {width() * 3 / 5, width() * 2 / 5}, Qt::Horizontal);
 }
 
 void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
@@ -176,10 +181,12 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
 
-	QList<QDockWidget *> bottomDocks{ui->mixerDock, ui->transitionsDock, controlsDock};
+	QList<QDockWidget *> bottomDocks{ui->mixerDock, ui->transitionsDock, controlsDock, tempestMediaBay};
 
-	resizeDocks(bottomDocks, {bottomDocksHeight, bottomDocksHeight, bottomDocksHeight}, Qt::Vertical);
-	resizeDocks(bottomDocks, {cx * 45 / 100, cx * 14 / 100, cx * 16 / 100}, Qt::Horizontal);
+	resizeDocks(bottomDocks, {bottomDocksHeight, bottomDocksHeight, bottomDocksHeight, bottomDocksHeight},
+		    Qt::Vertical);
+	resizeDocks(bottomDocks, {cx * 37 / 100, cx * 13 / 100, cx * 14 / 100, cx * 22 / 100},
+		    Qt::Horizontal);
 
 	int sideDockWidth = std::min(width() * 30 / 100, 280);
 	resizeDocks({ui->scenesDock, ui->sourcesDock}, {sideDockWidth, sideDockWidth}, Qt::Horizontal);
@@ -205,6 +212,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	statsDock->setFeatures(features);
 	tempestControlDeck->setFeatures(features);
 	tempestCommandMatrix->setFeatures(features);
+	tempestMediaBay->setFeatures(features);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--)
 		extraDocks[i]->setFeatures(features);
