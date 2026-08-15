@@ -28,8 +28,10 @@
 #include <QLineEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QTabWidget>
@@ -88,6 +90,7 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 	setWindowTitle(QStringLiteral("Transmission Command Matrix"));
 	setMinimumWidth(270);
 	BuildInterface();
+	EnableContentScaling(objectName());
 
 	config_t *config = App()->GetUserConfig();
 	for (const ProtocolWidgets &protocol : protocols) {
@@ -372,6 +375,7 @@ void TempestCommandMatrix::BuildInterface()
 		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
 		QPushButton:checked { border: 2px solid #45d9ff; background: #073c5f; color: white; }
 		QPushButton[protocol="true"] { min-height: 48px; font-size: 11px; letter-spacing: 1px; }
+		QPushButton[sceneRoute="true"] { min-height: 44px; }
 		QComboBox { min-height: 28px; background: #06101a; border: 1px solid #1f506d; color: #bdf6ff; }
 		QCheckBox { color: #748fa4; spacing: 7px; }
 		QScrollArea { border: none; background: transparent; }
@@ -436,6 +440,7 @@ void TempestCommandMatrix::BuildInterface()
 	sceneGrid->setContentsMargins(0, 0, 0, 0);
 	sceneGrid->setHorizontalSpacing(6);
 	sceneGrid->setVerticalSpacing(6);
+	sceneGrid->setAlignment(Qt::AlignTop);
 	sceneGrid->setColumnStretch(0, 1);
 	sceneGrid->setColumnStretch(1, 1);
 	scroll->setWidget(sceneContainer);
@@ -462,9 +467,10 @@ void TempestCommandMatrix::BuildInterface()
 		{"ending", "ENDING", "Tempest // Stream Ending"},
 	};
 
-	auto *protocolGrid = new QGridLayout();
+	protocolGrid = new QGridLayout();
 	protocolGrid->setHorizontalSpacing(6);
 	protocolGrid->setVerticalSpacing(6);
+	protocolGrid->setAlignment(Qt::AlignTop);
 	for (int index = 0; index < 4; ++index) {
 		const ProtocolDefinition &definition = definitions[index];
 		ProtocolWidgets protocol;
@@ -473,6 +479,7 @@ void TempestCommandMatrix::BuildInterface()
 		protocol.sourceName = QString::fromUtf8(definition.sourceName);
 		protocol.button = new QPushButton(protocol.label, protocolViewPage);
 		protocol.button->setProperty("protocol", true);
+		protocol.button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		connect(protocol.button, &QPushButton::clicked, this,
 			[this, id = protocol.id]() { ExecuteProtocol(id); });
 		protocolGrid->addWidget(protocol.button, index / 2, index % 2);
@@ -519,6 +526,19 @@ void TempestCommandMatrix::BuildInterface()
 	layout->addWidget(statusLabel);
 
 	setWidget(root);
+	QTimer::singleShot(0, this, [this]() { RelayoutRoutingGrids(); });
+}
+
+void TempestCommandMatrix::resizeEvent(QResizeEvent *event)
+{
+	OBSDock::resizeEvent(event);
+	RelayoutRoutingGrids();
+}
+
+void TempestCommandMatrix::contentScaleChanged()
+{
+	routingColumnCount = 0;
+	RelayoutRoutingGrids();
 }
 
 void TempestCommandMatrix::SetViewMode(const QString &mode, bool save)
@@ -616,30 +636,63 @@ void TempestCommandMatrix::RebuildAssignments(const QVector<SceneInfo> &scenes)
 
 void TempestCommandMatrix::RebuildSceneGrid(const QVector<SceneInfo> &scenes)
 {
+	emptySceneLabel = nullptr;
 	while (QLayoutItem *item = sceneGrid->takeAt(0)) {
 		if (QWidget *widget = item->widget())
 			widget->deleteLater();
 		delete item;
 	}
 	sceneButtons.clear();
+	currentScenes = scenes;
 
 	for (int index = 0; index < scenes.size(); ++index) {
 		const SceneInfo &scene = scenes[index];
 		auto *button = new QPushButton(QString(scene.name).replace(QStringLiteral("&"), QStringLiteral("&&")),
 					       sceneGrid->parentWidget());
 		button->setCheckable(true);
-		button->setMinimumHeight(44);
+		button->setProperty("sceneRoute", true);
+		button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		button->setAccessibleName(QStringLiteral("Route scene %1").arg(scene.name));
 		connect(button, &QPushButton::clicked, this,
 			[this, uuid = scene.uuid, name = scene.name]() { SwitchScene(uuid, name); });
-		sceneGrid->addWidget(button, index / 2, index % 2);
 		sceneButtons.insert(scene.uuid, button);
 	}
 
 	if (scenes.isEmpty()) {
-		auto *empty = new QLabel(QStringLiteral("No scenes available."), sceneGrid->parentWidget());
-		empty->setObjectName(QStringLiteral("matrixSubtitle"));
-		sceneGrid->addWidget(empty, 0, 0, 1, 2);
+		emptySceneLabel = new QLabel(QStringLiteral("No scenes available."), sceneGrid->parentWidget());
+		emptySceneLabel->setObjectName(QStringLiteral("matrixSubtitle"));
+	}
+	routingColumnCount = 0;
+	RelayoutRoutingGrids();
+}
+
+void TempestCommandMatrix::RelayoutRoutingGrids()
+{
+	if (!sceneGrid || !protocolGrid)
+		return;
+	const int availableWidth = std::max(1, basicViewPage ? basicViewPage->width() : width());
+	const int preferredButtonWidth = std::max(100, qRound(145.0 * ContentScalePercent() / 100.0));
+	const int columns = std::clamp(availableWidth / preferredButtonWidth, 1, 4);
+	if (columns == routingColumnCount)
+		return;
+	routingColumnCount = columns;
+
+	while (QLayoutItem *item = sceneGrid->takeAt(0))
+		delete item;
+	for (int index = 0; index < currentScenes.size(); ++index) {
+		if (QPushButton *button = sceneButtons.value(currentScenes[index].uuid))
+			sceneGrid->addWidget(button, index / columns, index % columns);
+	}
+	if (emptySceneLabel)
+		sceneGrid->addWidget(emptySceneLabel, 0, 0, 1, columns);
+
+	while (QLayoutItem *item = protocolGrid->takeAt(0))
+		delete item;
+	for (int index = 0; index < protocols.size(); ++index)
+		protocolGrid->addWidget(protocols[index].button, index / columns, index % columns);
+	for (int column = 0; column < 4; ++column) {
+		sceneGrid->setColumnStretch(column, column < columns ? 1 : 0);
+		protocolGrid->setColumnStretch(column, column < columns ? 1 : 0);
 	}
 }
 

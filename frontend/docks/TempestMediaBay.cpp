@@ -29,6 +29,7 @@ TempestMediaBay::TempestMediaBay(QWidget *parent) : OBSDock(parent)
 	selectedSourceUuid =
 		QString::fromUtf8(config_get_string(App()->GetUserConfig(), ConfigSection, "SelectedSourceUuid"));
 	BuildInterface();
+	EnableContentScaling(objectName());
 
 	sourceRefreshTimer.setInterval(1000);
 	connect(&sourceRefreshTimer, &QTimer::timeout, this, &TempestMediaBay::RefreshSources);

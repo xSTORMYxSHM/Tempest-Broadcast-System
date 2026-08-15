@@ -95,6 +95,12 @@ The default 1920x1080 workspace is headed by the native **Mainframe Command Nexu
 
 Each workspace stores its dock layout independently. Plugins and advanced dialogs remain available in Engineering mode while Command mode presents the Tempest-first operating surface.
 
+### Scalable Tempest docks
+
+Every native Tempest dock uses the same persistent content-scaling surface in both docked and floating states. The compact **Dock Scale** bar supports 60% through 160% scaling in 10% steps; the percentage button resets that dock to 100%. `Ctrl` plus the mouse wheel, the platform Zoom In/Zoom Out shortcuts, and `Ctrl+0` provide the same controls from the keyboard. Scale is saved independently for the Transmission Matrix, Control Deck, Media Bay, Sequence Director, Asset Vault, and HUD Composer.
+
+Scaling adjusts typography, control dimensions, margins, and layout spacing together. Each surface also gains horizontal and vertical overflow scrolling, so a detached dock remains usable when resized below its preferred content size.
+
 ### Twitch Stream Information dock
 
 The standard authenticated OBS/Twitch **Stream Information** dock remains the owner of title, Go Live notification, category, audience, tags, language, content labels, rerun, and branded-content controls. When base OBS creates its `twitchInfo` dock, TBS detects it asynchronously, docks it into the right-side Mainframe operations stack beside the Control Deck, Sequence Director, Asset Vault, and HUD Composer, and includes it in both Command and Engineering workspace state. Its normal Docks menu action remains available.
@@ -107,7 +113,7 @@ Command mode replaces the conventional Scenes and Sources column with the native
 
 The matrix provides:
 
-- a persistent **Basic** view containing only the dynamically refreshed two-column scene grid for direct routing,
+- a persistent **Basic** view containing only the dynamically refreshed scene grid for direct routing, responsively reflowing from one through four columns,
 - a separate **Protocol** view containing the large Starting, Live, BRB, and Ending automation controls,
 - a saved OBS scene assignment for each protocol,
 - automatic assignment when a collection contains a single scene,

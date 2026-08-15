@@ -113,6 +113,7 @@ TempestHUDComposer::TempestHUDComposer(OBSBasic *main, QWidget *parent) : OBSDoc
 	setWindowTitle(QStringLiteral("Mainframe HUD Composer"));
 	setMinimumWidth(390);
 	BuildInterface();
+	EnableContentScaling(objectName());
 	EnsureOutputDirectory();
 	LoadElements();
 	RebuildElementList();

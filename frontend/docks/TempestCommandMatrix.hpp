@@ -15,6 +15,7 @@ class QComboBox;
 class QGridLayout;
 class QLabel;
 class QPushButton;
+class QResizeEvent;
 class QStackedWidget;
 class QTimer;
 class OBSBasic;
@@ -34,6 +35,10 @@ public:
 	void SetSequenceDirector(TempestSequenceDirector *director);
 	void SetHUDComposer(TempestHUDComposer *composer);
 	void RunProtocol(const QString &protocolId);
+
+protected:
+	void resizeEvent(QResizeEvent *event) override;
+	void contentScaleChanged() override;
 
 private slots:
 	void RefreshScenes();
@@ -87,6 +92,7 @@ private:
 	void BuildInterface();
 	QVector<SceneInfo> EnumerateScenes() const;
 	void RebuildSceneGrid(const QVector<SceneInfo> &scenes);
+	void RelayoutRoutingGrids();
 	void RebuildAssignments(const QVector<SceneInfo> &scenes);
 	void ExecuteProtocol(const QString &protocolId);
 	void CompleteProtocolRoute(const QString &protocolId, const QString &sceneUuid, quint64 revision,
@@ -117,6 +123,8 @@ private:
 	QPointer<TempestHUDComposer> hudComposer;
 	QPointer<TempestSequenceDirector> sequenceDirector;
 	QPointer<QGridLayout> sceneGrid;
+	QPointer<QGridLayout> protocolGrid;
+	QPointer<QLabel> emptySceneLabel;
 	QPointer<QLabel> currentSceneLabel;
 	QPointer<QLabel> statusLabel;
 	QPointer<QLabel> routerLabel;
@@ -133,7 +141,9 @@ private:
 	QHash<QString, ProtocolActionConfig> actionConfigs;
 	QHash<obs_hotkey_id, QString> protocolHotkeys;
 	QHash<QString, QPointer<QPushButton>> sceneButtons;
+	QVector<SceneInfo> currentScenes;
 	QString sceneFingerprint;
+	int routingColumnCount = 0;
 	quint64 executionRevision = 0;
 	void *webSocketVendor = nullptr;
 	bool webSocketReady = false;

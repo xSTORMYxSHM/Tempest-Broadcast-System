@@ -53,6 +53,7 @@ TempestAssetVault::TempestAssetVault(OBSBasic *main, TempestSequenceDirector *di
 	setWindowTitle(QStringLiteral("Mainframe Asset Vault"));
 	setMinimumWidth(380);
 	BuildInterface();
+	EnableContentScaling(objectName());
 	LoadState();
 	RebuildRootSelector();
 

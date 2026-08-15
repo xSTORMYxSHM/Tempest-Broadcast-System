@@ -93,6 +93,7 @@ TempestControlDeck::TempestControlDeck(QWidget *parent) : OBSDock(parent)
 	setMinimumWidth(340);
 
 	BuildInterface();
+	EnableContentScaling(objectName());
 	LoadState();
 	EnsureOverlayDirectory();
 
@@ -156,8 +157,8 @@ void TempestControlDeck::ActivateMode(const QString &modeId, bool beginCountdown
 	raise();
 }
 
-void TempestControlDeck::UpdateOverlayText(const QString &modeId, const QString &transmission,
-					   const QString &status, const QString &messages)
+void TempestControlDeck::UpdateOverlayText(const QString &modeId, const QString &transmission, const QString &status,
+					   const QString &messages)
 {
 	ActivateMode(modeId);
 	if (!transmission.isEmpty())
@@ -172,16 +173,22 @@ void TempestControlDeck::UpdateOverlayText(const QString &modeId, const QString 
 void TempestControlDeck::BuildInterface()
 {
 	QWidget *body = new QWidget(this);
+	body->setObjectName(QStringLiteral("tempestControlRoot"));
+	body->setStyleSheet(QStringLiteral(R"(
+		QWidget#tempestControlRoot { background: #07131e; }
+		QLabel#controlTitle { color: #45d9ff; font-size: 15px; font-weight: 700; letter-spacing: 2px; }
+		QLabel#controlSubtitle { color: #748fa4; font-size: 10px; letter-spacing: 1px; }
+	)"));
 	QVBoxLayout *layout = new QVBoxLayout(body);
 	layout->setContentsMargins(12, 12, 12, 12);
 	layout->setSpacing(10);
 
-	QLabel *header = new QLabel(QStringLiteral(
-		"<span style='color:#45d9ff;font-size:16px;font-weight:700;'>TEMPEST // CONTROL DECK</span>"
-		"<br><span style='color:#748fa4;'>Broadcast overlay uplink</span>"),
-		body);
-	header->setTextFormat(Qt::RichText);
-	layout->addWidget(header);
+	auto *title = new QLabel(QStringLiteral("TEMPEST // CONTROL DECK"), body);
+	title->setObjectName(QStringLiteral("controlTitle"));
+	auto *subtitle = new QLabel(QStringLiteral("Broadcast overlay uplink"), body);
+	subtitle->setObjectName(QStringLiteral("controlSubtitle"));
+	layout->addWidget(title);
+	layout->addWidget(subtitle);
 
 	QFrame *rule = new QFrame(body);
 	rule->setFrameShape(QFrame::HLine);
@@ -228,9 +235,9 @@ void TempestControlDeck::BuildInterface()
 
 	countdownPreview = new QLabel(QStringLiteral("UPLINK PENDING"), body);
 	countdownPreview->setAlignment(Qt::AlignCenter);
-	countdownPreview->setStyleSheet(QStringLiteral(
-		"QLabel { color:#bdf6ff; background:#06131f; border:1px solid #0c7ccb; padding:10px; "
-		"font-size:22px; font-weight:700; letter-spacing:2px; }"));
+	countdownPreview->setStyleSheet(
+		QStringLiteral("QLabel { color:#bdf6ff; background:#06131f; border:1px solid #0c7ccb; padding:10px; "
+			       "font-size:22px; font-weight:700; letter-spacing:2px; }"));
 	layout->addWidget(countdownPreview);
 
 	QFormLayout *audioForm = new QFormLayout();
@@ -346,7 +353,8 @@ void TempestControlDeck::SaveModeState(const QString &modeId)
 	QByteArray runningKey = ModeKey("CountdownRunning", modeId);
 	config_set_string(config, ConfigSection, titleKey.constData(), streamTitle->text().toUtf8().constData());
 	config_set_string(config, ConfigSection, statusKey.constData(), statusLine->text().toUtf8().constData());
-	config_set_string(config, ConfigSection, messagesKey.constData(), rotationMessages->toPlainText().toUtf8().constData());
+	config_set_string(config, ConfigSection, messagesKey.constData(),
+			  rotationMessages->toPlainText().toUtf8().constData());
 	config_set_int(config, ConfigSection, endKey.constData(), countdownEndMs);
 	config_set_bool(config, ConfigSection, runningKey.constData(), countdownRunning);
 }
@@ -443,7 +451,7 @@ QString TempestControlDeck::BuildOverlayHtml() const
 {
 	QJsonArray messages;
 	const QStringList lines = rotationMessages->toPlainText().split(QRegularExpression(QStringLiteral("[\\r\\n]+")),
-									      Qt::SkipEmptyParts);
+									Qt::SkipEmptyParts);
 	for (const QString &line : lines) {
 		const QString trimmed = line.trimmed();
 		if (!trimmed.isEmpty())
@@ -546,9 +554,8 @@ void TempestControlDeck::UpdateCountdownPreview()
 	qint64 seconds = (remaining + 999) / 1000;
 	qint64 minutes = seconds / 60;
 	seconds %= 60;
-	countdownPreview->setText(QStringLiteral("%1:%2")
-					  .arg(minutes, 2, 10, QChar('0'))
-					  .arg(seconds, 2, 10, QChar('0')));
+	countdownPreview->setText(
+		QStringLiteral("%1:%2").arg(minutes, 2, 10, QChar('0')).arg(seconds, 2, 10, QChar('0')));
 }
 
 void TempestControlDeck::AudioLevelCallback(void *param, const float magnitude[MAX_AUDIO_CHANNELS],
@@ -603,7 +610,8 @@ void TempestControlDeck::RefreshAudioSources()
 	int selected = wanted.isEmpty() ? -1 : audioSourceCombo->findData(wanted);
 	if (selected < 0 && !entries.empty()) {
 		for (int i = 1; i < audioSourceCombo->count(); ++i) {
-			if (audioSourceCombo->itemText(i).contains(QStringLiteral("Desktop Audio"), Qt::CaseInsensitive)) {
+			if (audioSourceCombo->itemText(i).contains(QStringLiteral("Desktop Audio"),
+								   Qt::CaseInsensitive)) {
 				selected = i;
 				break;
 			}
@@ -670,10 +678,10 @@ void TempestControlDeck::ApplySourceSettings(obs_source_t *source)
 
 	OBSDataAutoRelease settings = obs_data_create();
 	QByteArray path = QDir::toNativeSeparators(overlayPath).toUtf8();
-	QByteArray css = QStringLiteral(
-				 "body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}/* tempest-revision:%1 */")
-				 .arg(renderRevision)
-				 .toUtf8();
+	QByteArray css =
+		QStringLiteral("body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}/* tempest-revision:%1 */")
+			.arg(renderRevision)
+			.toUtf8();
 	obs_data_set_bool(settings, "is_local_file", true);
 	obs_data_set_string(settings, "local_file", path.constData());
 	obs_data_set_int(settings, "width", width);
@@ -723,7 +731,8 @@ void TempestControlDeck::CreateOrUpdateSource()
 		OBSDataAutoRelease settings = obs_data_create();
 		source = obs_source_create(sourceType, sourceName.constData(), settings, nullptr);
 		if (!source) {
-			SetStatus(QStringLiteral("Unable to create the %1 Browser Source.").arg(CurrentModeLabel()), true);
+			SetStatus(QStringLiteral("Unable to create the %1 Browser Source.").arg(CurrentModeLabel()),
+				  true);
 			return;
 		}
 		ApplySourceSettings(source);

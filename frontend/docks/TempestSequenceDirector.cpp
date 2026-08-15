@@ -73,6 +73,7 @@ TempestSequenceDirector::TempestSequenceDirector(OBSBasic *main, TempestCommandM
 	setWindowTitle(QStringLiteral("Mainframe Sequence Director"));
 	setMinimumWidth(360);
 	BuildInterface();
+	EnableContentScaling(objectName());
 	LoadSequences();
 	activeSequenceId = CurrentSequenceId();
 	RebuildCueList();
