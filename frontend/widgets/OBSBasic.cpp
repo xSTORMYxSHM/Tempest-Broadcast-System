@@ -266,6 +266,8 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	addToolBar(Qt::TopToolBarArea, tempestCommandToolbar);
 	connect(tempestMainframeBar, &TempestMainframeBar::WorkspaceRequested, this,
 		[this](bool commandMode) { SetTempestWorkspace(commandMode); });
+	connect(tempestMainframeBar, &TempestMainframeBar::DockManagerRequested, this,
+		[this]() { OpenTempestDockManager(); });
 
 	/* Set up streaming connections */
 	connect(

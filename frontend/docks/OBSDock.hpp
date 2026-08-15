@@ -20,6 +20,8 @@ public:
 	inline OBSDock(const QString &title, QWidget *parent = nullptr) : QDockWidget(title, parent) {}
 	void EnableContentScaling(const QString &configKey);
 	int ContentScalePercent() const { return contentScalePercent; }
+	bool HasContentScaling() const { return !scaledContent.isNull(); }
+	void SetContentScalePercent(int percent) { ApplyContentScale(percent); }
 
 	virtual void closeEvent(QCloseEvent *event);
 	virtual void showEvent(QShowEvent *event);

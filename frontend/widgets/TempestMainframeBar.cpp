@@ -52,9 +52,9 @@ TempestMainframeBar::TempestMainframeBar(OBSBasic *main) : QFrame(main), main(ma
 		streamStopping = false;
 		streamElapsed.invalidate();
 		SetTransmissionState(armButton->isChecked() ? QStringLiteral("SYSTEM ARMED")
-								     : QStringLiteral("OFFLINE"),
+							    : QStringLiteral("OFFLINE"),
 				     armButton->isChecked() ? QStringLiteral("AWAITING TRANSMISSION COMMAND")
-								     : QStringLiteral("MAINFRAME STANDBY"),
+							    : QStringLiteral("MAINFRAME STANDBY"),
 				     armButton->isChecked() ? QStringLiteral("#edb74a") : QStringLiteral("#748fa4"));
 		UpdateActionButtons();
 	});
@@ -62,7 +62,7 @@ TempestMainframeBar::TempestMainframeBar(OBSBasic *main) : QFrame(main), main(ma
 		streamStarting = false;
 		streamStopping = false;
 		SetTransmissionState(armButton->isChecked() ? QStringLiteral("SYSTEM ARMED")
-								     : QStringLiteral("OFFLINE"),
+							    : QStringLiteral("OFFLINE"),
 				     QStringLiteral("UPLINK START FAILED"), QStringLiteral("#ff799c"));
 		UpdateActionButtons();
 	});
@@ -109,6 +109,7 @@ void TempestMainframeBar::BuildInterface()
 		QPushButton:checked { border-color: #45d9ff; background: #073c5f; color: white; }
 		QPushButton:disabled { color: #41596c; border-color: #1f3242; background: #09141d; }
 		QPushButton#tempestArm:checked { border-color: #edb74a; color: #ffd777; background: #4a3510; }
+		QPushButton#tempestDockManager { min-width: 82px; }
 		QPushButton#tempestStream { min-width: 132px; }
 		QPushButton#tempestRecord:checked { border-color: #ff4b70; color: white; background: #64142b; }
 		QPushButton#tempestEmergency { color: #ff799c; border-color: #82203a; }
@@ -141,11 +142,15 @@ void TempestMainframeBar::BuildInterface()
 	workspaceGroup->addButton(engineeringWorkspaceButton);
 	workspaceLayout->addWidget(commandWorkspaceButton);
 	workspaceLayout->addWidget(engineeringWorkspaceButton);
+	dockManagerButton = new QPushButton(QStringLiteral("LAYOUT"), this);
+	dockManagerButton->setObjectName(QStringLiteral("tempestDockManager"));
+	dockManagerButton->setToolTip(QStringLiteral("Open Mainframe Dock Layout Director"));
+	workspaceLayout->addWidget(dockManagerButton);
 	root->addLayout(workspaceLayout);
 
 	connect(commandWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(true); });
-	connect(engineeringWorkspaceButton, &QPushButton::clicked, this,
-		[this]() { emit WorkspaceRequested(false); });
+	connect(engineeringWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(false); });
+	connect(dockManagerButton, &QPushButton::clicked, this, [this]() { emit DockManagerRequested(); });
 
 	auto *stateLayout = new QVBoxLayout();
 	stateLayout->setSpacing(0);
@@ -200,8 +205,7 @@ void TempestMainframeBar::BuildInterface()
 	connect(recordButton, &QPushButton::clicked, this, &TempestMainframeBar::TriggerRecord);
 	connect(emergencyButton, &QPushButton::clicked, this, &TempestMainframeBar::EmergencyCut);
 
-	SetTransmissionState(QStringLiteral("OFFLINE"), QStringLiteral("MAINFRAME STANDBY"),
-			     QStringLiteral("#748fa4"));
+	SetTransmissionState(QStringLiteral("OFFLINE"), QStringLiteral("MAINFRAME STANDBY"), QStringLiteral("#748fa4"));
 }
 
 void TempestMainframeBar::SetCommandWorkspace(bool commandMode)
@@ -265,8 +269,9 @@ void TempestMainframeBar::RefreshTelemetry()
 
 	OBSSource scene = main->GetCurrentSceneSource();
 	const char *sceneName = scene ? obs_source_get_name(scene) : nullptr;
-	sceneLabel->setText(QStringLiteral("SCENE // %1").arg(sceneName ? QString::fromUtf8(sceneName).toUpper()
-								       : QStringLiteral("NO ACTIVE SCENE")));
+	sceneLabel->setText(
+		QStringLiteral("SCENE // %1")
+			.arg(sceneName ? QString::fromUtf8(sceneName).toUpper() : QStringLiteral("NO ACTIVE SCENE")));
 
 	const double fps = obs_get_active_fps();
 	const uint64_t totalFrames = obs_get_total_frames();
@@ -306,9 +311,9 @@ void TempestMainframeBar::UpdateActionButtons()
 	const bool busy = streamStarting || streamStopping;
 	armButton->setEnabled(!live && !busy);
 	streamButton->setEnabled(!busy && (live || armButton->isChecked()));
-	streamButton->setText(live ? QStringLiteral("END TRANSMISSION")
-				   : armButton->isChecked() ? QStringLiteral("INITIATE UPLINK")
-							  : QStringLiteral("UPLINK LOCKED"));
+	streamButton->setText(live                     ? QStringLiteral("END TRANSMISSION")
+			      : armButton->isChecked() ? QStringLiteral("INITIATE UPLINK")
+						       : QStringLiteral("UPLINK LOCKED"));
 	emergencyButton->setEnabled(live && !streamStopping);
 	recordButton->setChecked(recording);
 	recordButton->setText(recording ? QStringLiteral("STOP RECORD") : QStringLiteral("RECORD"));

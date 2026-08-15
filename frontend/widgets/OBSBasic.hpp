@@ -466,6 +466,7 @@ private:
 
 	void SetTempestWorkspace(bool commandMode, bool initial = false);
 	void ConfigureTempestCommandLayout();
+	void OpenTempestDockManager();
 	void IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal = false);
 	void SaveTempestWorkspaceState();
 

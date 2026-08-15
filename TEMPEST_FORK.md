@@ -101,6 +101,8 @@ Every native Tempest dock uses the same persistent content-scaling surface in bo
 
 Scaling adjusts typography, control dimensions, margins, and layout spacing together. Each surface also gains horizontal and vertical overflow scrolling, so a detached dock remains usable when resized below its preferred content size.
 
+The Command Nexus **Layout** button opens the native **Dock Layout Director**. It manages visibility, docked or floating state, per-dock scale, and focus for the complete Tempest dock suite, with Stream Information included whenever Twitch authentication makes that dock available. **Recover Command Layout** returns all panels to the canonical Command workspace and resets their scales, providing an in-app recovery path for hidden or off-screen floating docks.
+
 ### Twitch Stream Information dock
 
 The standard authenticated OBS/Twitch **Stream Information** dock remains the owner of title, Go Live notification, category, audience, tags, language, content labels, rerun, and branded-content controls. When base OBS creates its `twitchInfo` dock, TBS detects it asynchronously, docks it into the right-side Mainframe operations stack beside the Control Deck, Sequence Director, Asset Vault, and HUD Composer, and includes it in both Command and Engineering workspace state. Its normal Docks menu action remains available.

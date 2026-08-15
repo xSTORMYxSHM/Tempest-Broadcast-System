@@ -29,6 +29,16 @@
 
 #include <qt-wrappers.hpp>
 
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPushButton>
+#include <QVBoxLayout>
+
 #include <algorithm>
 
 void setupDockAction(QDockWidget *dock)
@@ -99,6 +109,182 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	resizeDocks({tempestCommandMatrix, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
 	resizeDocks({ui->mixerDock}, {mixerHeight}, Qt::Vertical);
 	resizeDocks({ui->mixerDock, tempestMediaBay}, {width() * 3 / 5, width() * 2 / 5}, Qt::Horizontal);
+}
+
+void OBSBasic::OpenTempestDockManager()
+{
+	struct DockEntry {
+		QString label;
+		QPointer<QDockWidget> dock;
+	};
+	struct DockControls {
+		QPointer<QDockWidget> dock;
+		QPointer<QCheckBox> visible;
+		QPointer<QCheckBox> floating;
+		QPointer<QComboBox> scale;
+	};
+
+	const QVector<DockEntry> entries = {
+		{QStringLiteral("Transmission Matrix"), tempestCommandMatrix},
+		{QStringLiteral("Control Deck"), tempestControlDeck},
+		{QStringLiteral("Signal Media Bay"), tempestMediaBay},
+		{QStringLiteral("Sequence Director"), tempestSequenceDirector},
+		{QStringLiteral("Asset Vault"), tempestAssetVault},
+		{QStringLiteral("HUD Composer"), tempestHUDComposer},
+		{QStringLiteral("Stream Information"), tempestStreamInfoDock},
+	};
+
+	QDialog dialog(this);
+	dialog.setWindowTitle(QStringLiteral("Mainframe Dock Layout Director"));
+	dialog.setModal(true);
+	dialog.resize(720, 500);
+	dialog.setStyleSheet(QStringLiteral(R"(
+		QDialog { background: #07131e; color: #bdf6ff; }
+		QLabel#layoutTitle { color: #45d9ff; font-size: 16px; font-weight: 700; letter-spacing: 2px; }
+		QLabel#layoutSubtitle, QLabel#layoutHeader { color: #748fa4; font-size: 10px; letter-spacing: 1px; }
+		QCheckBox { color: #9eb7c8; }
+		QComboBox { min-height: 28px; padding: 0 7px; color: #bdf6ff; background: #06101a; border: 1px solid #1f506d; }
+		QComboBox:disabled { color: #40576a; border-color: #172d3d; background: #091721; }
+		QPushButton { min-height: 30px; padding: 0 10px; color: #bdf6ff; background: #0d2230; border: 1px solid #1f506d; font-weight: 700; }
+		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
+		QPushButton:disabled { color: #40576a; border-color: #172d3d; background: #091721; }
+	)"));
+	auto *root = new QVBoxLayout(&dialog);
+	root->setContentsMargins(14, 14, 14, 14);
+	root->setSpacing(10);
+	auto *title = new QLabel(QStringLiteral("DOCK LAYOUT DIRECTOR"), &dialog);
+	title->setObjectName(QStringLiteral("layoutTitle"));
+	auto *subtitle = new QLabel(
+		QStringLiteral("Visibility, floating state, scale, and recovery for the Mainframe workstation."),
+		&dialog);
+	subtitle->setObjectName(QStringLiteral("layoutSubtitle"));
+	root->addWidget(title);
+	root->addWidget(subtitle);
+
+	auto *grid = new QGridLayout();
+	grid->setHorizontalSpacing(12);
+	grid->setVerticalSpacing(7);
+	const QStringList headings = {QStringLiteral("DOCK"), QStringLiteral("VISIBLE"), QStringLiteral("FLOATING"),
+				      QStringLiteral("SCALE"), QStringLiteral("ACTION")};
+	for (int column = 0; column < headings.size(); ++column) {
+		auto *heading = new QLabel(headings[column], &dialog);
+		heading->setObjectName(QStringLiteral("layoutHeader"));
+		grid->addWidget(heading, 0, column);
+	}
+	grid->setColumnStretch(0, 1);
+	grid->setColumnStretch(3, 1);
+
+	QVector<DockControls> controls;
+	for (int index = 0; index < entries.size(); ++index) {
+		const DockEntry &entry = entries[index];
+		const int row = index + 1;
+		auto *name = new QLabel(entry.label, &dialog);
+		if (!entry.dock)
+			name->setText(QStringLiteral("%1 // UNAVAILABLE").arg(entry.label));
+		auto *visible = new QCheckBox(&dialog);
+		auto *floating = new QCheckBox(&dialog);
+		auto *scale = new QComboBox(&dialog);
+		for (int percent = 60; percent <= 160; percent += 10)
+			scale->addItem(QStringLiteral("%1%").arg(percent), percent);
+		auto *focus = new QPushButton(QStringLiteral("FOCUS"), &dialog);
+		visible->setAccessibleName(QStringLiteral("%1 visible").arg(entry.label));
+		floating->setAccessibleName(QStringLiteral("%1 floating").arg(entry.label));
+		scale->setAccessibleName(QStringLiteral("%1 scale").arg(entry.label));
+		focus->setAccessibleName(QStringLiteral("Focus %1").arg(entry.label));
+
+		OBSDock *scalableDock = entry.dock ? qobject_cast<OBSDock *>(entry.dock.data()) : nullptr;
+		const bool available = entry.dock != nullptr;
+		const bool scalable = scalableDock && scalableDock->HasContentScaling();
+		visible->setChecked(available && !entry.dock->isHidden());
+		floating->setChecked(available && entry.dock->isFloating());
+		const int scaleIndex = scalable ? scale->findData(scalableDock->ContentScalePercent()) : -1;
+		scale->setCurrentIndex(scaleIndex >= 0 ? scaleIndex : scale->findData(100));
+		visible->setEnabled(available);
+		floating->setEnabled(available);
+		scale->setEnabled(scalable);
+		focus->setEnabled(available);
+		connect(focus, &QPushButton::clicked, &dialog, [guarded = entry.dock]() {
+			if (!guarded)
+				return;
+			guarded->setVisible(true);
+			guarded->show();
+			guarded->raise();
+			guarded->activateWindow();
+		});
+
+		grid->addWidget(name, row, 0);
+		grid->addWidget(visible, row, 1, Qt::AlignCenter);
+		grid->addWidget(floating, row, 2, Qt::AlignCenter);
+		grid->addWidget(scale, row, 3);
+		grid->addWidget(focus, row, 4);
+		controls.push_back({entry.dock, visible, floating, scale});
+	}
+	root->addLayout(grid);
+	root->addStretch(1);
+
+	auto *utilityRow = new QHBoxLayout();
+	auto *showAll = new QPushButton(QStringLiteral("SHOW ALL"), &dialog);
+	auto *resetScales = new QPushButton(QStringLiteral("RESET ALL SCALES"), &dialog);
+	auto *recover = new QPushButton(QStringLiteral("RECOVER COMMAND LAYOUT"), &dialog);
+	recover->setToolTip(QStringLiteral("Dock every Mainframe panel back into the canonical Command workspace."));
+	utilityRow->addWidget(showAll);
+	utilityRow->addWidget(resetScales);
+	utilityRow->addWidget(recover);
+	root->addLayout(utilityRow);
+	connect(showAll, &QPushButton::clicked, &dialog, [&controls]() {
+		for (DockControls &control : controls) {
+			if (control.visible && control.visible->isEnabled())
+				control.visible->setChecked(true);
+		}
+	});
+	connect(resetScales, &QPushButton::clicked, &dialog, [&controls]() {
+		for (DockControls &control : controls) {
+			if (control.scale && control.scale->isEnabled())
+				control.scale->setCurrentIndex(control.scale->findData(100));
+		}
+	});
+	bool recoverCommandLayout = false;
+	connect(recover, &QPushButton::clicked, &dialog, [&dialog, &recoverCommandLayout]() {
+		recoverCommandLayout = true;
+		dialog.accept();
+	});
+
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+	buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("APPLY LAYOUT"));
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+	root->addWidget(buttons);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+
+	if (recoverCommandLayout) {
+		for (DockControls &control : controls) {
+			if (auto *dock = control.dock ? qobject_cast<OBSDock *>(control.dock.data()) : nullptr;
+			    dock && dock->HasContentScaling())
+				dock->SetContentScalePercent(100);
+		}
+		tempestCommandDockState.clear();
+		tempestCommandWorkspace = true;
+		ConfigureTempestCommandLayout();
+		tempestMainframeBar->SetCommandWorkspace(true);
+		config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace", "command");
+	} else {
+		for (DockControls &control : controls) {
+			if (!control.dock)
+				continue;
+			if (auto *dock = qobject_cast<OBSDock *>(control.dock.data());
+			    dock && dock->HasContentScaling())
+				dock->SetContentScalePercent(control.scale->currentData().toInt());
+			control.dock->setFloating(control.floating->isChecked());
+			control.dock->setVisible(control.visible->isChecked());
+			if (control.visible->isChecked() && control.floating->isChecked()) {
+				control.dock->show();
+				control.dock->raise();
+			}
+		}
+	}
+	SaveTempestWorkspaceState();
+	config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 }
 
 void OBSBasic::IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal)

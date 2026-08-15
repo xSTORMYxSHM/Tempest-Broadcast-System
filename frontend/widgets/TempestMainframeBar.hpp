@@ -18,6 +18,7 @@ public:
 
 signals:
 	void WorkspaceRequested(bool commandMode);
+	void DockManagerRequested();
 
 private slots:
 	void ToggleArm(bool armed);
@@ -41,6 +42,7 @@ private:
 	QPointer<QLabel> recordStateLabel;
 	QPointer<QPushButton> commandWorkspaceButton;
 	QPointer<QPushButton> engineeringWorkspaceButton;
+	QPointer<QPushButton> dockManagerButton;
 	QPointer<QPushButton> armButton;
 	QPointer<QPushButton> streamButton;
 	QPointer<QPushButton> recordButton;
