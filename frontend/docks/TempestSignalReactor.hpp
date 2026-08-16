@@ -29,10 +29,17 @@ public:
 	void UnregisterHotkeys();
 	void TriggerPulse(float strength, const QString &origin = QStringLiteral("external"));
 	void SetWebSocketReady(bool ready);
+	void SetSourceBindingSummary(int total, int enabled);
+	bool SourceNetworkArmed() const;
+	float SourceNetworkIntensity() const;
 
 signals:
 	void PulseTriggered(float strength, const QString &origin);
 	void LevelsUpdated(float master, float desktop, float microphone, float beat);
+	void SourceNetworkArmedChanged(bool armed);
+	void SourceNetworkIntensityChanged(float intensity);
+	void SourceNetworkTestRequested();
+	void SourceNetworkRestoreRequested();
 
 private slots:
 	void RefreshAudioSources();
@@ -73,6 +80,9 @@ private:
 	QPointer<QProgressBar> microphoneMeter;
 	QPointer<QProgressBar> beatMeter;
 	QPointer<QProgressBar> masterMeter;
+	QPointer<QCheckBox> sourceNetworkArmed;
+	QPointer<QDoubleSpinBox> sourceNetworkIntensity;
+	QPointer<QLabel> sourceNetworkStatus;
 	QPointer<QLabel> statusLabel;
 	QPointer<QLabel> controlLabel;
 	QPointer<QPushButton> pulseButton;
@@ -82,6 +92,7 @@ private:
 	SignalChannel desktopChannel;
 	SignalChannel microphoneChannel;
 	QHash<obs_hotkey_id, float> pulseHotkeys;
+	QHash<obs_hotkey_id, QString> networkHotkeys;
 	QString configuredDesktopUuid;
 	QString configuredMicrophoneUuid;
 	QString telemetryPath;

@@ -197,6 +197,34 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 			EmitRouterEvent("SignalTriggered", eventData);
 		});
 	connect(signalReactor, &TempestSignalReactor::LevelsUpdated, this, &TempestCommandMatrix::ApplyReactionLevels);
+	reactionNetworkArmed = signalReactor->SourceNetworkArmed();
+	reactionNetworkIntensity = signalReactor->SourceNetworkIntensity();
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkArmedChanged, this, [this](bool armed) {
+		reactionNetworkArmed = armed;
+		if (!armed) {
+			reactionTestKey.clear();
+			reactionTestUntil = 0;
+			reactionNetworkTestUntil = 0;
+			RestoreAllReactions();
+		}
+		SetStatus(armed ? QStringLiteral("Source reaction network armed")
+				: QStringLiteral("Source reaction network disarmed // bases restored"));
+	});
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkIntensityChanged, this, [this](float intensity) {
+		reactionNetworkIntensity = std::clamp(double(intensity), 0.0, 2.0);
+		if (reactionNetworkIntensity <= 0.0)
+			RestoreAllReactions();
+	});
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkTestRequested, this,
+		&TempestCommandMatrix::TestReactionNetwork);
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkRestoreRequested, this, [this]() {
+		reactionTestKey.clear();
+		reactionTestUntil = 0;
+		reactionNetworkTestUntil = 0;
+		RestoreAllReactions();
+		SetStatus(QStringLiteral("All source reaction bases restored"));
+	});
+	UpdateReactionNetworkSummary();
 	RefreshReactionConsole();
 }
 
@@ -1994,6 +2022,7 @@ void TempestCommandMatrix::ApplyReactionBinding()
 	reaction.baselineCaptured = true;
 	sourceReactions.insert(key, reaction);
 	SaveSourceReactions();
+	UpdateReactionNetworkSummary();
 	SetStatus(QStringLiteral("Reactive rig saved // %1 // %2 modulator%3")
 			  .arg(reaction.signal.toUpper())
 			  .arg(ReactionEffectCount(reaction))
@@ -2051,15 +2080,48 @@ void TempestCommandMatrix::RemoveReactionBinding()
 	const QString sourceName = found->sourceName;
 	sourceReactions.erase(found);
 	SaveSourceReactions();
+	UpdateReactionNetworkSummary();
 	SetStatus(QStringLiteral("Reactive binding removed // %1").arg(sourceName));
 	RefreshReactionConsole();
 	RefreshLayoutConsole();
+}
+
+void TempestCommandMatrix::UpdateReactionNetworkSummary()
+{
+	if (!signalReactor)
+		return;
+	int enabled = 0;
+	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
+		if (it->enabled)
+			++enabled;
+	}
+	signalReactor->SetSourceBindingSummary(sourceReactions.size(), enabled);
+}
+
+void TempestCommandMatrix::TestReactionNetwork()
+{
+	int enabled = 0;
+	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
+		if (it->enabled)
+			++enabled;
+	}
+	if (enabled == 0) {
+		SetStatus(QStringLiteral("No enabled source reaction rigs to test"), true);
+		return;
+	}
+	reactionNetworkTestUntil = QDateTime::currentMSecsSinceEpoch() + 1200;
+	ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f);
+	QTimer::singleShot(1250, this, [this]() { ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f); });
+	SetStatus(QStringLiteral("Reaction network test // %1 rig%2")
+			  .arg(enabled)
+			  .arg(enabled == 1 ? QString() : QStringLiteral("s")));
 }
 
 void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, float microphone, float beat)
 {
 	reactionPhase = std::fmod(reactionPhase + 0.28, 6.283185307179586);
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const bool testingNetwork = now < reactionNetworkTestUntil;
 	bool capturedBaseline = false;
 	for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
 		SourceReaction &reaction = it.value();
@@ -2073,8 +2135,12 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			reaction.baselineCaptured = true;
 			capturedBaseline = true;
 		}
-		const bool testing = it.key() == reactionTestKey && now < reactionTestUntil;
-		if (!reaction.enabled && !testing) {
+		const bool testingSelected = it.key() == reactionTestKey && now < reactionTestUntil;
+		if (!reaction.enabled && !testingSelected) {
+			RestoreReaction(reaction);
+			continue;
+		}
+		if (!reactionNetworkArmed && !testingSelected && !testingNetwork) {
 			RestoreReaction(reaction);
 			continue;
 		}
@@ -2085,17 +2151,19 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			level = microphone;
 		else if (reaction.signal == QStringLiteral("beat"))
 			level = beat;
-		if (testing)
+		if (testingSelected || testingNetwork)
 			level = 1.0f;
 		level = std::clamp(level, 0.0f, 1.5f);
+		const float networkIntensity = float(std::clamp(reactionNetworkIntensity, 0.0, 2.0));
 
 		if (reaction.visibilityEnabled) {
 			const float onThreshold = float(reaction.threshold);
 			const float offThreshold = onThreshold * 0.75f;
+			const float visibilityLevel = level * networkIntensity;
 			if (reaction.visibilityActive)
-				reaction.visibilityActive = level >= offThreshold;
+				reaction.visibilityActive = visibilityLevel >= offThreshold;
 			else
-				reaction.visibilityActive = level >= onThreshold;
+				reaction.visibilityActive = visibilityLevel >= onThreshold;
 			const bool visible = reaction.baselineVisible && reaction.visibilityActive;
 			if (obs_sceneitem_visible(item) != visible)
 				obs_sceneitem_set_visible(item, visible);
@@ -2103,7 +2171,8 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 		}
 
 		const double denominator = std::max(0.001, 1.0 - reaction.threshold);
-		const float response = float(std::clamp((double(level) - reaction.threshold) / denominator, 0.0, 1.0));
+		const float response = float(std::clamp((double(level) - reaction.threshold) / denominator, 0.0, 1.0)) *
+				       networkIntensity;
 		if (response <= 0.0f) {
 			if (reaction.runtimeTransformApplied)
 				obs_sceneitem_set_info2(item, &reaction.baseline);
@@ -2129,6 +2198,8 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 	}
 	if (now >= reactionTestUntil)
 		reactionTestKey.clear();
+	if (now >= reactionNetworkTestUntil)
+		reactionNetworkTestUntil = 0;
 	if (capturedBaseline)
 		SaveSourceReactions();
 }

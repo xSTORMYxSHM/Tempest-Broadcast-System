@@ -183,6 +183,39 @@ void TempestSignalReactor::BuildInterface()
 	layout->addWidget(masterLabel);
 	layout->addWidget(masterMeter);
 
+	auto *networkFrame = new QFrame(root);
+	networkFrame->setObjectName(QStringLiteral("reactorChannel"));
+	networkFrame->setAccessibleName(QStringLiteral("Source reaction network controls"));
+	auto *networkLayout = new QVBoxLayout(networkFrame);
+	networkLayout->setContentsMargins(8, 8, 8, 8);
+	networkLayout->setSpacing(6);
+	auto *networkLabel = new QLabel(QStringLiteral("SOURCE REACTION NETWORK"), networkFrame);
+	networkLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	sourceNetworkStatus = new QLabel(QStringLiteral("NETWORK // NO SOURCE RIGS BOUND"), networkFrame);
+	sourceNetworkStatus->setObjectName(QStringLiteral("reactorStatus"));
+	sourceNetworkStatus->setAccessibleName(QStringLiteral("Source reaction network binding status"));
+	sourceNetworkArmed = new QCheckBox(QStringLiteral("ARM SOURCE REACTIONS"), networkFrame);
+	sourceNetworkArmed->setAccessibleName(QStringLiteral("Arm source reaction network"));
+	sourceNetworkIntensity = new QDoubleSpinBox(networkFrame);
+	sourceNetworkIntensity->setRange(0.0, 200.0);
+	sourceNetworkIntensity->setDecimals(0);
+	sourceNetworkIntensity->setSingleStep(5.0);
+	sourceNetworkIntensity->setSuffix(QStringLiteral(" %"));
+	sourceNetworkIntensity->setAccessibleName(QStringLiteral("Source reaction network intensity"));
+	auto *networkButtons = new QHBoxLayout();
+	auto *testNetwork = new QPushButton(QStringLiteral("TEST NETWORK"), networkFrame);
+	auto *restoreNetwork = new QPushButton(QStringLiteral("DISARM + RESTORE"), networkFrame);
+	testNetwork->setAccessibleName(QStringLiteral("Test all source reaction rigs"));
+	restoreNetwork->setAccessibleName(QStringLiteral("Disarm source reactions and restore all bases"));
+	networkButtons->addWidget(testNetwork);
+	networkButtons->addWidget(restoreNetwork);
+	networkLayout->addWidget(networkLabel);
+	networkLayout->addWidget(sourceNetworkStatus);
+	networkLayout->addWidget(sourceNetworkArmed);
+	networkLayout->addWidget(sourceNetworkIntensity);
+	networkLayout->addLayout(networkButtons);
+	layout->addWidget(networkFrame);
+
 	auto *pulseRow = new QHBoxLayout();
 	pulseButton = new QPushButton(QStringLiteral("TEST PULSE"), root);
 	peakButton = new QPushButton(QStringLiteral("TEST PEAK"), root);
@@ -221,6 +254,19 @@ void TempestSignalReactor::BuildInterface()
 	connect(microphoneSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(beatSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(smoothing, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(sourceNetworkArmed, &QCheckBox::toggled, this, [this](bool armed) {
+		SaveState();
+		emit SourceNetworkArmedChanged(armed);
+	});
+	connect(sourceNetworkIntensity, &QDoubleSpinBox::valueChanged, this, [this](double intensity) {
+		SaveState();
+		emit SourceNetworkIntensityChanged(float(intensity / 100.0));
+	});
+	connect(testNetwork, &QPushButton::clicked, this, &TempestSignalReactor::SourceNetworkTestRequested);
+	connect(restoreNetwork, &QPushButton::clicked, this, [this]() {
+		sourceNetworkArmed->setChecked(false);
+		emit SourceNetworkRestoreRequested();
+	});
 	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerPulse(0.65f, QStringLiteral("dock")); });
 	connect(peakButton, &QPushButton::clicked, this, [this]() { TriggerPulse(1.0f, QStringLiteral("dock")); });
 }
@@ -245,6 +291,26 @@ void TempestSignalReactor::RegisterHotkeys()
 		pulseHotkeys.insert(id, definition.strength);
 		LoadHotkey(id, QByteArray(definition.name));
 	}
+	struct NetworkDefinition {
+		const char *name;
+		const char *description;
+		const char *action;
+	};
+	constexpr NetworkDefinition networkDefinitions[] = {
+		{"TempestMainframe.ReactionNetwork.Toggle", "Tempest Mainframe: Toggle Source Reaction Network",
+		 "toggle"},
+		{"TempestMainframe.ReactionNetwork.Test", "Tempest Mainframe: Test All Source Reaction Rigs", "test"},
+		{"TempestMainframe.ReactionNetwork.Restore", "Tempest Mainframe: Disarm Reactions and Restore Bases",
+		 "restore"},
+	};
+	for (const NetworkDefinition &definition : networkDefinitions) {
+		const obs_hotkey_id id =
+			obs_hotkey_register_frontend(definition.name, definition.description, HotkeyCallback, this);
+		if (id == OBS_INVALID_HOTKEY_ID)
+			continue;
+		networkHotkeys.insert(id, QString::fromUtf8(definition.action));
+		LoadHotkey(id, QByteArray(definition.name));
+	}
 	UpdateControlBridgeState();
 }
 
@@ -253,6 +319,9 @@ void TempestSignalReactor::UnregisterHotkeys()
 	for (auto it = pulseHotkeys.cbegin(); it != pulseHotkeys.cend(); ++it)
 		obs_hotkey_unregister(it.key());
 	pulseHotkeys.clear();
+	for (auto it = networkHotkeys.cbegin(); it != networkHotkeys.cend(); ++it)
+		obs_hotkey_unregister(it.key());
+	networkHotkeys.clear();
 	UpdateControlBridgeState();
 }
 
@@ -277,14 +346,25 @@ void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotk
 		return;
 	auto *reactor = static_cast<TempestSignalReactor *>(data);
 	const float strength = reactor->pulseHotkeys.value(id, 0.0f);
-	if (strength <= 0.0f)
+	const QString networkAction = reactor->networkHotkeys.value(id);
+	if (strength <= 0.0f && networkAction.isEmpty())
 		return;
 	QPointer<TempestSignalReactor> guarded(reactor);
 	QMetaObject::invokeMethod(
 		reactor,
-		[guarded, strength]() {
-			if (guarded)
+		[guarded, strength, networkAction]() {
+			if (!guarded)
+				return;
+			if (strength > 0.0f) {
 				guarded->TriggerPulse(strength, QStringLiteral("hotkey"));
+			} else if (networkAction == QStringLiteral("toggle")) {
+				guarded->sourceNetworkArmed->setChecked(!guarded->sourceNetworkArmed->isChecked());
+			} else if (networkAction == QStringLiteral("test")) {
+				emit guarded->SourceNetworkTestRequested();
+			} else if (networkAction == QStringLiteral("restore")) {
+				guarded->sourceNetworkArmed->setChecked(false);
+				emit guarded->SourceNetworkRestoreRequested();
+			}
 		},
 		Qt::QueuedConnection);
 }
@@ -303,6 +383,12 @@ void TempestSignalReactor::LoadState()
 	microphoneSensitivity->setValue(microphoneGain > 0.0 ? microphoneGain : 1.2);
 	beatSensitivity->setValue(savedBeatSensitivity > 0.0 ? savedBeatSensitivity : 1.8);
 	smoothing->setValue(savedSmoothing >= 0.50 ? savedSmoothing : 0.82);
+	sourceNetworkArmed->setChecked(!config_has_user_value(config, ConfigSection, "SourceNetworkArmed") ||
+				       config_get_bool(config, ConfigSection, "SourceNetworkArmed"));
+	const double savedNetworkIntensity = config_get_double(config, ConfigSection, "SourceNetworkIntensity");
+	sourceNetworkIntensity->setValue(config_has_user_value(config, ConfigSection, "SourceNetworkIntensity")
+						 ? std::clamp(savedNetworkIntensity, 0.0, 200.0)
+						 : 100.0);
 	const char *desktopUuid = config_get_string(config, ConfigSection, "DesktopSourceUuid");
 	const char *microphoneUuid = config_get_string(config, ConfigSection, "MicrophoneSourceUuid");
 	configuredDesktopUuid = QString::fromUtf8(desktopUuid ? desktopUuid : "");
@@ -324,6 +410,8 @@ void TempestSignalReactor::SaveState()
 	config_set_double(config, ConfigSection, "MicrophoneSensitivity", microphoneSensitivity->value());
 	config_set_double(config, ConfigSection, "BeatSensitivity", beatSensitivity->value());
 	config_set_double(config, ConfigSection, "Smoothing", smoothing->value());
+	config_set_bool(config, ConfigSection, "SourceNetworkArmed", sourceNetworkArmed->isChecked());
+	config_set_double(config, ConfigSection, "SourceNetworkIntensity", sourceNetworkIntensity->value());
 	if (audioSourcesLoaded) {
 		configuredDesktopUuid = desktopSource->currentData().toString();
 		configuredMicrophoneUuid = microphoneSource->currentData().toString();
@@ -465,16 +553,43 @@ void TempestSignalReactor::SetWebSocketReady(bool ready)
 	UpdateControlBridgeState();
 }
 
+void TempestSignalReactor::SetSourceBindingSummary(int total, int enabled)
+{
+	if (!sourceNetworkStatus)
+		return;
+	QString summary;
+	if (total <= 0) {
+		summary = QStringLiteral("NETWORK // NO SOURCE RIGS BOUND");
+	} else {
+		summary = QStringLiteral("NETWORK // %1 RIG%2 // %3 ENABLED")
+				  .arg(total)
+				  .arg(total == 1 ? QString() : QStringLiteral("S"))
+				  .arg(enabled);
+	}
+	sourceNetworkStatus->setText(summary);
+	sourceNetworkStatus->setAccessibleName(summary);
+}
+
+bool TempestSignalReactor::SourceNetworkArmed() const
+{
+	return sourceNetworkArmed && sourceNetworkArmed->isChecked();
+}
+
+float TempestSignalReactor::SourceNetworkIntensity() const
+{
+	return sourceNetworkIntensity ? float(sourceNetworkIntensity->value() / 100.0) : 1.0f;
+}
+
 void TempestSignalReactor::UpdateControlBridgeState()
 {
 	if (!controlLabel)
 		return;
-	const bool hotkeysReady = pulseHotkeys.size() == 2;
+	const bool hotkeysReady = pulseHotkeys.size() == 2 && networkHotkeys.size() == 3;
 	QString state;
 	if (hotkeysReady && webSocketReady)
-		state = QStringLiteral("CONTROL BRIDGE // 2 HOTKEYS + WEBSOCKET VENDOR API READY");
+		state = QStringLiteral("CONTROL BRIDGE // 5 HOTKEYS + WEBSOCKET VENDOR API READY");
 	else if (hotkeysReady)
-		state = QStringLiteral("CONTROL BRIDGE // 2 HOTKEYS READY");
+		state = QStringLiteral("CONTROL BRIDGE // 5 HOTKEYS READY");
 	else
 		state = QStringLiteral("CONTROL BRIDGE // INITIALIZING");
 	controlLabel->setText(state);

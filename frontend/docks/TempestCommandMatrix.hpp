@@ -184,6 +184,8 @@ private:
 	void TestReactionBinding();
 	void RemoveReactionBinding();
 	void ApplyReactionLevels(float master, float desktop, float microphone, float beat);
+	void UpdateReactionNetworkSummary();
+	void TestReactionNetwork();
 	void RestoreReaction(SourceReaction &reaction);
 	void RestoreAllReactions();
 	void RegisterTransformUndo(obs_scene_t *scene, obs_data_t *undoData, obs_data_t *redoData,
@@ -277,4 +279,7 @@ private:
 	double reactionPhase = 0.0;
 	QString reactionTestKey;
 	qint64 reactionTestUntil = 0;
+	qint64 reactionNetworkTestUntil = 0;
+	bool reactionNetworkArmed = true;
+	double reactionNetworkIntensity = 1.0;
 };
