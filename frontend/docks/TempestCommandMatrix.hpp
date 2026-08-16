@@ -79,6 +79,9 @@ private:
 		QString mediaSourceUuid;
 		QString mediaAction = QStringLiteral("keep");
 		QString recordingAction = QStringLiteral("keep");
+		QString reactionNetworkAction = QStringLiteral("keep");
+		bool reactionIntensityEnabled = false;
+		int reactionIntensity = 100;
 		bool launchEnabled = false;
 		QString programPath;
 		QString programArguments;
@@ -142,6 +145,7 @@ private:
 	void ApplyAudioAction(const QString &sourceUuid, const QString &action);
 	void ApplyMediaAction(const QString &sourceUuid, const QString &action);
 	void ApplyRecordingAction(const QString &action);
+	void ApplyReactionNetworkAction(const ProtocolActionConfig &config);
 	bool LaunchConfiguredProgram(const ProtocolActionConfig &config);
 	void OpenActionEditor();
 	void LoadActionConfigs();

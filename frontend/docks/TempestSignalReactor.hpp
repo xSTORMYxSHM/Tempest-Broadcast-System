@@ -32,6 +32,10 @@ public:
 	void SetSourceBindingSummary(int total, int enabled);
 	bool SourceNetworkArmed() const;
 	float SourceNetworkIntensity() const;
+	void SetSourceNetworkArmed(bool armed);
+	void SetSourceNetworkIntensity(float intensity);
+	void TestSourceNetwork();
+	void DisarmAndRestoreSourceNetwork();
 
 signals:
 	void PulseTriggered(float strength, const QString &origin);

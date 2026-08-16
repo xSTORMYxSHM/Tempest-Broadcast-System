@@ -262,11 +262,8 @@ void TempestSignalReactor::BuildInterface()
 		SaveState();
 		emit SourceNetworkIntensityChanged(float(intensity / 100.0));
 	});
-	connect(testNetwork, &QPushButton::clicked, this, &TempestSignalReactor::SourceNetworkTestRequested);
-	connect(restoreNetwork, &QPushButton::clicked, this, [this]() {
-		sourceNetworkArmed->setChecked(false);
-		emit SourceNetworkRestoreRequested();
-	});
+	connect(testNetwork, &QPushButton::clicked, this, &TempestSignalReactor::TestSourceNetwork);
+	connect(restoreNetwork, &QPushButton::clicked, this, &TempestSignalReactor::DisarmAndRestoreSourceNetwork);
 	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerPulse(0.65f, QStringLiteral("dock")); });
 	connect(peakButton, &QPushButton::clicked, this, [this]() { TriggerPulse(1.0f, QStringLiteral("dock")); });
 }
@@ -358,12 +355,11 @@ void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotk
 			if (strength > 0.0f) {
 				guarded->TriggerPulse(strength, QStringLiteral("hotkey"));
 			} else if (networkAction == QStringLiteral("toggle")) {
-				guarded->sourceNetworkArmed->setChecked(!guarded->sourceNetworkArmed->isChecked());
+				guarded->SetSourceNetworkArmed(!guarded->SourceNetworkArmed());
 			} else if (networkAction == QStringLiteral("test")) {
-				emit guarded->SourceNetworkTestRequested();
+				guarded->TestSourceNetwork();
 			} else if (networkAction == QStringLiteral("restore")) {
-				guarded->sourceNetworkArmed->setChecked(false);
-				emit guarded->SourceNetworkRestoreRequested();
+				guarded->DisarmAndRestoreSourceNetwork();
 			}
 		},
 		Qt::QueuedConnection);
@@ -578,6 +574,29 @@ bool TempestSignalReactor::SourceNetworkArmed() const
 float TempestSignalReactor::SourceNetworkIntensity() const
 {
 	return sourceNetworkIntensity ? float(sourceNetworkIntensity->value() / 100.0) : 1.0f;
+}
+
+void TempestSignalReactor::SetSourceNetworkArmed(bool armed)
+{
+	if (sourceNetworkArmed)
+		sourceNetworkArmed->setChecked(armed);
+}
+
+void TempestSignalReactor::SetSourceNetworkIntensity(float intensity)
+{
+	if (sourceNetworkIntensity)
+		sourceNetworkIntensity->setValue(std::clamp(double(intensity), 0.0, 2.0) * 100.0);
+}
+
+void TempestSignalReactor::TestSourceNetwork()
+{
+	emit SourceNetworkTestRequested();
+}
+
+void TempestSignalReactor::DisarmAndRestoreSourceNetwork()
+{
+	SetSourceNetworkArmed(false);
+	emit SourceNetworkRestoreRequested();
 }
 
 void TempestSignalReactor::UpdateControlBridgeState()

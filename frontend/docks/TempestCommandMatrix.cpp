@@ -2350,6 +2350,8 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 	if (hudComposer)
 		hudComposer->ApplyProtocolVisibility(sceneSource, protocol->id);
 	main->SetCurrentScene(OBSSource(sceneSource.Get()));
+	const ProtocolActionConfig config = actionConfigs.value(protocolId);
+	ApplyReactionNetworkAction(config);
 	SetStatus(QStringLiteral("%1 PROTOCOL // %2%3")
 			  .arg(protocol->label, obs_source_get_name(sceneSource),
 			       launchFailed ? QStringLiteral(" // PROGRAM FAILED") : QString()),
@@ -2359,6 +2361,9 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 	obs_data_set_string(eventData, "sceneUuid", sceneUuid.toUtf8().constData());
 	obs_data_set_string(eventData, "sceneName", obs_source_get_name(sceneSource));
 	obs_data_set_bool(eventData, "programLaunchFailed", launchFailed);
+	obs_data_set_string(eventData, "reactionNetworkAction", config.reactionNetworkAction.toUtf8().constData());
+	obs_data_set_bool(eventData, "reactionIntensityApplied", config.reactionIntensityEnabled);
+	obs_data_set_int(eventData, "reactionIntensity", config.reactionIntensity);
 	EmitRouterEvent("ProtocolExecuted", eventData);
 	UpdateActiveScene();
 }
@@ -2386,6 +2391,24 @@ void TempestCommandMatrix::ApplyRecordingAction(const QString &action)
 		main->StartRecording();
 	else if (action == QStringLiteral("stop") && main->RecordingActive())
 		main->StopRecording();
+}
+
+void TempestCommandMatrix::ApplyReactionNetworkAction(const ProtocolActionConfig &config)
+{
+	if (!signalReactor)
+		return;
+	if (config.reactionIntensityEnabled)
+		signalReactor->SetSourceNetworkIntensity(float(config.reactionIntensity) / 100.0f);
+	if (config.reactionNetworkAction == QStringLiteral("arm")) {
+		signalReactor->SetSourceNetworkArmed(true);
+	} else if (config.reactionNetworkAction == QStringLiteral("disarm")) {
+		signalReactor->DisarmAndRestoreSourceNetwork();
+	} else if (config.reactionNetworkAction == QStringLiteral("test")) {
+		signalReactor->TestSourceNetwork();
+	} else if (config.reactionNetworkAction == QStringLiteral("arm-test")) {
+		signalReactor->SetSourceNetworkArmed(true);
+		signalReactor->TestSourceNetwork();
+	}
 }
 
 bool TempestCommandMatrix::LaunchConfiguredProgram(const ProtocolActionConfig &config)
@@ -2520,6 +2543,17 @@ void TempestCommandMatrix::LoadActionConfigs()
 		actions.recordingAction = stringValue("RecordingAction");
 		if (actions.recordingAction.isEmpty())
 			actions.recordingAction = QStringLiteral("keep");
+		actions.reactionNetworkAction = stringValue("ReactionNetworkAction");
+		static const QStringList validNetworkActions = {QStringLiteral("keep"), QStringLiteral("arm"),
+								QStringLiteral("disarm"), QStringLiteral("test"),
+								QStringLiteral("arm-test")};
+		if (!validNetworkActions.contains(actions.reactionNetworkAction))
+			actions.reactionNetworkAction = QStringLiteral("keep");
+		const QByteArray reactionIntensityEnabledKey =
+			ActionConfigKey(protocol.id, "ReactionIntensityEnabled").toUtf8();
+		actions.reactionIntensityEnabled =
+			config_get_bool(config, ConfigSection, reactionIntensityEnabledKey.constData());
+		actions.reactionIntensity = std::clamp(intValue("ReactionIntensity", 100), 0, 200);
 		const QByteArray enabledKey = ActionConfigKey(protocol.id, "LaunchEnabled").toUtf8();
 		actions.launchEnabled = config_get_bool(config, ConfigSection, enabledKey.constData());
 		actions.programPath = stringValue("ProgramPath");
@@ -2551,6 +2585,12 @@ void TempestCommandMatrix::SaveActionConfigs()
 		setString("MediaSourceUuid", actions.mediaSourceUuid);
 		setString("MediaAction", actions.mediaAction);
 		setString("RecordingAction", actions.recordingAction);
+		setString("ReactionNetworkAction", actions.reactionNetworkAction);
+		const QByteArray reactionIntensityEnabledKey =
+			ActionConfigKey(protocol.id, "ReactionIntensityEnabled").toUtf8();
+		config_set_bool(config, ConfigSection, reactionIntensityEnabledKey.constData(),
+				actions.reactionIntensityEnabled);
+		setInt("ReactionIntensity", actions.reactionIntensity);
 		const QByteArray enabledKey = ActionConfigKey(protocol.id, "LaunchEnabled").toUtf8();
 		config_set_bool(config, ConfigSection, enabledKey.constData(), actions.launchEnabled);
 		setString("ProgramPath", actions.programPath);
@@ -2573,6 +2613,9 @@ void TempestCommandMatrix::OpenActionEditor()
 		QComboBox *mediaSource = nullptr;
 		QComboBox *mediaAction = nullptr;
 		QComboBox *recordingAction = nullptr;
+		QComboBox *reactionNetworkAction = nullptr;
+		QCheckBox *reactionIntensityEnabled = nullptr;
+		QSpinBox *reactionIntensity = nullptr;
 		QCheckBox *launchEnabled = nullptr;
 		QLineEdit *programPath = nullptr;
 		QLineEdit *programArguments = nullptr;
@@ -2592,6 +2635,8 @@ void TempestCommandMatrix::OpenActionEditor()
 		QTabBar::tab:selected { color: #bdf6ff; background: #073c5f; border-color: #45d9ff; }
 		QGroupBox { border: 1px solid #1f506d; margin-top: 12px; padding-top: 10px; color: #45d9ff; font-weight: 700; }
 		QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
+		QScrollArea { border: none; background: #07131e; }
+		QScrollArea > QWidget > QWidget { background: #07131e; }
 		QLabel, QCheckBox { color: #9eb7c8; }
 		QComboBox, QSpinBox, QLineEdit { min-height: 28px; background: #06101a; border: 1px solid #1f506d; color: #bdf6ff; padding: 0 6px; }
 		QPushButton { min-height: 30px; border: 1px solid #1f506d; background: #0d2230; color: #bdf6ff; padding: 0 12px; font-weight: 700; }
@@ -2614,10 +2659,13 @@ void TempestCommandMatrix::OpenActionEditor()
 		const ProtocolActionConfig actions = actionConfigs.value(protocol.id);
 		EditorFields fields;
 		fields.protocolId = protocol.id;
-		auto *page = new QWidget(tabs);
-		auto *pageLayout = new QVBoxLayout(page);
+		auto *page = new QScrollArea(tabs);
+		page->setWidgetResizable(true);
+		page->setFrameShape(QFrame::NoFrame);
+		auto *pageContents = new QWidget(page);
+		auto *pageLayout = new QVBoxLayout(pageContents);
 
-		auto *routeGroup = new QGroupBox(QStringLiteral("ROUTING SEQUENCE"), page);
+		auto *routeGroup = new QGroupBox(QStringLiteral("ROUTING SEQUENCE"), pageContents);
 		auto *routeForm = new QFormLayout(routeGroup);
 		fields.delay = new QSpinBox(routeGroup);
 		fields.delay->setObjectName(protocol.id + QStringLiteral("DelayMs"));
@@ -2653,7 +2701,7 @@ void TempestCommandMatrix::OpenActionEditor()
 			combo->addItem(QStringLiteral("MUTE"), QStringLiteral("mute"));
 			combo->addItem(QStringLiteral("UNMUTE"), QStringLiteral("unmute"));
 		};
-		auto *audioGroup = new QGroupBox(QStringLiteral("AUDIO SOURCE STATES"), page);
+		auto *audioGroup = new QGroupBox(QStringLiteral("AUDIO SOURCE STATES"), pageContents);
 		auto *audioGrid = new QGridLayout(audioGroup);
 		audioGrid->addWidget(new QLabel(QStringLiteral("Source"), audioGroup), 0, 0);
 		audioGrid->addWidget(new QLabel(QStringLiteral("Action"), audioGroup), 0, 1);
@@ -2675,7 +2723,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		audioGrid->addWidget(fields.audioActionB, 2, 1);
 		pageLayout->addWidget(audioGroup);
 
-		auto *mediaGroup = new QGroupBox(QStringLiteral("SIGNAL MEDIA ACTION"), page);
+		auto *mediaGroup = new QGroupBox(QStringLiteral("SIGNAL MEDIA ACTION"), pageContents);
 		auto *mediaGrid = new QGridLayout(mediaGroup);
 		mediaGrid->addWidget(new QLabel(QStringLiteral("Source"), mediaGroup), 0, 0);
 		mediaGrid->addWidget(new QLabel(QStringLiteral("Action"), mediaGroup), 0, 1);
@@ -2697,7 +2745,39 @@ void TempestCommandMatrix::OpenActionEditor()
 		mediaGrid->addWidget(fields.mediaAction, 1, 1);
 		pageLayout->addWidget(mediaGroup);
 
-		auto *outputGroup = new QGroupBox(QStringLiteral("RECORDING AND PROGRAM"), page);
+		auto *reactionGroup = new QGroupBox(QStringLiteral("SOURCE REACTION NETWORK"), pageContents);
+		auto *reactionForm = new QFormLayout(reactionGroup);
+		fields.reactionNetworkAction = new QComboBox(reactionGroup);
+		fields.reactionNetworkAction->setAccessibleName(protocol.label +
+								QStringLiteral(" reaction network action"));
+		fields.reactionNetworkAction->addItem(QStringLiteral("KEEP CURRENT STATE"), QStringLiteral("keep"));
+		fields.reactionNetworkAction->addItem(QStringLiteral("ARM NETWORK"), QStringLiteral("arm"));
+		fields.reactionNetworkAction->addItem(QStringLiteral("DISARM + RESTORE"), QStringLiteral("disarm"));
+		fields.reactionNetworkAction->addItem(QStringLiteral("TEST ENABLED RIGS"), QStringLiteral("test"));
+		fields.reactionNetworkAction->addItem(QStringLiteral("ARM + TEST ENABLED RIGS"),
+						      QStringLiteral("arm-test"));
+		SetComboData(fields.reactionNetworkAction, actions.reactionNetworkAction);
+		reactionForm->addRow(QStringLiteral("On scene route"), fields.reactionNetworkAction);
+		fields.reactionIntensityEnabled =
+			new QCheckBox(QStringLiteral("Set protocol-specific master intensity"), reactionGroup);
+		fields.reactionIntensityEnabled->setAccessibleName(
+			protocol.label + QStringLiteral(" reaction network intensity enabled"));
+		fields.reactionIntensityEnabled->setChecked(actions.reactionIntensityEnabled);
+		reactionForm->addRow(QString(), fields.reactionIntensityEnabled);
+		fields.reactionIntensity = new QSpinBox(reactionGroup);
+		fields.reactionIntensity->setAccessibleName(protocol.label +
+							    QStringLiteral(" reaction network intensity"));
+		fields.reactionIntensity->setRange(0, 200);
+		fields.reactionIntensity->setSingleStep(5);
+		fields.reactionIntensity->setSuffix(QStringLiteral(" %"));
+		fields.reactionIntensity->setValue(actions.reactionIntensity);
+		fields.reactionIntensity->setEnabled(actions.reactionIntensityEnabled);
+		connect(fields.reactionIntensityEnabled, &QCheckBox::toggled, fields.reactionIntensity,
+			&QWidget::setEnabled);
+		reactionForm->addRow(QStringLiteral("Master intensity"), fields.reactionIntensity);
+		pageLayout->addWidget(reactionGroup);
+
+		auto *outputGroup = new QGroupBox(QStringLiteral("RECORDING AND PROGRAM"), pageContents);
 		auto *outputForm = new QFormLayout(outputGroup);
 		fields.recordingAction = new QComboBox(outputGroup);
 		fields.recordingAction->addItem(QStringLiteral("KEEP"), QStringLiteral("keep"));
@@ -2730,6 +2810,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		outputForm->addRow(QStringLiteral("Arguments"), fields.programArguments);
 		pageLayout->addWidget(outputGroup);
 		pageLayout->addStretch(1);
+		page->setWidget(pageContents);
 
 		tabs->addTab(page, protocol.label);
 		editors.push_back(fields);
@@ -2754,6 +2835,9 @@ void TempestCommandMatrix::OpenActionEditor()
 		actions.mediaSourceUuid = fields.mediaSource->currentData().toString();
 		actions.mediaAction = fields.mediaAction->currentData().toString();
 		actions.recordingAction = fields.recordingAction->currentData().toString();
+		actions.reactionNetworkAction = fields.reactionNetworkAction->currentData().toString();
+		actions.reactionIntensityEnabled = fields.reactionIntensityEnabled->isChecked();
+		actions.reactionIntensity = fields.reactionIntensity->value();
 		actions.launchEnabled = fields.launchEnabled->isChecked();
 		actions.programPath = fields.programPath->text().trimmed();
 		actions.programArguments = fields.programArguments->text();
