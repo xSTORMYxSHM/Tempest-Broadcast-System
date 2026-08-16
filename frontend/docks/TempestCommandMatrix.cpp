@@ -199,6 +199,7 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 	connect(signalReactor, &TempestSignalReactor::LevelsUpdated, this, &TempestCommandMatrix::ApplyReactionLevels);
 	reactionNetworkArmed = signalReactor->SourceNetworkArmed();
 	reactionNetworkIntensity = signalReactor->SourceNetworkIntensity();
+	reactionNetworkActiveSceneOnly = signalReactor->SourceNetworkActiveSceneOnly();
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkArmedChanged, this, [this](bool armed) {
 		reactionNetworkArmed = armed;
 		if (!armed) {
@@ -214,6 +215,18 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 		reactionNetworkIntensity = std::clamp(double(intensity), 0.0, 2.0);
 		if (reactionNetworkIntensity <= 0.0)
 			RestoreAllReactions();
+	});
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkScopeChanged, this, [this](bool activeSceneOnly) {
+		reactionNetworkActiveSceneOnly = activeSceneOnly;
+		if (activeSceneOnly) {
+			for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
+				if (it->sceneUuid != reactionActiveSceneUuid)
+					RestoreReaction(it.value());
+			}
+		}
+		UpdateReactionNetworkSummary();
+		SetStatus(activeSceneOnly ? QStringLiteral("Reaction scope // active scene rigs only")
+					  : QStringLiteral("Reaction scope // all bound scenes"));
 	});
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkTestRequested, this,
 		&TempestCommandMatrix::TestReactionNetwork);
@@ -2091,18 +2104,40 @@ void TempestCommandMatrix::UpdateReactionNetworkSummary()
 	if (!signalReactor)
 		return;
 	int enabled = 0;
+	int active = 0;
+	int activeEnabled = 0;
 	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
 		if (it->enabled)
 			++enabled;
+		if (it->sceneUuid == reactionActiveSceneUuid) {
+			++active;
+			if (it->enabled)
+				++activeEnabled;
+		}
 	}
-	signalReactor->SetSourceBindingSummary(sourceReactions.size(), enabled);
+	signalReactor->SetSourceBindingSummary(sourceReactions.size(), enabled, active, activeEnabled);
+}
+
+void TempestCommandMatrix::SetReactionActiveScene(const QString &sceneUuid)
+{
+	const bool changed = reactionActiveSceneUuid != sceneUuid;
+	reactionActiveSceneUuid = sceneUuid;
+	if (!changed)
+		return;
+	if (reactionNetworkActiveSceneOnly) {
+		for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
+			if (it->sceneUuid != reactionActiveSceneUuid)
+				RestoreReaction(it.value());
+		}
+	}
+	UpdateReactionNetworkSummary();
 }
 
 void TempestCommandMatrix::TestReactionNetwork()
 {
 	int enabled = 0;
 	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
-		if (it->enabled)
+		if (it->enabled && (!reactionNetworkActiveSceneOnly || it->sceneUuid == reactionActiveSceneUuid))
 			++enabled;
 	}
 	if (enabled == 0) {
@@ -2136,6 +2171,11 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			capturedBaseline = true;
 		}
 		const bool testingSelected = it.key() == reactionTestKey && now < reactionTestUntil;
+		if (reactionNetworkActiveSceneOnly && reaction.sceneUuid != reactionActiveSceneUuid &&
+		    !testingSelected) {
+			RestoreReaction(reaction);
+			continue;
+		}
 		if (!reaction.enabled && !testingSelected) {
 			RestoreReaction(reaction);
 			continue;
@@ -2350,6 +2390,7 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 	if (hudComposer)
 		hudComposer->ApplyProtocolVisibility(sceneSource, protocol->id);
 	main->SetCurrentScene(OBSSource(sceneSource.Get()));
+	SetReactionActiveScene(sceneUuid);
 	const ProtocolActionConfig config = actionConfigs.value(protocolId);
 	ApplyReactionNetworkAction(config);
 	SetStatus(QStringLiteral("%1 PROTOCOL // %2%3")
@@ -2362,6 +2403,7 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 	obs_data_set_string(eventData, "sceneName", obs_source_get_name(sceneSource));
 	obs_data_set_bool(eventData, "programLaunchFailed", launchFailed);
 	obs_data_set_string(eventData, "reactionNetworkAction", config.reactionNetworkAction.toUtf8().constData());
+	obs_data_set_string(eventData, "reactionScopeAction", config.reactionScopeAction.toUtf8().constData());
 	obs_data_set_bool(eventData, "reactionIntensityApplied", config.reactionIntensityEnabled);
 	obs_data_set_int(eventData, "reactionIntensity", config.reactionIntensity);
 	EmitRouterEvent("ProtocolExecuted", eventData);
@@ -2397,6 +2439,10 @@ void TempestCommandMatrix::ApplyReactionNetworkAction(const ProtocolActionConfig
 {
 	if (!signalReactor)
 		return;
+	if (config.reactionScopeAction == QStringLiteral("active"))
+		signalReactor->SetSourceNetworkActiveSceneOnly(true);
+	else if (config.reactionScopeAction == QStringLiteral("all"))
+		signalReactor->SetSourceNetworkActiveSceneOnly(false);
 	if (config.reactionIntensityEnabled)
 		signalReactor->SetSourceNetworkIntensity(float(config.reactionIntensity) / 100.0f);
 	if (config.reactionNetworkAction == QStringLiteral("arm")) {
@@ -2549,6 +2595,11 @@ void TempestCommandMatrix::LoadActionConfigs()
 								QStringLiteral("arm-test")};
 		if (!validNetworkActions.contains(actions.reactionNetworkAction))
 			actions.reactionNetworkAction = QStringLiteral("keep");
+		actions.reactionScopeAction = stringValue("ReactionScopeAction");
+		static const QStringList validScopeActions = {QStringLiteral("keep"), QStringLiteral("active"),
+							      QStringLiteral("all")};
+		if (!validScopeActions.contains(actions.reactionScopeAction))
+			actions.reactionScopeAction = QStringLiteral("keep");
 		const QByteArray reactionIntensityEnabledKey =
 			ActionConfigKey(protocol.id, "ReactionIntensityEnabled").toUtf8();
 		actions.reactionIntensityEnabled =
@@ -2586,6 +2637,7 @@ void TempestCommandMatrix::SaveActionConfigs()
 		setString("MediaAction", actions.mediaAction);
 		setString("RecordingAction", actions.recordingAction);
 		setString("ReactionNetworkAction", actions.reactionNetworkAction);
+		setString("ReactionScopeAction", actions.reactionScopeAction);
 		const QByteArray reactionIntensityEnabledKey =
 			ActionConfigKey(protocol.id, "ReactionIntensityEnabled").toUtf8();
 		config_set_bool(config, ConfigSection, reactionIntensityEnabledKey.constData(),
@@ -2614,6 +2666,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		QComboBox *mediaAction = nullptr;
 		QComboBox *recordingAction = nullptr;
 		QComboBox *reactionNetworkAction = nullptr;
+		QComboBox *reactionScopeAction = nullptr;
 		QCheckBox *reactionIntensityEnabled = nullptr;
 		QSpinBox *reactionIntensity = nullptr;
 		QCheckBox *launchEnabled = nullptr;
@@ -2758,6 +2811,13 @@ void TempestCommandMatrix::OpenActionEditor()
 						      QStringLiteral("arm-test"));
 		SetComboData(fields.reactionNetworkAction, actions.reactionNetworkAction);
 		reactionForm->addRow(QStringLiteral("On scene route"), fields.reactionNetworkAction);
+		fields.reactionScopeAction = new QComboBox(reactionGroup);
+		fields.reactionScopeAction->setAccessibleName(protocol.label + QStringLiteral(" reaction scene scope"));
+		fields.reactionScopeAction->addItem(QStringLiteral("KEEP CURRENT SCOPE"), QStringLiteral("keep"));
+		fields.reactionScopeAction->addItem(QStringLiteral("ACTIVE SCENE RIGS ONLY"), QStringLiteral("active"));
+		fields.reactionScopeAction->addItem(QStringLiteral("ALL BOUND SCENES"), QStringLiteral("all"));
+		SetComboData(fields.reactionScopeAction, actions.reactionScopeAction);
+		reactionForm->addRow(QStringLiteral("Scene scope"), fields.reactionScopeAction);
 		fields.reactionIntensityEnabled =
 			new QCheckBox(QStringLiteral("Set protocol-specific master intensity"), reactionGroup);
 		fields.reactionIntensityEnabled->setAccessibleName(
@@ -2836,6 +2896,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		actions.mediaAction = fields.mediaAction->currentData().toString();
 		actions.recordingAction = fields.recordingAction->currentData().toString();
 		actions.reactionNetworkAction = fields.reactionNetworkAction->currentData().toString();
+		actions.reactionScopeAction = fields.reactionScopeAction->currentData().toString();
 		actions.reactionIntensityEnabled = fields.reactionIntensityEnabled->isChecked();
 		actions.reactionIntensity = fields.reactionIntensity->value();
 		actions.launchEnabled = fields.launchEnabled->isChecked();
@@ -2877,6 +2938,7 @@ void TempestCommandMatrix::UpdateActiveScene()
 	OBSSource current = main->GetCurrentSceneSource();
 	const QString currentUuid = current ? QString::fromUtf8(obs_source_get_uuid(current)) : QString();
 	const QString currentName = current ? QString::fromUtf8(obs_source_get_name(current)) : QStringLiteral("NONE");
+	SetReactionActiveScene(currentUuid);
 	currentSceneLabel->setText(QStringLiteral("ACTIVE // %1").arg(currentName.toUpper()));
 	RefreshSourcePanel(currentUuid, currentName);
 	const bool editingLayout =

@@ -29,11 +29,13 @@ public:
 	void UnregisterHotkeys();
 	void TriggerPulse(float strength, const QString &origin = QStringLiteral("external"));
 	void SetWebSocketReady(bool ready);
-	void SetSourceBindingSummary(int total, int enabled);
+	void SetSourceBindingSummary(int total, int enabled, int active, int activeEnabled);
 	bool SourceNetworkArmed() const;
 	float SourceNetworkIntensity() const;
+	bool SourceNetworkActiveSceneOnly() const;
 	void SetSourceNetworkArmed(bool armed);
 	void SetSourceNetworkIntensity(float intensity);
+	void SetSourceNetworkActiveSceneOnly(bool activeSceneOnly);
 	void TestSourceNetwork();
 	void DisarmAndRestoreSourceNetwork();
 
@@ -42,6 +44,7 @@ signals:
 	void LevelsUpdated(float master, float desktop, float microphone, float beat);
 	void SourceNetworkArmedChanged(bool armed);
 	void SourceNetworkIntensityChanged(float intensity);
+	void SourceNetworkScopeChanged(bool activeSceneOnly);
 	void SourceNetworkTestRequested();
 	void SourceNetworkRestoreRequested();
 
@@ -85,6 +88,7 @@ private:
 	QPointer<QProgressBar> beatMeter;
 	QPointer<QProgressBar> masterMeter;
 	QPointer<QCheckBox> sourceNetworkArmed;
+	QPointer<QCheckBox> sourceNetworkActiveSceneOnly;
 	QPointer<QDoubleSpinBox> sourceNetworkIntensity;
 	QPointer<QLabel> sourceNetworkStatus;
 	QPointer<QLabel> statusLabel;

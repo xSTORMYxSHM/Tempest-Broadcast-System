@@ -80,6 +80,7 @@ private:
 		QString mediaAction = QStringLiteral("keep");
 		QString recordingAction = QStringLiteral("keep");
 		QString reactionNetworkAction = QStringLiteral("keep");
+		QString reactionScopeAction = QStringLiteral("keep");
 		bool reactionIntensityEnabled = false;
 		int reactionIntensity = 100;
 		bool launchEnabled = false;
@@ -189,6 +190,7 @@ private:
 	void RemoveReactionBinding();
 	void ApplyReactionLevels(float master, float desktop, float microphone, float beat);
 	void UpdateReactionNetworkSummary();
+	void SetReactionActiveScene(const QString &sceneUuid);
 	void TestReactionNetwork();
 	void RestoreReaction(SourceReaction &reaction);
 	void RestoreAllReactions();
@@ -285,5 +287,7 @@ private:
 	qint64 reactionTestUntil = 0;
 	qint64 reactionNetworkTestUntil = 0;
 	bool reactionNetworkArmed = true;
+	bool reactionNetworkActiveSceneOnly = true;
 	double reactionNetworkIntensity = 1.0;
+	QString reactionActiveSceneUuid;
 };
