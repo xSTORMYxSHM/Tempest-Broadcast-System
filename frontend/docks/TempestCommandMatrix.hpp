@@ -194,6 +194,7 @@ private:
 	void UpdateReactionNetworkSummary();
 	void SetReactionActiveScene(const QString &sceneUuid);
 	bool ReactionCircuitActive(const QString &circuit) const;
+	double ReactionCircuitGain(const QString &circuit) const;
 	void TestReactionNetwork();
 	void RestoreReaction(SourceReaction &reaction);
 	void RestoreAllReactions();
@@ -295,4 +296,5 @@ private:
 	double reactionNetworkIntensity = 1.0;
 	QString reactionActiveSceneUuid;
 	QString reactionCircuitProfile = QStringLiteral("all");
+	QHash<QString, double> reactionCircuitGains;
 };

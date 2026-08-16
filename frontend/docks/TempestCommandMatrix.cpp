@@ -201,6 +201,9 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 	reactionNetworkIntensity = signalReactor->SourceNetworkIntensity();
 	reactionNetworkActiveSceneOnly = signalReactor->SourceNetworkActiveSceneOnly();
 	reactionCircuitProfile = signalReactor->SourceNetworkCircuitProfile();
+	for (const QString &circuit : {QStringLiteral("core"), QStringLiteral("frame"), QStringLiteral("chat"),
+				       QStringLiteral("plates"), QStringLiteral("alerts")})
+		reactionCircuitGains.insert(circuit, signalReactor->SourceNetworkCircuitGain(circuit));
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkArmedChanged, this, [this](bool armed) {
 		reactionNetworkArmed = armed;
 		if (!armed) {
@@ -238,6 +241,20 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 			}
 			UpdateReactionNetworkSummary();
 			SetStatus(QStringLiteral("Reaction circuits // %1").arg(profile.toUpper()));
+		});
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkCircuitGainsChanged, this,
+		[this](float core, float frame, float chat, float plates, float alerts) {
+			reactionCircuitGains[QStringLiteral("core")] = std::clamp(double(core), 0.0, 2.0);
+			reactionCircuitGains[QStringLiteral("frame")] = std::clamp(double(frame), 0.0, 2.0);
+			reactionCircuitGains[QStringLiteral("chat")] = std::clamp(double(chat), 0.0, 2.0);
+			reactionCircuitGains[QStringLiteral("plates")] = std::clamp(double(plates), 0.0, 2.0);
+			reactionCircuitGains[QStringLiteral("alerts")] = std::clamp(double(alerts), 0.0, 2.0);
+			for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
+				if (ReactionCircuitGain(it->circuit) <= 0.0)
+					RestoreReaction(it.value());
+			}
+			UpdateReactionNetworkSummary();
+			SetStatus(QStringLiteral("Reaction circuit mixer updated"));
 		});
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkTestRequested, this,
 		&TempestCommandMatrix::TestReactionNetwork);
@@ -2142,7 +2159,7 @@ void TempestCommandMatrix::UpdateReactionNetworkSummary()
 			++enabled;
 		if (it->sceneUuid == reactionActiveSceneUuid) {
 			++active;
-			if (it->enabled && ReactionCircuitActive(it->circuit))
+			if (it->enabled && ReactionCircuitActive(it->circuit) && ReactionCircuitGain(it->circuit) > 0.0)
 				++activeEnabled;
 		}
 	}
@@ -2182,11 +2199,16 @@ bool TempestCommandMatrix::ReactionCircuitActive(const QString &circuit) const
 	return true;
 }
 
+double TempestCommandMatrix::ReactionCircuitGain(const QString &circuit) const
+{
+	return std::clamp(reactionCircuitGains.value(circuit, 1.0), 0.0, 2.0);
+}
+
 void TempestCommandMatrix::TestReactionNetwork()
 {
 	int enabled = 0;
 	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
-		if (it->enabled && ReactionCircuitActive(it->circuit) &&
+		if (it->enabled && ReactionCircuitActive(it->circuit) && ReactionCircuitGain(it->circuit) > 0.0 &&
 		    (!reactionNetworkActiveSceneOnly || it->sceneUuid == reactionActiveSceneUuid))
 			++enabled;
 	}
@@ -2230,6 +2252,10 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			RestoreReaction(reaction);
 			continue;
 		}
+		if (ReactionCircuitGain(reaction.circuit) <= 0.0 && !testingSelected) {
+			RestoreReaction(reaction);
+			continue;
+		}
 		if (!reaction.enabled && !testingSelected) {
 			RestoreReaction(reaction);
 			continue;
@@ -2248,7 +2274,8 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 		if (testingSelected || testingNetwork)
 			level = 1.0f;
 		level = std::clamp(level, 0.0f, 1.5f);
-		const float networkIntensity = float(std::clamp(reactionNetworkIntensity, 0.0, 2.0));
+		const float circuitGain = testingSelected ? 1.0f : float(ReactionCircuitGain(reaction.circuit));
+		const float networkIntensity = float(std::clamp(reactionNetworkIntensity, 0.0, 2.0)) * circuitGain;
 
 		if (reaction.visibilityEnabled) {
 			const float onThreshold = float(reaction.threshold);

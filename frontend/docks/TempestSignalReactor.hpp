@@ -34,11 +34,13 @@ public:
 	float SourceNetworkIntensity() const;
 	bool SourceNetworkActiveSceneOnly() const;
 	QString SourceNetworkCircuitProfile() const;
+	float SourceNetworkCircuitGain(const QString &circuit) const;
 	void SetSourceNetworkArmed(bool armed);
 	void SetSourceNetworkIntensity(float intensity);
 	void SetSourceNetworkActiveSceneOnly(bool activeSceneOnly);
 	void SetSourceNetworkCircuitProfile(const QString &profile);
 	void CycleSourceNetworkCircuitProfile();
+	void ResetSourceNetworkCircuitGains();
 	void TestSourceNetwork();
 	void DisarmAndRestoreSourceNetwork();
 
@@ -49,6 +51,7 @@ signals:
 	void SourceNetworkIntensityChanged(float intensity);
 	void SourceNetworkScopeChanged(bool activeSceneOnly);
 	void SourceNetworkCircuitProfileChanged(const QString &profile);
+	void SourceNetworkCircuitGainsChanged(float core, float frame, float chat, float plates, float alerts);
 	void SourceNetworkTestRequested();
 	void SourceNetworkRestoreRequested();
 
@@ -94,6 +97,7 @@ private:
 	QPointer<QCheckBox> sourceNetworkArmed;
 	QPointer<QCheckBox> sourceNetworkActiveSceneOnly;
 	QPointer<QComboBox> sourceNetworkCircuitProfile;
+	QHash<QString, QPointer<QDoubleSpinBox>> sourceNetworkCircuitGains;
 	QPointer<QDoubleSpinBox> sourceNetworkIntensity;
 	QPointer<QLabel> sourceNetworkStatus;
 	QPointer<QLabel> statusLabel;

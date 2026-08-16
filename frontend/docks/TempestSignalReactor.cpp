@@ -208,6 +208,30 @@ void TempestSignalReactor::BuildInterface()
 					     QStringLiteral("alert"));
 	sourceNetworkCircuitProfile->addItem(QStringLiteral("CORE ONLY"), QStringLiteral("core"));
 	sourceNetworkCircuitProfile->setAccessibleName(QStringLiteral("Source reaction circuit profile"));
+	auto *circuitMixer = new QGridLayout();
+	circuitMixer->setHorizontalSpacing(6);
+	circuitMixer->setVerticalSpacing(5);
+	struct CircuitControl {
+		const char *id;
+		const char *label;
+	};
+	constexpr CircuitControl circuitControls[] = {
+		{"core", "CORE"}, {"frame", "FRAME"}, {"chat", "CHAT"}, {"plates", "PLATES"}, {"alerts", "ALERTS"},
+	};
+	for (int index = 0; index < 5; ++index) {
+		const CircuitControl &control = circuitControls[index];
+		auto *gain = new QDoubleSpinBox(networkFrame);
+		gain->setRange(0.0, 200.0);
+		gain->setDecimals(0);
+		gain->setSingleStep(5.0);
+		gain->setPrefix(QString::fromUtf8(control.label) + QStringLiteral("  "));
+		gain->setSuffix(QStringLiteral(" %"));
+		gain->setValue(100.0);
+		gain->setAccessibleName(
+			QStringLiteral("%1 reaction circuit gain").arg(QString::fromUtf8(control.label)));
+		sourceNetworkCircuitGains.insert(QString::fromUtf8(control.id), gain);
+		circuitMixer->addWidget(gain, index / 2, index % 2);
+	}
 	sourceNetworkIntensity = new QDoubleSpinBox(networkFrame);
 	sourceNetworkIntensity->setRange(0.0, 200.0);
 	sourceNetworkIntensity->setDecimals(0);
@@ -217,8 +241,10 @@ void TempestSignalReactor::BuildInterface()
 	auto *networkButtons = new QHBoxLayout();
 	auto *testNetwork = new QPushButton(QStringLiteral("TEST NETWORK"), networkFrame);
 	auto *restoreNetwork = new QPushButton(QStringLiteral("DISARM + RESTORE"), networkFrame);
+	auto *resetMixer = new QPushButton(QStringLiteral("RESET CIRCUIT MIXER"), networkFrame);
 	testNetwork->setAccessibleName(QStringLiteral("Test all source reaction rigs"));
 	restoreNetwork->setAccessibleName(QStringLiteral("Disarm source reactions and restore all bases"));
+	resetMixer->setAccessibleName(QStringLiteral("Reset source reaction circuit mixer"));
 	networkButtons->addWidget(testNetwork);
 	networkButtons->addWidget(restoreNetwork);
 	networkLayout->addWidget(networkLabel);
@@ -226,6 +252,8 @@ void TempestSignalReactor::BuildInterface()
 	networkLayout->addWidget(sourceNetworkArmed);
 	networkLayout->addWidget(sourceNetworkActiveSceneOnly);
 	networkLayout->addWidget(sourceNetworkCircuitProfile);
+	networkLayout->addLayout(circuitMixer);
+	networkLayout->addWidget(resetMixer);
 	networkLayout->addWidget(sourceNetworkIntensity);
 	networkLayout->addLayout(networkButtons);
 	layout->addWidget(networkFrame);
@@ -284,6 +312,17 @@ void TempestSignalReactor::BuildInterface()
 		SaveState();
 		emit SourceNetworkCircuitProfileChanged(SourceNetworkCircuitProfile());
 	});
+	for (auto it = sourceNetworkCircuitGains.begin(); it != sourceNetworkCircuitGains.end(); ++it) {
+		connect(it.value(), &QDoubleSpinBox::valueChanged, this, [this](double) {
+			SaveState();
+			emit SourceNetworkCircuitGainsChanged(SourceNetworkCircuitGain(QStringLiteral("core")),
+							      SourceNetworkCircuitGain(QStringLiteral("frame")),
+							      SourceNetworkCircuitGain(QStringLiteral("chat")),
+							      SourceNetworkCircuitGain(QStringLiteral("plates")),
+							      SourceNetworkCircuitGain(QStringLiteral("alerts")));
+		});
+	}
+	connect(resetMixer, &QPushButton::clicked, this, &TempestSignalReactor::ResetSourceNetworkCircuitGains);
 	connect(testNetwork, &QPushButton::clicked, this, &TempestSignalReactor::TestSourceNetwork);
 	connect(restoreNetwork, &QPushButton::clicked, this, &TempestSignalReactor::DisarmAndRestoreSourceNetwork);
 	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerPulse(0.65f, QStringLiteral("dock")); });
@@ -325,6 +364,8 @@ void TempestSignalReactor::RegisterHotkeys()
 		 "scope"},
 		{"TempestMainframe.ReactionNetwork.Circuits",
 		 "Tempest Mainframe: Cycle Source Reaction Circuit Profile", "circuits"},
+		{"TempestMainframe.ReactionNetwork.MixerReset",
+		 "Tempest Mainframe: Reset Source Reaction Circuit Mixer", "mixer-reset"},
 	};
 	for (const NetworkDefinition &definition : networkDefinitions) {
 		const obs_hotkey_id id =
@@ -390,6 +431,8 @@ void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotk
 				guarded->SetSourceNetworkActiveSceneOnly(!guarded->SourceNetworkActiveSceneOnly());
 			} else if (networkAction == QStringLiteral("circuits")) {
 				guarded->CycleSourceNetworkCircuitProfile();
+			} else if (networkAction == QStringLiteral("mixer-reset")) {
+				guarded->ResetSourceNetworkCircuitGains();
 			}
 		},
 		Qt::QueuedConnection);
@@ -418,6 +461,13 @@ void TempestSignalReactor::LoadState()
 		QString::fromUtf8(config_get_string(config, ConfigSection, "SourceNetworkCircuitProfile"));
 	const int circuitIndex = sourceNetworkCircuitProfile->findData(savedCircuitProfile);
 	sourceNetworkCircuitProfile->setCurrentIndex(circuitIndex >= 0 ? circuitIndex : 0);
+	for (auto it = sourceNetworkCircuitGains.begin(); it != sourceNetworkCircuitGains.end(); ++it) {
+		const QByteArray key = QStringLiteral("SourceNetworkCircuitGain_%1").arg(it.key()).toUtf8();
+		const double savedGain = config_has_user_value(config, ConfigSection, key.constData())
+						 ? config_get_double(config, ConfigSection, key.constData())
+						 : 100.0;
+		it.value()->setValue(std::clamp(savedGain, 0.0, 200.0));
+	}
 	const double savedNetworkIntensity = config_get_double(config, ConfigSection, "SourceNetworkIntensity");
 	sourceNetworkIntensity->setValue(config_has_user_value(config, ConfigSection, "SourceNetworkIntensity")
 						 ? std::clamp(savedNetworkIntensity, 0.0, 200.0)
@@ -448,6 +498,10 @@ void TempestSignalReactor::SaveState()
 			sourceNetworkActiveSceneOnly->isChecked());
 	config_set_string(config, ConfigSection, "SourceNetworkCircuitProfile",
 			  SourceNetworkCircuitProfile().toUtf8().constData());
+	for (auto it = sourceNetworkCircuitGains.cbegin(); it != sourceNetworkCircuitGains.cend(); ++it) {
+		const QByteArray key = QStringLiteral("SourceNetworkCircuitGain_%1").arg(it.key()).toUtf8();
+		config_set_double(config, ConfigSection, key.constData(), it.value()->value());
+	}
 	config_set_double(config, ConfigSection, "SourceNetworkIntensity", sourceNetworkIntensity->value());
 	if (audioSourcesLoaded) {
 		configuredDesktopUuid = desktopSource->currentData().toString();
@@ -634,6 +688,13 @@ QString TempestSignalReactor::SourceNetworkCircuitProfile() const
 					   : QStringLiteral("all");
 }
 
+float TempestSignalReactor::SourceNetworkCircuitGain(const QString &circuit) const
+{
+	const auto found = sourceNetworkCircuitGains.constFind(circuit);
+	return found != sourceNetworkCircuitGains.cend() && found.value() ? float(found.value()->value() / 100.0)
+									  : 1.0f;
+}
+
 void TempestSignalReactor::SetSourceNetworkArmed(bool armed)
 {
 	if (sourceNetworkArmed)
@@ -669,6 +730,16 @@ void TempestSignalReactor::CycleSourceNetworkCircuitProfile()
 						     sourceNetworkCircuitProfile->count());
 }
 
+void TempestSignalReactor::ResetSourceNetworkCircuitGains()
+{
+	for (auto it = sourceNetworkCircuitGains.begin(); it != sourceNetworkCircuitGains.end(); ++it) {
+		QSignalBlocker blocker(it.value());
+		it.value()->setValue(100.0);
+	}
+	SaveState();
+	emit SourceNetworkCircuitGainsChanged(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+}
+
 void TempestSignalReactor::TestSourceNetwork()
 {
 	emit SourceNetworkTestRequested();
@@ -684,12 +755,12 @@ void TempestSignalReactor::UpdateControlBridgeState()
 {
 	if (!controlLabel)
 		return;
-	const bool hotkeysReady = pulseHotkeys.size() == 2 && networkHotkeys.size() == 5;
+	const bool hotkeysReady = pulseHotkeys.size() == 2 && networkHotkeys.size() == 6;
 	QString state;
 	if (hotkeysReady && webSocketReady)
-		state = QStringLiteral("CONTROL BRIDGE // 7 HOTKEYS + WEBSOCKET VENDOR API READY");
+		state = QStringLiteral("CONTROL BRIDGE // 8 HOTKEYS + WEBSOCKET VENDOR API READY");
 	else if (hotkeysReady)
-		state = QStringLiteral("CONTROL BRIDGE // 7 HOTKEYS READY");
+		state = QStringLiteral("CONTROL BRIDGE // 8 HOTKEYS READY");
 	else
 		state = QStringLiteral("CONTROL BRIDGE // INITIALIZING");
 	controlLabel->setText(state);
@@ -751,6 +822,11 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("sourceNetworkIntensity"), SourceNetworkIntensity());
 	telemetry.insert(QStringLiteral("sourceNetworkActiveSceneOnly"), SourceNetworkActiveSceneOnly());
 	telemetry.insert(QStringLiteral("sourceNetworkCircuitProfile"), SourceNetworkCircuitProfile());
+	QJsonObject circuitGains;
+	for (const QString &circuit : {QStringLiteral("core"), QStringLiteral("frame"), QStringLiteral("chat"),
+				       QStringLiteral("plates"), QStringLiteral("alerts")})
+		circuitGains.insert(circuit, SourceNetworkCircuitGain(circuit));
+	telemetry.insert(QStringLiteral("sourceNetworkCircuitGains"), circuitGains);
 	telemetry.insert(QStringLiteral("timestamp"), QDateTime::currentMSecsSinceEpoch());
 	QSaveFile file(telemetryPath);
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
