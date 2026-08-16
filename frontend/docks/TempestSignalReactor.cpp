@@ -91,12 +91,15 @@ void TempestSignalReactor::BuildInterface()
 		QLabel#reactorTitle { color: #45d9ff; font-size: 15px; font-weight: 700; letter-spacing: 2px; }
 		QLabel#reactorSubtitle, QLabel#reactorChannelLabel { color: #748fa4; font-size: 10px; letter-spacing: 1px; }
 		QLabel#reactorStatus { color: #45d9ff; font-size: 10px; }
+		QLabel#reactorCircuitState { color: #748fa4; font-size: 9px; letter-spacing: 1px; }
 		QLabel#reactorControl { color: #9b8cff; font-size: 10px; letter-spacing: 1px; padding: 5px; border: 1px solid #302d67; background: #090d1d; }
 		QLabel#reactorHint { color: #748fa4; font-size: 10px; padding: 7px; border: 1px solid #183a50; background: #06101a; }
 		QFrame#reactorChannel { background: #081a27; border: 1px solid #183a50; }
+		QFrame#reactorCircuit { background: #06131e; border: 1px solid #17394f; }
 		QComboBox, QDoubleSpinBox { min-height: 29px; padding: 0 7px; color: #bdf6ff; background: #06101a; border: 1px solid #1f506d; }
 		QProgressBar { min-height: 9px; max-height: 9px; border: 1px solid #17394f; background: #04101a; }
 		QProgressBar::chunk { background: #45d9ff; }
+		QProgressBar#reactorCircuitMeter::chunk { background: #9b8cff; }
 		QPushButton { min-height: 31px; padding: 0 9px; color: #bdf6ff; background: #0d2230; border: 1px solid #1f506d; font-weight: 700; }
 		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
 		QCheckBox { color: #9eb7c8; }
@@ -220,17 +223,37 @@ void TempestSignalReactor::BuildInterface()
 	};
 	for (int index = 0; index < 5; ++index) {
 		const CircuitControl &control = circuitControls[index];
-		auto *gain = new QDoubleSpinBox(networkFrame);
+		const QString circuit = QString::fromUtf8(control.id);
+		const QString label = QString::fromUtf8(control.label);
+		auto *circuitFrame = new QFrame(networkFrame);
+		circuitFrame->setObjectName(QStringLiteral("reactorCircuit"));
+		auto *circuitLayout = new QVBoxLayout(circuitFrame);
+		circuitLayout->setContentsMargins(6, 6, 6, 6);
+		circuitLayout->setSpacing(4);
+		auto *gain = new QDoubleSpinBox(circuitFrame);
 		gain->setRange(0.0, 200.0);
 		gain->setDecimals(0);
 		gain->setSingleStep(5.0);
-		gain->setPrefix(QString::fromUtf8(control.label) + QStringLiteral("  "));
+		gain->setPrefix(label + QStringLiteral("  "));
 		gain->setSuffix(QStringLiteral(" %"));
 		gain->setValue(100.0);
-		gain->setAccessibleName(
-			QStringLiteral("%1 reaction circuit gain").arg(QString::fromUtf8(control.label)));
-		sourceNetworkCircuitGains.insert(QString::fromUtf8(control.id), gain);
-		circuitMixer->addWidget(gain, index / 2, index % 2);
+		gain->setAccessibleName(QStringLiteral("%1 reaction circuit gain").arg(label));
+		auto *meter = new QProgressBar(circuitFrame);
+		meter->setObjectName(QStringLiteral("reactorCircuitMeter"));
+		meter->setRange(0, 2000);
+		meter->setTextVisible(false);
+		meter->setAccessibleName(QStringLiteral("%1 reaction circuit activity").arg(label));
+		auto *state = new QLabel(QStringLiteral("UNBOUND"), circuitFrame);
+		state->setObjectName(QStringLiteral("reactorCircuitState"));
+		state->setAccessibleName(QStringLiteral("%1 reaction circuit state // UNBOUND").arg(label));
+		circuitLayout->addWidget(gain);
+		circuitLayout->addWidget(meter);
+		circuitLayout->addWidget(state);
+		sourceNetworkCircuitGains.insert(circuit, gain);
+		sourceNetworkCircuitMeters.insert(circuit, meter);
+		sourceNetworkCircuitStates.insert(circuit, state);
+		sourceNetworkCircuitActivities.insert(circuit, 0.0f);
+		circuitMixer->addWidget(circuitFrame, index / 2, index % 2);
 	}
 	sourceNetworkIntensity = new QDoubleSpinBox(networkFrame);
 	sourceNetworkIntensity->setRange(0.0, 200.0);
@@ -291,30 +314,38 @@ void TempestSignalReactor::BuildInterface()
 	connect(refresh, &QPushButton::clicked, this, &TempestSignalReactor::RefreshAudioSources);
 	connect(desktopSource, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::AttachDesktopSource);
 	connect(microphoneSource, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::AttachMicrophoneSource);
-	connect(reactorEnabled, &QCheckBox::toggled, this, &TempestSignalReactor::SaveState);
+	connect(reactorEnabled, &QCheckBox::toggled, this, [this]() {
+		SaveState();
+		RefreshSourceNetworkCircuitMonitors();
+	});
 	connect(desktopSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(microphoneSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(beatSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(smoothing, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(sourceNetworkArmed, &QCheckBox::toggled, this, [this](bool armed) {
 		SaveState();
+		RefreshSourceNetworkCircuitMonitors();
 		emit SourceNetworkArmedChanged(armed);
 	});
 	connect(sourceNetworkIntensity, &QDoubleSpinBox::valueChanged, this, [this](double intensity) {
 		SaveState();
+		RefreshSourceNetworkCircuitMonitors();
 		emit SourceNetworkIntensityChanged(float(intensity / 100.0));
 	});
 	connect(sourceNetworkActiveSceneOnly, &QCheckBox::toggled, this, [this](bool activeSceneOnly) {
 		SaveState();
+		RefreshSourceNetworkCircuitMonitors();
 		emit SourceNetworkScopeChanged(activeSceneOnly);
 	});
 	connect(sourceNetworkCircuitProfile, &QComboBox::currentIndexChanged, this, [this](int) {
 		SaveState();
+		RefreshSourceNetworkCircuitMonitors();
 		emit SourceNetworkCircuitProfileChanged(SourceNetworkCircuitProfile());
 	});
 	for (auto it = sourceNetworkCircuitGains.begin(); it != sourceNetworkCircuitGains.end(); ++it) {
 		connect(it.value(), &QDoubleSpinBox::valueChanged, this, [this](double) {
 			SaveState();
+			RefreshSourceNetworkCircuitMonitors();
 			emit SourceNetworkCircuitGainsChanged(SourceNetworkCircuitGain(QStringLiteral("core")),
 							      SourceNetworkCircuitGain(QStringLiteral("frame")),
 							      SourceNetworkCircuitGain(QStringLiteral("chat")),
@@ -667,6 +698,24 @@ void TempestSignalReactor::SetSourceBindingSummary(int total, int enabled, int a
 	sourceNetworkStatus->setAccessibleName(summary);
 }
 
+void TempestSignalReactor::SetSourceCircuitSummary(const QString &circuit, int total, int scoped, int enabled)
+{
+	if (!sourceNetworkCircuitStates.contains(circuit))
+		return;
+	sourceNetworkCircuitTotals[circuit] = std::max(0, total);
+	sourceNetworkCircuitScoped[circuit] = std::max(0, scoped);
+	sourceNetworkCircuitEnabled[circuit] = std::max(0, enabled);
+	RefreshSourceNetworkCircuitMonitor(circuit);
+}
+
+void TempestSignalReactor::SetSourceCircuitActivity(const QString &circuit, float activity)
+{
+	if (!sourceNetworkCircuitMeters.contains(circuit))
+		return;
+	sourceNetworkCircuitActivities[circuit] = std::clamp(activity, 0.0f, 2.0f);
+	RefreshSourceNetworkCircuitMonitor(circuit);
+}
+
 bool TempestSignalReactor::SourceNetworkArmed() const
 {
 	return sourceNetworkArmed && sourceNetworkArmed->isChecked();
@@ -693,6 +742,92 @@ float TempestSignalReactor::SourceNetworkCircuitGain(const QString &circuit) con
 	const auto found = sourceNetworkCircuitGains.constFind(circuit);
 	return found != sourceNetworkCircuitGains.cend() && found.value() ? float(found.value()->value() / 100.0)
 									  : 1.0f;
+}
+
+bool TempestSignalReactor::SourceNetworkCircuitActive(const QString &circuit) const
+{
+	const QString profile = SourceNetworkCircuitProfile();
+	if (profile == QStringLiteral("all"))
+		return true;
+	if (profile == QStringLiteral("core"))
+		return circuit == QStringLiteral("core");
+	if (profile == QStringLiteral("ambient"))
+		return circuit == QStringLiteral("core") || circuit == QStringLiteral("frame") ||
+		       circuit == QStringLiteral("plates");
+	if (profile == QStringLiteral("conversation"))
+		return circuit == QStringLiteral("core") || circuit == QStringLiteral("frame") ||
+		       circuit == QStringLiteral("chat") || circuit == QStringLiteral("plates");
+	if (profile == QStringLiteral("alert"))
+		return circuit == QStringLiteral("core") || circuit == QStringLiteral("frame") ||
+		       circuit == QStringLiteral("alerts");
+	return true;
+}
+
+QString TempestSignalReactor::SourceNetworkCircuitState(const QString &circuit) const
+{
+	const int total = sourceNetworkCircuitTotals.value(circuit);
+	const float activity = sourceNetworkCircuitActivities.value(circuit);
+	if (total <= 0)
+		return QStringLiteral("UNBOUND");
+	if (activity > 0.005f)
+		return QStringLiteral("LIVE // %1%").arg(qRound(activity * 100.0f));
+	if (!SourceNetworkCircuitActive(circuit))
+		return QStringLiteral("MUTED // PROFILE");
+	if (SourceNetworkCircuitGain(circuit) <= 0.0f)
+		return QStringLiteral("MUTED // GAIN");
+	if (SourceNetworkIntensity() <= 0.0f)
+		return QStringLiteral("MUTED // MASTER");
+	if (SourceNetworkActiveSceneOnly() && sourceNetworkCircuitScoped.value(circuit) <= 0)
+		return QStringLiteral("OUTSIDE ACTIVE SCENE");
+	if (sourceNetworkCircuitEnabled.value(circuit) <= 0)
+		return QStringLiteral("NO ENABLED RIGS");
+	if (!reactorEnabled || !reactorEnabled->isChecked())
+		return QStringLiteral("REACTOR OFFLINE");
+	if (!SourceNetworkArmed())
+		return QStringLiteral("NETWORK STANDBY");
+	return QStringLiteral("READY // %1 RIG%2")
+		.arg(sourceNetworkCircuitEnabled.value(circuit))
+		.arg(sourceNetworkCircuitEnabled.value(circuit) == 1 ? QString() : QStringLiteral("S"));
+}
+
+void TempestSignalReactor::RefreshSourceNetworkCircuitMonitor(const QString &circuit)
+{
+	const auto meter = sourceNetworkCircuitMeters.value(circuit);
+	const auto stateLabel = sourceNetworkCircuitStates.value(circuit);
+	if (!meter || !stateLabel)
+		return;
+	const float activity = sourceNetworkCircuitActivities.value(circuit);
+	meter->setValue(qRound(std::clamp(activity, 0.0f, 2.0f) * 1000.0f));
+	const QString state = SourceNetworkCircuitState(circuit);
+	if (stateLabel->text() != state) {
+		stateLabel->setText(state);
+		QString stateClass = QStringLiteral("idle");
+		if (state.startsWith(QStringLiteral("LIVE")))
+			stateClass = QStringLiteral("live");
+		else if (state.startsWith(QStringLiteral("MUTED")))
+			stateClass = QStringLiteral("muted");
+		else if (state.startsWith(QStringLiteral("READY")))
+			stateClass = QStringLiteral("ready");
+		if (stateLabel->property("circuitStateClass").toString() != stateClass) {
+			stateLabel->setProperty("circuitStateClass", stateClass);
+			if (stateClass == QStringLiteral("live"))
+				stateLabel->setStyleSheet(QStringLiteral("color:#45d9ff;"));
+			else if (stateClass == QStringLiteral("muted"))
+				stateLabel->setStyleSheet(QStringLiteral("color:#ff4b70;"));
+			else if (stateClass == QStringLiteral("ready"))
+				stateLabel->setStyleSheet(QStringLiteral("color:#9b8cff;"));
+			else
+				stateLabel->setStyleSheet(QStringLiteral("color:#748fa4;"));
+		}
+		stateLabel->setAccessibleName(
+			QStringLiteral("%1 reaction circuit state // %2").arg(circuit.toUpper(), state));
+	}
+}
+
+void TempestSignalReactor::RefreshSourceNetworkCircuitMonitors()
+{
+	for (auto it = sourceNetworkCircuitStates.cbegin(); it != sourceNetworkCircuitStates.cend(); ++it)
+		RefreshSourceNetworkCircuitMonitor(it.key());
 }
 
 void TempestSignalReactor::SetSourceNetworkArmed(bool armed)
@@ -737,6 +872,7 @@ void TempestSignalReactor::ResetSourceNetworkCircuitGains()
 		it.value()->setValue(100.0);
 	}
 	SaveState();
+	RefreshSourceNetworkCircuitMonitors();
 	emit SourceNetworkCircuitGainsChanged(1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
 }
 
@@ -823,10 +959,17 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("sourceNetworkActiveSceneOnly"), SourceNetworkActiveSceneOnly());
 	telemetry.insert(QStringLiteral("sourceNetworkCircuitProfile"), SourceNetworkCircuitProfile());
 	QJsonObject circuitGains;
+	QJsonObject circuitActivity;
+	QJsonObject circuitStates;
 	for (const QString &circuit : {QStringLiteral("core"), QStringLiteral("frame"), QStringLiteral("chat"),
-				       QStringLiteral("plates"), QStringLiteral("alerts")})
+				       QStringLiteral("plates"), QStringLiteral("alerts")}) {
 		circuitGains.insert(circuit, SourceNetworkCircuitGain(circuit));
+		circuitActivity.insert(circuit, sourceNetworkCircuitActivities.value(circuit));
+		circuitStates.insert(circuit, SourceNetworkCircuitState(circuit));
+	}
 	telemetry.insert(QStringLiteral("sourceNetworkCircuitGains"), circuitGains);
+	telemetry.insert(QStringLiteral("sourceNetworkCircuitActivity"), circuitActivity);
+	telemetry.insert(QStringLiteral("sourceNetworkCircuitStates"), circuitStates);
 	telemetry.insert(QStringLiteral("timestamp"), QDateTime::currentMSecsSinceEpoch());
 	QSaveFile file(telemetryPath);
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Text))

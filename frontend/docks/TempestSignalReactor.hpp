@@ -30,6 +30,8 @@ public:
 	void TriggerPulse(float strength, const QString &origin = QStringLiteral("external"));
 	void SetWebSocketReady(bool ready);
 	void SetSourceBindingSummary(int total, int enabled, int active, int activeEnabled);
+	void SetSourceCircuitSummary(const QString &circuit, int total, int scoped, int enabled);
+	void SetSourceCircuitActivity(const QString &circuit, float activity);
 	bool SourceNetworkArmed() const;
 	float SourceNetworkIntensity() const;
 	bool SourceNetworkActiveSceneOnly() const;
@@ -80,6 +82,10 @@ private:
 	void DestroyMeter(SignalChannel &channel);
 	void AttachChannel(SignalChannel &channel, QComboBox *selector, const QString &label);
 	void UpdateControlBridgeState();
+	bool SourceNetworkCircuitActive(const QString &circuit) const;
+	QString SourceNetworkCircuitState(const QString &circuit) const;
+	void RefreshSourceNetworkCircuitMonitor(const QString &circuit);
+	void RefreshSourceNetworkCircuitMonitors();
 	void SetStatus(const QString &message, bool error = false);
 
 	QPointer<OBSBasic> main;
@@ -98,6 +104,12 @@ private:
 	QPointer<QCheckBox> sourceNetworkActiveSceneOnly;
 	QPointer<QComboBox> sourceNetworkCircuitProfile;
 	QHash<QString, QPointer<QDoubleSpinBox>> sourceNetworkCircuitGains;
+	QHash<QString, QPointer<QProgressBar>> sourceNetworkCircuitMeters;
+	QHash<QString, QPointer<QLabel>> sourceNetworkCircuitStates;
+	QHash<QString, float> sourceNetworkCircuitActivities;
+	QHash<QString, int> sourceNetworkCircuitTotals;
+	QHash<QString, int> sourceNetworkCircuitScoped;
+	QHash<QString, int> sourceNetworkCircuitEnabled;
 	QPointer<QDoubleSpinBox> sourceNetworkIntensity;
 	QPointer<QLabel> sourceNetworkStatus;
 	QPointer<QLabel> statusLabel;

@@ -2151,10 +2151,28 @@ void TempestCommandMatrix::UpdateReactionNetworkSummary()
 {
 	if (!signalReactor)
 		return;
+	QHash<QString, int> circuitTotals;
+	QHash<QString, int> circuitScoped;
+	QHash<QString, int> circuitEnabled;
+	for (const QString &circuit : {QStringLiteral("core"), QStringLiteral("frame"), QStringLiteral("chat"),
+				       QStringLiteral("plates"), QStringLiteral("alerts")}) {
+		circuitTotals.insert(circuit, 0);
+		circuitScoped.insert(circuit, 0);
+		circuitEnabled.insert(circuit, 0);
+	}
 	int enabled = 0;
 	int active = 0;
 	int activeEnabled = 0;
 	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
+		const bool inScope = !reactionNetworkActiveSceneOnly || it->sceneUuid == reactionActiveSceneUuid;
+		if (circuitTotals.contains(it->circuit)) {
+			++circuitTotals[it->circuit];
+			if (inScope) {
+				++circuitScoped[it->circuit];
+				if (it->enabled)
+					++circuitEnabled[it->circuit];
+			}
+		}
 		if (it->enabled)
 			++enabled;
 		if (it->sceneUuid == reactionActiveSceneUuid) {
@@ -2164,6 +2182,9 @@ void TempestCommandMatrix::UpdateReactionNetworkSummary()
 		}
 	}
 	signalReactor->SetSourceBindingSummary(sourceReactions.size(), enabled, active, activeEnabled);
+	for (auto it = circuitTotals.cbegin(); it != circuitTotals.cend(); ++it)
+		signalReactor->SetSourceCircuitSummary(it.key(), it.value(), circuitScoped.value(it.key()),
+						       circuitEnabled.value(it.key()));
 }
 
 void TempestCommandMatrix::SetReactionActiveScene(const QString &sceneUuid)
@@ -2204,6 +2225,15 @@ double TempestCommandMatrix::ReactionCircuitGain(const QString &circuit) const
 	return std::clamp(reactionCircuitGains.value(circuit, 1.0), 0.0, 2.0);
 }
 
+void TempestCommandMatrix::PublishReactionCircuitActivity(const QHash<QString, float> &activity)
+{
+	if (!signalReactor)
+		return;
+	for (const QString &circuit : {QStringLiteral("core"), QStringLiteral("frame"), QStringLiteral("chat"),
+				       QStringLiteral("plates"), QStringLiteral("alerts")})
+		signalReactor->SetSourceCircuitActivity(circuit, activity.value(circuit));
+}
+
 void TempestCommandMatrix::TestReactionNetwork()
 {
 	int enabled = 0;
@@ -2229,6 +2259,7 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 	reactionPhase = std::fmod(reactionPhase + 0.28, 6.283185307179586);
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const bool testingNetwork = now < reactionNetworkTestUntil;
+	QHash<QString, float> circuitActivity;
 	bool capturedBaseline = false;
 	for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
 		SourceReaction &reaction = it.value();
@@ -2289,11 +2320,16 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			if (obs_sceneitem_visible(item) != visible)
 				obs_sceneitem_set_visible(item, visible);
 			reaction.runtimeVisibilityApplied = true;
+			if (reaction.visibilityActive)
+				circuitActivity[reaction.circuit] = std::max(circuitActivity.value(reaction.circuit),
+									     std::clamp(visibilityLevel, 0.0f, 2.0f));
 		}
 
 		const double denominator = std::max(0.001, 1.0 - reaction.threshold);
 		const float response = float(std::clamp((double(level) - reaction.threshold) / denominator, 0.0, 1.0)) *
 				       networkIntensity;
+		circuitActivity[reaction.circuit] =
+			std::max(circuitActivity.value(reaction.circuit), std::clamp(response, 0.0f, 2.0f));
 		if (response <= 0.0f) {
 			if (reaction.runtimeTransformApplied)
 				obs_sceneitem_set_info2(item, &reaction.baseline);
@@ -2321,6 +2357,7 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 		reactionTestKey.clear();
 	if (now >= reactionNetworkTestUntil)
 		reactionNetworkTestUntil = 0;
+	PublishReactionCircuitActivity(circuitActivity);
 	if (capturedBaseline)
 		SaveSourceReactions();
 }

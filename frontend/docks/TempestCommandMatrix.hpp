@@ -195,6 +195,7 @@ private:
 	void SetReactionActiveScene(const QString &sceneUuid);
 	bool ReactionCircuitActive(const QString &circuit) const;
 	double ReactionCircuitGain(const QString &circuit) const;
+	void PublishReactionCircuitActivity(const QHash<QString, float> &activity);
 	void TestReactionNetwork();
 	void RestoreReaction(SourceReaction &reaction);
 	void RestoreAllReactions();
