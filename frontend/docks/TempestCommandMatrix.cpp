@@ -201,6 +201,7 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 	reactionNetworkIntensity = signalReactor->SourceNetworkIntensity();
 	reactionNetworkActiveSceneOnly = signalReactor->SourceNetworkActiveSceneOnly();
 	reactionCircuitProfile = signalReactor->SourceNetworkCircuitProfile();
+	reactionSoloCircuit = signalReactor->SourceNetworkSoloCircuit();
 	for (const QString &circuit : {QStringLiteral("core"), QStringLiteral("frame"), QStringLiteral("chat"),
 				       QStringLiteral("plates"), QStringLiteral("alerts")})
 		reactionCircuitGains.insert(circuit, signalReactor->SourceNetworkCircuitGain(circuit));
@@ -210,6 +211,7 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 			reactionTestKey.clear();
 			reactionTestUntil = 0;
 			reactionNetworkTestUntil = 0;
+			reactionNetworkTestCircuit.clear();
 			RestoreAllReactions();
 		}
 		SetStatus(armed ? QStringLiteral("Source reaction network armed")
@@ -242,6 +244,18 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 			UpdateReactionNetworkSummary();
 			SetStatus(QStringLiteral("Reaction circuits // %1").arg(profile.toUpper()));
 		});
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkCircuitSoloChanged, this,
+		[this](const QString &circuit) {
+			reactionSoloCircuit = circuit;
+			for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
+				if (!ReactionCircuitActive(it->circuit))
+					RestoreReaction(it.value());
+			}
+			UpdateReactionNetworkSummary();
+			SetStatus(circuit.isEmpty()
+					  ? QStringLiteral("Reaction circuit solo cleared")
+					  : QStringLiteral("Reaction circuit solo // %1").arg(circuit.toUpper()));
+		});
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkCircuitGainsChanged, this,
 		[this](float core, float frame, float chat, float plates, float alerts) {
 			reactionCircuitGains[QStringLiteral("core")] = std::clamp(double(core), 0.0, 2.0);
@@ -258,10 +272,13 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 		});
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkTestRequested, this,
 		&TempestCommandMatrix::TestReactionNetwork);
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkCircuitTestRequested, this,
+		&TempestCommandMatrix::TestReactionCircuit);
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkRestoreRequested, this, [this]() {
 		reactionTestKey.clear();
 		reactionTestUntil = 0;
 		reactionNetworkTestUntil = 0;
+		reactionNetworkTestCircuit.clear();
 		RestoreAllReactions();
 		SetStatus(QStringLiteral("All source reaction bases restored"));
 	});
@@ -2204,6 +2221,8 @@ void TempestCommandMatrix::SetReactionActiveScene(const QString &sceneUuid)
 
 bool TempestCommandMatrix::ReactionCircuitActive(const QString &circuit) const
 {
+	if (!reactionSoloCircuit.isEmpty())
+		return circuit == reactionSoloCircuit;
 	if (reactionCircuitProfile == QStringLiteral("all"))
 		return true;
 	if (reactionCircuitProfile == QStringLiteral("core"))
@@ -2246,10 +2265,33 @@ void TempestCommandMatrix::TestReactionNetwork()
 		SetStatus(QStringLiteral("No enabled source reaction rigs to test"), true);
 		return;
 	}
+	reactionNetworkTestCircuit.clear();
 	reactionNetworkTestUntil = QDateTime::currentMSecsSinceEpoch() + 1200;
 	ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f);
 	QTimer::singleShot(1250, this, [this]() { ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f); });
 	SetStatus(QStringLiteral("Reaction network test // %1 rig%2")
+			  .arg(enabled)
+			  .arg(enabled == 1 ? QString() : QStringLiteral("s")));
+}
+
+void TempestCommandMatrix::TestReactionCircuit(const QString &circuit)
+{
+	int enabled = 0;
+	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
+		if (it->enabled && it->circuit == circuit &&
+		    (!reactionNetworkActiveSceneOnly || it->sceneUuid == reactionActiveSceneUuid))
+			++enabled;
+	}
+	if (enabled == 0) {
+		SetStatus(QStringLiteral("No enabled %1 circuit rigs to test").arg(circuit.toUpper()), true);
+		return;
+	}
+	reactionNetworkTestCircuit = circuit;
+	reactionNetworkTestUntil = QDateTime::currentMSecsSinceEpoch() + 1200;
+	ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f);
+	QTimer::singleShot(1250, this, [this]() { ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f); });
+	SetStatus(QStringLiteral("%1 circuit test // %2 rig%3")
+			  .arg(circuit.toUpper())
 			  .arg(enabled)
 			  .arg(enabled == 1 ? QString() : QStringLiteral("s")));
 }
@@ -2274,16 +2316,20 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			capturedBaseline = true;
 		}
 		const bool testingSelected = it.key() == reactionTestKey && now < reactionTestUntil;
+		const bool testingTargetedCircuit = testingNetwork && !reactionNetworkTestCircuit.isEmpty() &&
+						    reaction.circuit == reactionNetworkTestCircuit;
+		const bool testingNetworkRig = testingNetwork &&
+					       (reactionNetworkTestCircuit.isEmpty() || testingTargetedCircuit);
 		if (reactionNetworkActiveSceneOnly && reaction.sceneUuid != reactionActiveSceneUuid &&
 		    !testingSelected) {
 			RestoreReaction(reaction);
 			continue;
 		}
-		if (!ReactionCircuitActive(reaction.circuit) && !testingSelected) {
+		if (!ReactionCircuitActive(reaction.circuit) && !testingSelected && !testingTargetedCircuit) {
 			RestoreReaction(reaction);
 			continue;
 		}
-		if (ReactionCircuitGain(reaction.circuit) <= 0.0 && !testingSelected) {
+		if (ReactionCircuitGain(reaction.circuit) <= 0.0 && !testingSelected && !testingTargetedCircuit) {
 			RestoreReaction(reaction);
 			continue;
 		}
@@ -2291,7 +2337,7 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			RestoreReaction(reaction);
 			continue;
 		}
-		if (!reactionNetworkArmed && !testingSelected && !testingNetwork) {
+		if (!reactionNetworkArmed && !testingSelected && !testingNetworkRig) {
 			RestoreReaction(reaction);
 			continue;
 		}
@@ -2302,10 +2348,11 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			level = microphone;
 		else if (reaction.signal == QStringLiteral("beat"))
 			level = beat;
-		if (testingSelected || testingNetwork)
+		if (testingSelected || testingNetworkRig)
 			level = 1.0f;
 		level = std::clamp(level, 0.0f, 1.5f);
-		const float circuitGain = testingSelected ? 1.0f : float(ReactionCircuitGain(reaction.circuit));
+		const float circuitGain =
+			testingSelected || testingTargetedCircuit ? 1.0f : float(ReactionCircuitGain(reaction.circuit));
 		const float networkIntensity = float(std::clamp(reactionNetworkIntensity, 0.0, 2.0)) * circuitGain;
 
 		if (reaction.visibilityEnabled) {
@@ -2355,8 +2402,10 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 	}
 	if (now >= reactionTestUntil)
 		reactionTestKey.clear();
-	if (now >= reactionNetworkTestUntil)
+	if (now >= reactionNetworkTestUntil) {
 		reactionNetworkTestUntil = 0;
+		reactionNetworkTestCircuit.clear();
+	}
 	PublishReactionCircuitActivity(circuitActivity);
 	if (capturedBaseline)
 		SaveSourceReactions();

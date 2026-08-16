@@ -37,10 +37,12 @@ public:
 	bool SourceNetworkActiveSceneOnly() const;
 	QString SourceNetworkCircuitProfile() const;
 	float SourceNetworkCircuitGain(const QString &circuit) const;
+	QString SourceNetworkSoloCircuit() const;
 	void SetSourceNetworkArmed(bool armed);
 	void SetSourceNetworkIntensity(float intensity);
 	void SetSourceNetworkActiveSceneOnly(bool activeSceneOnly);
 	void SetSourceNetworkCircuitProfile(const QString &profile);
+	void SetSourceNetworkSoloCircuit(const QString &circuit);
 	void CycleSourceNetworkCircuitProfile();
 	void ResetSourceNetworkCircuitGains();
 	void TestSourceNetwork();
@@ -54,7 +56,9 @@ signals:
 	void SourceNetworkScopeChanged(bool activeSceneOnly);
 	void SourceNetworkCircuitProfileChanged(const QString &profile);
 	void SourceNetworkCircuitGainsChanged(float core, float frame, float chat, float plates, float alerts);
+	void SourceNetworkCircuitSoloChanged(const QString &circuit);
 	void SourceNetworkTestRequested();
+	void SourceNetworkCircuitTestRequested(const QString &circuit);
 	void SourceNetworkRestoreRequested();
 
 private slots:
@@ -86,6 +90,8 @@ private:
 	QString SourceNetworkCircuitState(const QString &circuit) const;
 	void RefreshSourceNetworkCircuitMonitor(const QString &circuit);
 	void RefreshSourceNetworkCircuitMonitors();
+	void ToggleSourceNetworkCircuitMute(const QString &circuit);
+	void ToggleSourceNetworkCircuitSolo(const QString &circuit);
 	void SetStatus(const QString &message, bool error = false);
 
 	QPointer<OBSBasic> main;
@@ -106,7 +112,11 @@ private:
 	QHash<QString, QPointer<QDoubleSpinBox>> sourceNetworkCircuitGains;
 	QHash<QString, QPointer<QProgressBar>> sourceNetworkCircuitMeters;
 	QHash<QString, QPointer<QLabel>> sourceNetworkCircuitStates;
+	QHash<QString, QPointer<QPushButton>> sourceNetworkCircuitMuteButtons;
+	QHash<QString, QPointer<QPushButton>> sourceNetworkCircuitSoloButtons;
+	QHash<QString, QPointer<QPushButton>> sourceNetworkCircuitTestButtons;
 	QHash<QString, float> sourceNetworkCircuitActivities;
+	QHash<QString, double> sourceNetworkCircuitRestoreGains;
 	QHash<QString, int> sourceNetworkCircuitTotals;
 	QHash<QString, int> sourceNetworkCircuitScoped;
 	QHash<QString, int> sourceNetworkCircuitEnabled;
@@ -128,6 +138,7 @@ private:
 	float manualPulse = 0.0f;
 	float beatBaseline = 0.0f;
 	float beatLevel = 0.0f;
+	QString sourceNetworkSoloCircuit;
 	bool audioSourcesLoaded = false;
 	bool loadingState = false;
 	bool webSocketReady = false;

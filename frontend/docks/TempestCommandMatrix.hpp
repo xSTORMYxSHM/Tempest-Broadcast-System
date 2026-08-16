@@ -197,6 +197,7 @@ private:
 	double ReactionCircuitGain(const QString &circuit) const;
 	void PublishReactionCircuitActivity(const QHash<QString, float> &activity);
 	void TestReactionNetwork();
+	void TestReactionCircuit(const QString &circuit);
 	void RestoreReaction(SourceReaction &reaction);
 	void RestoreAllReactions();
 	void RegisterTransformUndo(obs_scene_t *scene, obs_data_t *undoData, obs_data_t *redoData,
@@ -292,10 +293,12 @@ private:
 	QString reactionTestKey;
 	qint64 reactionTestUntil = 0;
 	qint64 reactionNetworkTestUntil = 0;
+	QString reactionNetworkTestCircuit;
 	bool reactionNetworkArmed = true;
 	bool reactionNetworkActiveSceneOnly = true;
 	double reactionNetworkIntensity = 1.0;
 	QString reactionActiveSceneUuid;
 	QString reactionCircuitProfile = QStringLiteral("all");
+	QString reactionSoloCircuit;
 	QHash<QString, double> reactionCircuitGains;
 };
