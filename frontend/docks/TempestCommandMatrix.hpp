@@ -81,6 +81,7 @@ private:
 		QString recordingAction = QStringLiteral("keep");
 		QString reactionNetworkAction = QStringLiteral("keep");
 		QString reactionScopeAction = QStringLiteral("keep");
+		QString reactionCircuitProfile = QStringLiteral("keep");
 		bool reactionIntensityEnabled = false;
 		int reactionIntensity = 100;
 		bool launchEnabled = false;
@@ -103,6 +104,7 @@ private:
 		int64_t itemId = 0;
 		QString signal = QStringLiteral("master");
 		QString preset = QStringLiteral("custom");
+		QString circuit = QStringLiteral("core");
 		double threshold = 0.08;
 		bool scaleEnabled = true;
 		double scaleAmount = 12.0;
@@ -191,6 +193,7 @@ private:
 	void ApplyReactionLevels(float master, float desktop, float microphone, float beat);
 	void UpdateReactionNetworkSummary();
 	void SetReactionActiveScene(const QString &sceneUuid);
+	bool ReactionCircuitActive(const QString &circuit) const;
 	void TestReactionNetwork();
 	void RestoreReaction(SourceReaction &reaction);
 	void RestoreAllReactions();
@@ -250,6 +253,7 @@ private:
 	QPointer<QCheckBox> reactionEnabled;
 	QPointer<QComboBox> reactionSignal;
 	QPointer<QComboBox> reactionPreset;
+	QPointer<QComboBox> reactionCircuit;
 	QPointer<QCheckBox> reactionScaleEnabled;
 	QPointer<QDoubleSpinBox> reactionScaleAmount;
 	QPointer<QCheckBox> reactionLiftEnabled;
@@ -290,4 +294,5 @@ private:
 	bool reactionNetworkActiveSceneOnly = true;
 	double reactionNetworkIntensity = 1.0;
 	QString reactionActiveSceneUuid;
+	QString reactionCircuitProfile = QStringLiteral("all");
 };

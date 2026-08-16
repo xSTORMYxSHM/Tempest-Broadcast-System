@@ -198,6 +198,16 @@ void TempestSignalReactor::BuildInterface()
 	sourceNetworkArmed->setAccessibleName(QStringLiteral("Arm source reaction network"));
 	sourceNetworkActiveSceneOnly = new QCheckBox(QStringLiteral("ACTIVE SCENE RIGS ONLY"), networkFrame);
 	sourceNetworkActiveSceneOnly->setAccessibleName(QStringLiteral("Limit source reactions to active scene"));
+	sourceNetworkCircuitProfile = new QComboBox(networkFrame);
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("ALL CIRCUITS"), QStringLiteral("all"));
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("AMBIENT // CORE + FRAME + PLATES"),
+					     QStringLiteral("ambient"));
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("CONVERSATION // CORE + FRAME + CHAT + PLATES"),
+					     QStringLiteral("conversation"));
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("ALERT FOCUS // CORE + FRAME + ALERTS"),
+					     QStringLiteral("alert"));
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("CORE ONLY"), QStringLiteral("core"));
+	sourceNetworkCircuitProfile->setAccessibleName(QStringLiteral("Source reaction circuit profile"));
 	sourceNetworkIntensity = new QDoubleSpinBox(networkFrame);
 	sourceNetworkIntensity->setRange(0.0, 200.0);
 	sourceNetworkIntensity->setDecimals(0);
@@ -215,6 +225,7 @@ void TempestSignalReactor::BuildInterface()
 	networkLayout->addWidget(sourceNetworkStatus);
 	networkLayout->addWidget(sourceNetworkArmed);
 	networkLayout->addWidget(sourceNetworkActiveSceneOnly);
+	networkLayout->addWidget(sourceNetworkCircuitProfile);
 	networkLayout->addWidget(sourceNetworkIntensity);
 	networkLayout->addLayout(networkButtons);
 	layout->addWidget(networkFrame);
@@ -269,6 +280,10 @@ void TempestSignalReactor::BuildInterface()
 		SaveState();
 		emit SourceNetworkScopeChanged(activeSceneOnly);
 	});
+	connect(sourceNetworkCircuitProfile, &QComboBox::currentIndexChanged, this, [this](int) {
+		SaveState();
+		emit SourceNetworkCircuitProfileChanged(SourceNetworkCircuitProfile());
+	});
 	connect(testNetwork, &QPushButton::clicked, this, &TempestSignalReactor::TestSourceNetwork);
 	connect(restoreNetwork, &QPushButton::clicked, this, &TempestSignalReactor::DisarmAndRestoreSourceNetwork);
 	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerPulse(0.65f, QStringLiteral("dock")); });
@@ -308,6 +323,8 @@ void TempestSignalReactor::RegisterHotkeys()
 		 "restore"},
 		{"TempestMainframe.ReactionNetwork.Scope", "Tempest Mainframe: Toggle Active Scene Reaction Scope",
 		 "scope"},
+		{"TempestMainframe.ReactionNetwork.Circuits",
+		 "Tempest Mainframe: Cycle Source Reaction Circuit Profile", "circuits"},
 	};
 	for (const NetworkDefinition &definition : networkDefinitions) {
 		const obs_hotkey_id id =
@@ -371,6 +388,8 @@ void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotk
 				guarded->DisarmAndRestoreSourceNetwork();
 			} else if (networkAction == QStringLiteral("scope")) {
 				guarded->SetSourceNetworkActiveSceneOnly(!guarded->SourceNetworkActiveSceneOnly());
+			} else if (networkAction == QStringLiteral("circuits")) {
+				guarded->CycleSourceNetworkCircuitProfile();
 			}
 		},
 		Qt::QueuedConnection);
@@ -395,6 +414,10 @@ void TempestSignalReactor::LoadState()
 	sourceNetworkActiveSceneOnly->setChecked(
 		!config_has_user_value(config, ConfigSection, "SourceNetworkActiveSceneOnly") ||
 		config_get_bool(config, ConfigSection, "SourceNetworkActiveSceneOnly"));
+	const QString savedCircuitProfile =
+		QString::fromUtf8(config_get_string(config, ConfigSection, "SourceNetworkCircuitProfile"));
+	const int circuitIndex = sourceNetworkCircuitProfile->findData(savedCircuitProfile);
+	sourceNetworkCircuitProfile->setCurrentIndex(circuitIndex >= 0 ? circuitIndex : 0);
 	const double savedNetworkIntensity = config_get_double(config, ConfigSection, "SourceNetworkIntensity");
 	sourceNetworkIntensity->setValue(config_has_user_value(config, ConfigSection, "SourceNetworkIntensity")
 						 ? std::clamp(savedNetworkIntensity, 0.0, 200.0)
@@ -423,6 +446,8 @@ void TempestSignalReactor::SaveState()
 	config_set_bool(config, ConfigSection, "SourceNetworkArmed", sourceNetworkArmed->isChecked());
 	config_set_bool(config, ConfigSection, "SourceNetworkActiveSceneOnly",
 			sourceNetworkActiveSceneOnly->isChecked());
+	config_set_string(config, ConfigSection, "SourceNetworkCircuitProfile",
+			  SourceNetworkCircuitProfile().toUtf8().constData());
 	config_set_double(config, ConfigSection, "SourceNetworkIntensity", sourceNetworkIntensity->value());
 	if (audioSourcesLoaded) {
 		configuredDesktopUuid = desktopSource->currentData().toString();
@@ -603,6 +628,12 @@ bool TempestSignalReactor::SourceNetworkActiveSceneOnly() const
 	return !sourceNetworkActiveSceneOnly || sourceNetworkActiveSceneOnly->isChecked();
 }
 
+QString TempestSignalReactor::SourceNetworkCircuitProfile() const
+{
+	return sourceNetworkCircuitProfile ? sourceNetworkCircuitProfile->currentData().toString()
+					   : QStringLiteral("all");
+}
+
 void TempestSignalReactor::SetSourceNetworkArmed(bool armed)
 {
 	if (sourceNetworkArmed)
@@ -621,6 +652,23 @@ void TempestSignalReactor::SetSourceNetworkActiveSceneOnly(bool activeSceneOnly)
 		sourceNetworkActiveSceneOnly->setChecked(activeSceneOnly);
 }
 
+void TempestSignalReactor::SetSourceNetworkCircuitProfile(const QString &profile)
+{
+	if (!sourceNetworkCircuitProfile)
+		return;
+	const int index = sourceNetworkCircuitProfile->findData(profile);
+	if (index >= 0)
+		sourceNetworkCircuitProfile->setCurrentIndex(index);
+}
+
+void TempestSignalReactor::CycleSourceNetworkCircuitProfile()
+{
+	if (!sourceNetworkCircuitProfile || sourceNetworkCircuitProfile->count() <= 0)
+		return;
+	sourceNetworkCircuitProfile->setCurrentIndex((sourceNetworkCircuitProfile->currentIndex() + 1) %
+						     sourceNetworkCircuitProfile->count());
+}
+
 void TempestSignalReactor::TestSourceNetwork()
 {
 	emit SourceNetworkTestRequested();
@@ -636,12 +684,12 @@ void TempestSignalReactor::UpdateControlBridgeState()
 {
 	if (!controlLabel)
 		return;
-	const bool hotkeysReady = pulseHotkeys.size() == 2 && networkHotkeys.size() == 4;
+	const bool hotkeysReady = pulseHotkeys.size() == 2 && networkHotkeys.size() == 5;
 	QString state;
 	if (hotkeysReady && webSocketReady)
-		state = QStringLiteral("CONTROL BRIDGE // 6 HOTKEYS + WEBSOCKET VENDOR API READY");
+		state = QStringLiteral("CONTROL BRIDGE // 7 HOTKEYS + WEBSOCKET VENDOR API READY");
 	else if (hotkeysReady)
-		state = QStringLiteral("CONTROL BRIDGE // 6 HOTKEYS READY");
+		state = QStringLiteral("CONTROL BRIDGE // 7 HOTKEYS READY");
 	else
 		state = QStringLiteral("CONTROL BRIDGE // INITIALIZING");
 	controlLabel->setText(state);
@@ -702,6 +750,7 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("sourceNetworkArmed"), SourceNetworkArmed());
 	telemetry.insert(QStringLiteral("sourceNetworkIntensity"), SourceNetworkIntensity());
 	telemetry.insert(QStringLiteral("sourceNetworkActiveSceneOnly"), SourceNetworkActiveSceneOnly());
+	telemetry.insert(QStringLiteral("sourceNetworkCircuitProfile"), SourceNetworkCircuitProfile());
 	telemetry.insert(QStringLiteral("timestamp"), QDateTime::currentMSecsSinceEpoch());
 	QSaveFile file(telemetryPath);
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Text))

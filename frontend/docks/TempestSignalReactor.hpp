@@ -33,9 +33,12 @@ public:
 	bool SourceNetworkArmed() const;
 	float SourceNetworkIntensity() const;
 	bool SourceNetworkActiveSceneOnly() const;
+	QString SourceNetworkCircuitProfile() const;
 	void SetSourceNetworkArmed(bool armed);
 	void SetSourceNetworkIntensity(float intensity);
 	void SetSourceNetworkActiveSceneOnly(bool activeSceneOnly);
+	void SetSourceNetworkCircuitProfile(const QString &profile);
+	void CycleSourceNetworkCircuitProfile();
 	void TestSourceNetwork();
 	void DisarmAndRestoreSourceNetwork();
 
@@ -45,6 +48,7 @@ signals:
 	void SourceNetworkArmedChanged(bool armed);
 	void SourceNetworkIntensityChanged(float intensity);
 	void SourceNetworkScopeChanged(bool activeSceneOnly);
+	void SourceNetworkCircuitProfileChanged(const QString &profile);
 	void SourceNetworkTestRequested();
 	void SourceNetworkRestoreRequested();
 
@@ -89,6 +93,7 @@ private:
 	QPointer<QProgressBar> masterMeter;
 	QPointer<QCheckBox> sourceNetworkArmed;
 	QPointer<QCheckBox> sourceNetworkActiveSceneOnly;
+	QPointer<QComboBox> sourceNetworkCircuitProfile;
 	QPointer<QDoubleSpinBox> sourceNetworkIntensity;
 	QPointer<QLabel> sourceNetworkStatus;
 	QPointer<QLabel> statusLabel;

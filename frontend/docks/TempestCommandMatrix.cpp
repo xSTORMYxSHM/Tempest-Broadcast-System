@@ -200,6 +200,7 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 	reactionNetworkArmed = signalReactor->SourceNetworkArmed();
 	reactionNetworkIntensity = signalReactor->SourceNetworkIntensity();
 	reactionNetworkActiveSceneOnly = signalReactor->SourceNetworkActiveSceneOnly();
+	reactionCircuitProfile = signalReactor->SourceNetworkCircuitProfile();
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkArmedChanged, this, [this](bool armed) {
 		reactionNetworkArmed = armed;
 		if (!armed) {
@@ -228,6 +229,16 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 		SetStatus(activeSceneOnly ? QStringLiteral("Reaction scope // active scene rigs only")
 					  : QStringLiteral("Reaction scope // all bound scenes"));
 	});
+	connect(signalReactor, &TempestSignalReactor::SourceNetworkCircuitProfileChanged, this,
+		[this](const QString &profile) {
+			reactionCircuitProfile = profile;
+			for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
+				if (!ReactionCircuitActive(it->circuit))
+					RestoreReaction(it.value());
+			}
+			UpdateReactionNetworkSummary();
+			SetStatus(QStringLiteral("Reaction circuits // %1").arg(profile.toUpper()));
+		});
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkTestRequested, this,
 		&TempestCommandMatrix::TestReactionNetwork);
 	connect(signalReactor, &TempestSignalReactor::SourceNetworkRestoreRequested, this, [this]() {
@@ -902,6 +913,13 @@ void TempestCommandMatrix::BuildInterface()
 	reactionPreset->addItem(QStringLiteral("FRACTAL DRIFT"), QStringLiteral("fractal-drift"));
 	reactionPreset->addItem(QStringLiteral("GHOST SIGNAL"), QStringLiteral("ghost-signal"));
 	reactionPreset->setAccessibleName(QStringLiteral("Reactive source motion rig preset"));
+	reactionCircuit = new QComboBox(reactionConsolePanel);
+	reactionCircuit->addItem(QStringLiteral("CORE"), QStringLiteral("core"));
+	reactionCircuit->addItem(QStringLiteral("FRAME BORDER"), QStringLiteral("frame"));
+	reactionCircuit->addItem(QStringLiteral("CHAT"), QStringLiteral("chat"));
+	reactionCircuit->addItem(QStringLiteral("ELEMENT PLATES"), QStringLiteral("plates"));
+	reactionCircuit->addItem(QStringLiteral("ALERTS"), QStringLiteral("alerts"));
+	reactionCircuit->setAccessibleName(QStringLiteral("Reactive source circuit assignment"));
 	reactionSignal = new QComboBox(reactionConsolePanel);
 	reactionSignal->addItem(QStringLiteral("MASTER ENERGY"), QStringLiteral("master"));
 	reactionSignal->addItem(QStringLiteral("DESKTOP AUDIO"), QStringLiteral("desktop"));
@@ -916,6 +934,7 @@ void TempestCommandMatrix::BuildInterface()
 	reactionThreshold->setAccessibleName(QStringLiteral("Reactive source signal threshold"));
 	reactionForm->addRow(reactionEnabled);
 	reactionForm->addRow(QStringLiteral("PRESET"), reactionPreset);
+	reactionForm->addRow(QStringLiteral("CIRCUIT"), reactionCircuit);
 	reactionForm->addRow(QStringLiteral("SIGNAL"), reactionSignal);
 	reactionForm->addRow(QStringLiteral("GATE"), reactionThreshold);
 	reactionConsole->addLayout(reactionForm);
@@ -1756,6 +1775,9 @@ void TempestCommandMatrix::LoadSourceReactions()
 
 	static const QStringList validSignals = {QStringLiteral("master"), QStringLiteral("desktop"),
 						 QStringLiteral("microphone"), QStringLiteral("beat")};
+	static const QStringList validCircuits = {QStringLiteral("core"), QStringLiteral("frame"),
+						  QStringLiteral("chat"), QStringLiteral("plates"),
+						  QStringLiteral("alerts")};
 	for (const QJsonValue &value : document.array()) {
 		const QJsonObject object = value.toObject();
 		SourceReaction reaction;
@@ -1765,10 +1787,13 @@ void TempestCommandMatrix::LoadSourceReactions()
 		reaction.itemId = object.value(QStringLiteral("itemId")).toVariant().toLongLong();
 		reaction.signal = object.value(QStringLiteral("signal")).toString(QStringLiteral("master"));
 		reaction.preset = object.value(QStringLiteral("preset")).toString(QStringLiteral("custom"));
+		reaction.circuit = object.value(QStringLiteral("circuit")).toString(QStringLiteral("core"));
 		reaction.threshold = object.value(QStringLiteral("threshold")).toDouble(0.08);
 		reaction.enabled = object.value(QStringLiteral("enabled")).toBool(true);
 		if (!validSignals.contains(reaction.signal))
 			reaction.signal = QStringLiteral("master");
+		if (!validCircuits.contains(reaction.circuit))
+			reaction.circuit = QStringLiteral("core");
 		const QJsonObject effects = object.value(QStringLiteral("effects")).toObject();
 		if (!effects.isEmpty()) {
 			auto loadEffect = [&effects](const QString &name, bool &enabled, double &amount,
@@ -1843,6 +1868,7 @@ void TempestCommandMatrix::SaveSourceReactions()
 		object.insert(QStringLiteral("itemId"), QString::number(reaction.itemId));
 		object.insert(QStringLiteral("signal"), reaction.signal);
 		object.insert(QStringLiteral("preset"), reaction.preset);
+		object.insert(QStringLiteral("circuit"), reaction.circuit);
 		object.insert(QStringLiteral("threshold"), reaction.threshold);
 		object.insert(QStringLiteral("enabled"), reaction.enabled);
 		QJsonObject effects;
@@ -1886,10 +1912,10 @@ void TempestCommandMatrix::SaveSourceReactions()
 
 void TempestCommandMatrix::RefreshReactionConsole()
 {
-	if (!reactionConsolePanel || !reactionEnabled || !reactionPreset || !reactionSignal || !reactionScaleEnabled ||
-	    !reactionScaleAmount || !reactionLiftEnabled || !reactionLiftAmount || !reactionSwayEnabled ||
-	    !reactionSwayAmount || !reactionRotateEnabled || !reactionRotateAmount || !reactionVisibilityEnabled ||
-	    !reactionThreshold || !reactionStatusLabel)
+	if (!reactionConsolePanel || !reactionEnabled || !reactionPreset || !reactionCircuit || !reactionSignal ||
+	    !reactionScaleEnabled || !reactionScaleAmount || !reactionLiftEnabled || !reactionLiftAmount ||
+	    !reactionSwayEnabled || !reactionSwayAmount || !reactionRotateEnabled || !reactionRotateAmount ||
+	    !reactionVisibilityEnabled || !reactionThreshold || !reactionStatusLabel)
 		return;
 
 	const QString key = SelectedReactionKey();
@@ -1898,6 +1924,7 @@ void TempestCommandMatrix::RefreshReactionConsole()
 	if (found == sourceReactions.cend()) {
 		reactionEnabled->setChecked(true);
 		reactionPreset->setCurrentIndex(0);
+		reactionCircuit->setCurrentIndex(0);
 		reactionSignal->setCurrentIndex(0);
 		reactionThreshold->setValue(0.08);
 		reactionScaleEnabled->setChecked(true);
@@ -1915,6 +1942,7 @@ void TempestCommandMatrix::RefreshReactionConsole()
 		const SourceReaction &reaction = found.value();
 		reactionEnabled->setChecked(reaction.enabled);
 		SetComboData(reactionPreset, reaction.preset);
+		SetComboData(reactionCircuit, reaction.circuit);
 		SetComboData(reactionSignal, reaction.signal);
 		reactionThreshold->setValue(reaction.threshold);
 		reactionScaleEnabled->setChecked(reaction.scaleEnabled);
@@ -1927,7 +1955,8 @@ void TempestCommandMatrix::RefreshReactionConsole()
 		reactionRotateAmount->setValue(reaction.rotateAmount);
 		reactionVisibilityEnabled->setChecked(reaction.visibilityEnabled);
 		reactionStatusLabel->setText(
-			QStringLiteral("BOUND // %1 // %2 MODULATOR%3 // BASE %4")
+			QStringLiteral("BOUND // %1 CIRCUIT // %2 // %3 MODULATOR%4 // BASE %5")
+				.arg(reaction.circuit.toUpper())
 				.arg(reaction.signal.toUpper())
 				.arg(ReactionEffectCount(reaction))
 				.arg(ReactionEffectCount(reaction) == 1 ? QString() : QStringLiteral("S"))
@@ -2014,6 +2043,7 @@ void TempestCommandMatrix::ApplyReactionBinding()
 	reaction.itemId = obs_sceneitem_get_id(item);
 	reaction.signal = reactionSignal->currentData().toString();
 	reaction.preset = reactionPreset->currentData().toString();
+	reaction.circuit = reactionCircuit->currentData().toString();
 	reaction.threshold = reactionThreshold->value();
 	reaction.scaleEnabled = reactionScaleEnabled->isChecked();
 	reaction.scaleAmount = reactionScaleAmount->value();
@@ -2036,7 +2066,8 @@ void TempestCommandMatrix::ApplyReactionBinding()
 	sourceReactions.insert(key, reaction);
 	SaveSourceReactions();
 	UpdateReactionNetworkSummary();
-	SetStatus(QStringLiteral("Reactive rig saved // %1 // %2 modulator%3")
+	SetStatus(QStringLiteral("Reactive rig saved // %1 circuit // %2 // %3 modulator%4")
+			  .arg(reaction.circuit.toUpper())
 			  .arg(reaction.signal.toUpper())
 			  .arg(ReactionEffectCount(reaction))
 			  .arg(ReactionEffectCount(reaction) == 1 ? QString() : QStringLiteral("s")));
@@ -2111,7 +2142,7 @@ void TempestCommandMatrix::UpdateReactionNetworkSummary()
 			++enabled;
 		if (it->sceneUuid == reactionActiveSceneUuid) {
 			++active;
-			if (it->enabled)
+			if (it->enabled && ReactionCircuitActive(it->circuit))
 				++activeEnabled;
 		}
 	}
@@ -2133,11 +2164,30 @@ void TempestCommandMatrix::SetReactionActiveScene(const QString &sceneUuid)
 	UpdateReactionNetworkSummary();
 }
 
+bool TempestCommandMatrix::ReactionCircuitActive(const QString &circuit) const
+{
+	if (reactionCircuitProfile == QStringLiteral("all"))
+		return true;
+	if (reactionCircuitProfile == QStringLiteral("core"))
+		return circuit == QStringLiteral("core");
+	if (reactionCircuitProfile == QStringLiteral("ambient"))
+		return circuit == QStringLiteral("core") || circuit == QStringLiteral("frame") ||
+		       circuit == QStringLiteral("plates");
+	if (reactionCircuitProfile == QStringLiteral("conversation"))
+		return circuit == QStringLiteral("core") || circuit == QStringLiteral("frame") ||
+		       circuit == QStringLiteral("chat") || circuit == QStringLiteral("plates");
+	if (reactionCircuitProfile == QStringLiteral("alert"))
+		return circuit == QStringLiteral("core") || circuit == QStringLiteral("frame") ||
+		       circuit == QStringLiteral("alerts");
+	return true;
+}
+
 void TempestCommandMatrix::TestReactionNetwork()
 {
 	int enabled = 0;
 	for (auto it = sourceReactions.cbegin(); it != sourceReactions.cend(); ++it) {
-		if (it->enabled && (!reactionNetworkActiveSceneOnly || it->sceneUuid == reactionActiveSceneUuid))
+		if (it->enabled && ReactionCircuitActive(it->circuit) &&
+		    (!reactionNetworkActiveSceneOnly || it->sceneUuid == reactionActiveSceneUuid))
 			++enabled;
 	}
 	if (enabled == 0) {
@@ -2173,6 +2223,10 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 		const bool testingSelected = it.key() == reactionTestKey && now < reactionTestUntil;
 		if (reactionNetworkActiveSceneOnly && reaction.sceneUuid != reactionActiveSceneUuid &&
 		    !testingSelected) {
+			RestoreReaction(reaction);
+			continue;
+		}
+		if (!ReactionCircuitActive(reaction.circuit) && !testingSelected) {
 			RestoreReaction(reaction);
 			continue;
 		}
@@ -2404,6 +2458,7 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 	obs_data_set_bool(eventData, "programLaunchFailed", launchFailed);
 	obs_data_set_string(eventData, "reactionNetworkAction", config.reactionNetworkAction.toUtf8().constData());
 	obs_data_set_string(eventData, "reactionScopeAction", config.reactionScopeAction.toUtf8().constData());
+	obs_data_set_string(eventData, "reactionCircuitProfile", config.reactionCircuitProfile.toUtf8().constData());
 	obs_data_set_bool(eventData, "reactionIntensityApplied", config.reactionIntensityEnabled);
 	obs_data_set_int(eventData, "reactionIntensity", config.reactionIntensity);
 	EmitRouterEvent("ProtocolExecuted", eventData);
@@ -2443,6 +2498,8 @@ void TempestCommandMatrix::ApplyReactionNetworkAction(const ProtocolActionConfig
 		signalReactor->SetSourceNetworkActiveSceneOnly(true);
 	else if (config.reactionScopeAction == QStringLiteral("all"))
 		signalReactor->SetSourceNetworkActiveSceneOnly(false);
+	if (config.reactionCircuitProfile != QStringLiteral("keep"))
+		signalReactor->SetSourceNetworkCircuitProfile(config.reactionCircuitProfile);
 	if (config.reactionIntensityEnabled)
 		signalReactor->SetSourceNetworkIntensity(float(config.reactionIntensity) / 100.0f);
 	if (config.reactionNetworkAction == QStringLiteral("arm")) {
@@ -2600,6 +2657,12 @@ void TempestCommandMatrix::LoadActionConfigs()
 							      QStringLiteral("all")};
 		if (!validScopeActions.contains(actions.reactionScopeAction))
 			actions.reactionScopeAction = QStringLiteral("keep");
+		actions.reactionCircuitProfile = stringValue("ReactionCircuitProfile");
+		static const QStringList validCircuitProfiles = {
+			QStringLiteral("keep"),         QStringLiteral("all"),   QStringLiteral("ambient"),
+			QStringLiteral("conversation"), QStringLiteral("alert"), QStringLiteral("core")};
+		if (!validCircuitProfiles.contains(actions.reactionCircuitProfile))
+			actions.reactionCircuitProfile = QStringLiteral("keep");
 		const QByteArray reactionIntensityEnabledKey =
 			ActionConfigKey(protocol.id, "ReactionIntensityEnabled").toUtf8();
 		actions.reactionIntensityEnabled =
@@ -2638,6 +2701,7 @@ void TempestCommandMatrix::SaveActionConfigs()
 		setString("RecordingAction", actions.recordingAction);
 		setString("ReactionNetworkAction", actions.reactionNetworkAction);
 		setString("ReactionScopeAction", actions.reactionScopeAction);
+		setString("ReactionCircuitProfile", actions.reactionCircuitProfile);
 		const QByteArray reactionIntensityEnabledKey =
 			ActionConfigKey(protocol.id, "ReactionIntensityEnabled").toUtf8();
 		config_set_bool(config, ConfigSection, reactionIntensityEnabledKey.constData(),
@@ -2667,6 +2731,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		QComboBox *recordingAction = nullptr;
 		QComboBox *reactionNetworkAction = nullptr;
 		QComboBox *reactionScopeAction = nullptr;
+		QComboBox *reactionCircuitProfile = nullptr;
 		QCheckBox *reactionIntensityEnabled = nullptr;
 		QSpinBox *reactionIntensity = nullptr;
 		QCheckBox *launchEnabled = nullptr;
@@ -2818,6 +2883,17 @@ void TempestCommandMatrix::OpenActionEditor()
 		fields.reactionScopeAction->addItem(QStringLiteral("ALL BOUND SCENES"), QStringLiteral("all"));
 		SetComboData(fields.reactionScopeAction, actions.reactionScopeAction);
 		reactionForm->addRow(QStringLiteral("Scene scope"), fields.reactionScopeAction);
+		fields.reactionCircuitProfile = new QComboBox(reactionGroup);
+		fields.reactionCircuitProfile->setAccessibleName(protocol.label +
+								 QStringLiteral(" reaction circuit profile"));
+		fields.reactionCircuitProfile->addItem(QStringLiteral("KEEP CURRENT PROFILE"), QStringLiteral("keep"));
+		fields.reactionCircuitProfile->addItem(QStringLiteral("ALL CIRCUITS"), QStringLiteral("all"));
+		fields.reactionCircuitProfile->addItem(QStringLiteral("AMBIENT"), QStringLiteral("ambient"));
+		fields.reactionCircuitProfile->addItem(QStringLiteral("CONVERSATION"), QStringLiteral("conversation"));
+		fields.reactionCircuitProfile->addItem(QStringLiteral("ALERT FOCUS"), QStringLiteral("alert"));
+		fields.reactionCircuitProfile->addItem(QStringLiteral("CORE ONLY"), QStringLiteral("core"));
+		SetComboData(fields.reactionCircuitProfile, actions.reactionCircuitProfile);
+		reactionForm->addRow(QStringLiteral("Circuit profile"), fields.reactionCircuitProfile);
 		fields.reactionIntensityEnabled =
 			new QCheckBox(QStringLiteral("Set protocol-specific master intensity"), reactionGroup);
 		fields.reactionIntensityEnabled->setAccessibleName(
@@ -2897,6 +2973,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		actions.recordingAction = fields.recordingAction->currentData().toString();
 		actions.reactionNetworkAction = fields.reactionNetworkAction->currentData().toString();
 		actions.reactionScopeAction = fields.reactionScopeAction->currentData().toString();
+		actions.reactionCircuitProfile = fields.reactionCircuitProfile->currentData().toString();
 		actions.reactionIntensityEnabled = fields.reactionIntensityEnabled->isChecked();
 		actions.reactionIntensity = fields.reactionIntensity->value();
 		actions.launchEnabled = fields.launchEnabled->isChecked();
