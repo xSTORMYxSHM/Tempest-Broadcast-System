@@ -22,6 +22,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -48,6 +49,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 
@@ -89,6 +91,23 @@ void SetRouterResponse(obs_data_t *response, bool accepted, const char *message)
 {
 	obs_data_set_bool(response, "accepted", accepted);
 	obs_data_set_string(response, "message", message);
+}
+
+void GetSceneItemBox(obs_sceneitem_t *item, vec3 &topLeft, vec3 &bottomRight)
+{
+	matrix4 transform;
+	obs_sceneitem_get_box_transform(item, &transform);
+	vec3_set(&topLeft, FLT_MAX, FLT_MAX, 0.0f);
+	vec3_set(&bottomRight, -FLT_MAX, -FLT_MAX, 0.0f);
+	for (int y = 0; y <= 1; ++y) {
+		for (int x = 0; x <= 1; ++x) {
+			vec3 point;
+			vec3_set(&point, float(x), float(y), 0.0f);
+			vec3_transform(&point, &point, &transform);
+			vec3_min(&topLeft, &topLeft, &point);
+			vec3_max(&bottomRight, &bottomRight, &point);
+		}
+	}
 }
 } // namespace
 
@@ -448,6 +467,11 @@ void TempestCommandMatrix::BuildInterface()
 		QLabel#matrixInspectorType { color: #748fa4; font-size: 9px; }
 		QPushButton[inspectorAction="true"] { min-height: 27px; padding: 0 5px; font-size: 9px; }
 		QPushButton[inspectorAction="true"]:disabled { color: #40596b; border-color: #102c3d; background: #091722; }
+		QPushButton[layoutToggle="true"] { min-height: 29px; padding: 0 7px; font-size: 9px; letter-spacing: 1px; text-align: left; }
+		QWidget#matrixLayoutConsole { border: 1px solid #102f42; background: #07131e; }
+		QWidget#matrixLayoutConsole QLabel { border: none; background: transparent; color: #748fa4; font-size: 9px; }
+		QWidget#matrixLayoutConsole QDoubleSpinBox { min-height: 25px; padding: 0 4px; border: 1px solid #1f506d; background: #06101a; color: #bdf6ff; selection-background-color: #0c7ccb; }
+		QPushButton[layoutMini="true"] { min-height: 25px; padding: 0 4px; font-size: 8px; }
 		QSplitter::handle { background: #153b52; height: 2px; margin: 4px 0; }
 	)"));
 
@@ -622,6 +646,185 @@ void TempestCommandMatrix::BuildInterface()
 	addInspectorButton(inspectorRestartButton, QStringLiteral("RESTART"), 3, 2);
 	addInspectorButton(inspectorMuteButton, QStringLiteral("MUTE AUDIO"), 4, 0, 3);
 	inspectorLayout->addLayout(inspectorGrid);
+
+	layoutToggleButton = new QPushButton(QStringLiteral("PRECISION LAYOUT"), sourceInspectorPanel);
+	layoutToggleButton->setProperty("layoutToggle", true);
+	layoutToggleButton->setCheckable(true);
+	layoutToggleButton->setAccessibleName(QStringLiteral("Toggle precision source layout controls"));
+	inspectorLayout->addWidget(layoutToggleButton);
+
+	layoutConsolePanel = new QWidget(sourceInspectorPanel);
+	layoutConsolePanel->setObjectName(QStringLiteral("matrixLayoutConsole"));
+	layoutConsolePanel->setAccessibleName(QStringLiteral("Precision source layout console"));
+	auto *layoutConsole = new QVBoxLayout(layoutConsolePanel);
+	layoutConsole->setContentsMargins(6, 6, 6, 6);
+	layoutConsole->setSpacing(5);
+
+	auto *transformGrid = new QGridLayout();
+	transformGrid->setContentsMargins(0, 0, 0, 0);
+	transformGrid->setHorizontalSpacing(4);
+	transformGrid->setVerticalSpacing(4);
+	auto addLayoutField = [this, transformGrid](QPointer<QDoubleSpinBox> &target, const QString &label, int row,
+						    int column, double minimum, double maximum, int decimals,
+						    double step) {
+		auto *fieldLabel = new QLabel(label, layoutConsolePanel);
+		target = new QDoubleSpinBox(layoutConsolePanel);
+		target->setRange(minimum, maximum);
+		target->setDecimals(decimals);
+		target->setSingleStep(step);
+		target->setKeyboardTracking(false);
+		target->setAccelerated(true);
+		target->setAccessibleName(QStringLiteral("Source layout %1").arg(label.toLower()));
+		transformGrid->addWidget(fieldLabel, row, column * 2);
+		transformGrid->addWidget(target, row, column * 2 + 1);
+	};
+	addLayoutField(layoutPosX, QStringLiteral("X"), 0, 0, -100000.0, 100000.0, 1, 1.0);
+	addLayoutField(layoutPosY, QStringLiteral("Y"), 0, 1, -100000.0, 100000.0, 1, 1.0);
+	addLayoutField(layoutWidth, QStringLiteral("W"), 1, 0, -32768.0, 32768.0, 1, 1.0);
+	addLayoutField(layoutHeight, QStringLiteral("H"), 1, 1, -32768.0, 32768.0, 1, 1.0);
+	addLayoutField(layoutRotation, QStringLiteral("ROT"), 2, 0, -3600.0, 3600.0, 1, 1.0);
+	addLayoutField(layoutSafeMargin, QStringLiteral("SAFE %"), 2, 1, 0.0, 25.0, 1, 0.5);
+	layoutSafeMargin->setValue(5.0);
+	addLayoutField(layoutCropLeft, QStringLiteral("CROP L"), 3, 0, 0.0, 32768.0, 0, 1.0);
+	addLayoutField(layoutCropRight, QStringLiteral("R"), 3, 1, 0.0, 32768.0, 0, 1.0);
+	addLayoutField(layoutCropTop, QStringLiteral("CROP T"), 4, 0, 0.0, 32768.0, 0, 1.0);
+	addLayoutField(layoutCropBottom, QStringLiteral("B"), 4, 1, 0.0, 32768.0, 0, 1.0);
+	transformGrid->setColumnStretch(1, 1);
+	transformGrid->setColumnStretch(3, 1);
+	layoutConsole->addLayout(transformGrid);
+
+	layoutAspectLock = new QCheckBox(QStringLiteral("LOCK ASPECT RATIO"), layoutConsolePanel);
+	layoutAspectLock->setChecked(true);
+	layoutAspectLock->setAccessibleName(QStringLiteral("Lock source layout aspect ratio"));
+	layoutConsole->addWidget(layoutAspectLock);
+	connect(layoutWidth, &QDoubleSpinBox::valueChanged, this, [this](double value) {
+		if (!layoutSyncing && layoutAspectLock && layoutAspectLock->isChecked() && layoutHeight &&
+		    std::abs(layoutAspectRatio) > 0.0001) {
+			QSignalBlocker blocker(layoutHeight);
+			layoutHeight->setValue(value / layoutAspectRatio);
+		}
+	});
+	connect(layoutHeight, &QDoubleSpinBox::valueChanged, this, [this](double value) {
+		if (!layoutSyncing && layoutAspectLock && layoutAspectLock->isChecked() && layoutWidth) {
+			QSignalBlocker blocker(layoutWidth);
+			layoutWidth->setValue(value * layoutAspectRatio);
+		}
+	});
+
+	auto addMiniButton = [this](const QString &text, const QString &accessibleName) {
+		auto *button = new QPushButton(text, layoutConsolePanel);
+		button->setProperty("layoutMini", true);
+		button->setAccessibleName(accessibleName);
+		button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		return button;
+	};
+	auto *historyRow = new QHBoxLayout();
+	historyRow->setContentsMargins(0, 0, 0, 0);
+	historyRow->setSpacing(4);
+	auto *undoLayout = addMiniButton(QStringLiteral("UNDO"), QStringLiteral("Undo last OBS action"));
+	auto *redoLayout = addMiniButton(QStringLiteral("REDO"), QStringLiteral("Redo last OBS action"));
+	historyRow->addWidget(undoLayout, 1);
+	historyRow->addWidget(redoLayout, 1);
+	layoutConsole->addLayout(historyRow);
+	connect(undoLayout, &QPushButton::clicked, this, [this]() { TriggerMainAction("actionMainUndo"); });
+	connect(redoLayout, &QPushButton::clicked, this, [this]() { TriggerMainAction("actionMainRedo"); });
+
+	auto *nudgeLabel = new QLabel(QStringLiteral("NUDGE // STEP"), layoutConsolePanel);
+	layoutConsole->addWidget(nudgeLabel);
+	auto *nudgeGrid = new QGridLayout();
+	nudgeGrid->setContentsMargins(0, 0, 0, 0);
+	nudgeGrid->setSpacing(4);
+	auto *nudgeUp = addMiniButton(QStringLiteral("UP"), QStringLiteral("Nudge source up"));
+	auto *nudgeLeft = addMiniButton(QStringLiteral("LEFT"), QStringLiteral("Nudge source left"));
+	auto *nudgeRight = addMiniButton(QStringLiteral("RIGHT"), QStringLiteral("Nudge source right"));
+	auto *nudgeDown = addMiniButton(QStringLiteral("DOWN"), QStringLiteral("Nudge source down"));
+	layoutNudgeStep = new QDoubleSpinBox(layoutConsolePanel);
+	layoutNudgeStep->setRange(0.1, 1000.0);
+	layoutNudgeStep->setDecimals(1);
+	layoutNudgeStep->setValue(10.0);
+	layoutNudgeStep->setSingleStep(1.0);
+	layoutNudgeStep->setAccessibleName(QStringLiteral("Source nudge step in pixels"));
+	nudgeGrid->addWidget(nudgeUp, 0, 1);
+	nudgeGrid->addWidget(nudgeLeft, 1, 0);
+	nudgeGrid->addWidget(layoutNudgeStep, 1, 1);
+	nudgeGrid->addWidget(nudgeRight, 1, 2);
+	nudgeGrid->addWidget(nudgeDown, 2, 1);
+	layoutConsole->addLayout(nudgeGrid);
+	connect(nudgeUp, &QPushButton::clicked, this,
+		[this]() { NudgeSelectedSource(0.0f, -float(layoutNudgeStep->value())); });
+	connect(nudgeLeft, &QPushButton::clicked, this,
+		[this]() { NudgeSelectedSource(-float(layoutNudgeStep->value()), 0.0f); });
+	connect(nudgeRight, &QPushButton::clicked, this,
+		[this]() { NudgeSelectedSource(float(layoutNudgeStep->value()), 0.0f); });
+	connect(nudgeDown, &QPushButton::clicked, this,
+		[this]() { NudgeSelectedSource(0.0f, float(layoutNudgeStep->value())); });
+
+	auto *snapLabel = new QLabel(QStringLiteral("SAFE-ZONE SNAP"), layoutConsolePanel);
+	layoutConsole->addWidget(snapLabel);
+	auto *snapGrid = new QGridLayout();
+	snapGrid->setContentsMargins(0, 0, 0, 0);
+	snapGrid->setSpacing(4);
+	const QString snapText[3][3] = {{QStringLiteral("TL"), QStringLiteral("T"), QStringLiteral("TR")},
+					{QStringLiteral("L"), QStringLiteral("C"), QStringLiteral("R")},
+					{QStringLiteral("BL"), QStringLiteral("B"), QStringLiteral("BR")}};
+	for (int vertical = -1; vertical <= 1; ++vertical) {
+		for (int horizontal = -1; horizontal <= 1; ++horizontal) {
+			auto *button = addMiniButton(snapText[vertical + 1][horizontal + 1],
+						     QStringLiteral("Snap source %1 %2")
+							     .arg(vertical < 0   ? QStringLiteral("top")
+								  : vertical > 0 ? QStringLiteral("bottom")
+										 : QStringLiteral("center"),
+								  horizontal < 0   ? QStringLiteral("left")
+								  : horizontal > 0 ? QStringLiteral("right")
+										   : QStringLiteral("center")));
+			snapGrid->addWidget(button, vertical + 1, horizontal + 1);
+			connect(button, &QPushButton::clicked, this,
+				[this, horizontal, vertical]() { SnapSelectedSource(horizontal, vertical); });
+		}
+	}
+	layoutConsole->addLayout(snapGrid);
+
+	auto *applyLayout =
+		addMiniButton(QStringLiteral("APPLY TRANSFORM"), QStringLiteral("Apply precision transform"));
+	layoutConsole->addWidget(applyLayout);
+	connect(applyLayout, &QPushButton::clicked, this, &TempestCommandMatrix::ApplyLayoutConsole);
+
+	auto *snapshotLabel = new QLabel(QStringLiteral("SCENE LAYOUT SNAPSHOTS"), layoutConsolePanel);
+	layoutConsole->addWidget(snapshotLabel);
+	auto *snapshotGrid = new QGridLayout();
+	snapshotGrid->setContentsMargins(0, 0, 0, 0);
+	snapshotGrid->setSpacing(4);
+	auto *saveA = addMiniButton(QStringLiteral("SAVE A"), QStringLiteral("Save scene layout snapshot A"));
+	auto *recallA = addMiniButton(QStringLiteral("RECALL A"), QStringLiteral("Recall scene layout snapshot A"));
+	auto *saveB = addMiniButton(QStringLiteral("SAVE B"), QStringLiteral("Save scene layout snapshot B"));
+	auto *recallB = addMiniButton(QStringLiteral("RECALL B"), QStringLiteral("Recall scene layout snapshot B"));
+	snapshotGrid->addWidget(saveA, 0, 0);
+	snapshotGrid->addWidget(recallA, 0, 1);
+	snapshotGrid->addWidget(saveB, 1, 0);
+	snapshotGrid->addWidget(recallB, 1, 1);
+	layoutConsole->addLayout(snapshotGrid);
+	connect(saveA, &QPushButton::clicked, this, [this]() { SaveLayoutSnapshot("A"); });
+	connect(recallA, &QPushButton::clicked, this, [this]() { RecallLayoutSnapshot("A"); });
+	connect(saveB, &QPushButton::clicked, this, [this]() { SaveLayoutSnapshot("B"); });
+	connect(recallB, &QPushButton::clicked, this, [this]() { RecallLayoutSnapshot("B"); });
+	inspectorLayout->addWidget(layoutConsolePanel);
+
+	config_t *matrixConfig = App()->GetUserConfig();
+	const bool layoutExpanded = !config_has_user_value(matrixConfig, ConfigSection, "LayoutExpanded") ||
+				    config_get_bool(matrixConfig, ConfigSection, "LayoutExpanded");
+	layoutToggleButton->setChecked(layoutExpanded);
+	layoutConsolePanel->setVisible(layoutExpanded);
+	layoutToggleButton->setText(layoutExpanded ? QStringLiteral("PRECISION LAYOUT // OPEN")
+						   : QStringLiteral("PRECISION LAYOUT"));
+	connect(layoutToggleButton, &QPushButton::toggled, this, [this](bool expanded) {
+		if (layoutConsolePanel)
+			layoutConsolePanel->setVisible(expanded);
+		layoutToggleButton->setText(expanded ? QStringLiteral("PRECISION LAYOUT // OPEN")
+						     : QStringLiteral("PRECISION LAYOUT"));
+		config_t *config = App()->GetUserConfig();
+		config_set_bool(config, ConfigSection, "LayoutExpanded", expanded);
+		config_save_safe(config, "tmp", nullptr);
+	});
 
 	connect(inspectorFitButton, &QPushButton::clicked, this, [this]() { TriggerMainAction("actionFitToScreen"); });
 	connect(inspectorCenterButton, &QPushButton::clicked, this,
@@ -989,6 +1192,7 @@ void TempestCommandMatrix::UpdateSourceInspector()
 		inspectorPauseButton->setVisible(false);
 		inspectorRestartButton->setVisible(false);
 		inspectorMuteButton->setVisible(false);
+		RefreshLayoutConsole();
 		return;
 	}
 
@@ -1033,6 +1237,7 @@ void TempestCommandMatrix::UpdateSourceInspector()
 	if (hasAudio)
 		inspectorMuteButton->setText(obs_source_muted(source) ? QStringLiteral("UNMUTE AUDIO")
 								      : QStringLiteral("MUTE AUDIO"));
+	RefreshLayoutConsole();
 }
 
 void TempestCommandMatrix::TriggerMainAction(const char *objectName)
@@ -1040,8 +1245,10 @@ void TempestCommandMatrix::TriggerMainAction(const char *objectName)
 	if (!main || !SelectedInspectorItem())
 		return;
 	QAction *action = main->findChild<QAction *>(QString::fromUtf8(objectName));
-	if (action && action->isEnabled())
+	if (action && action->isEnabled()) {
 		action->trigger();
+		QTimer::singleShot(0, this, [this]() { RefreshLayoutConsole(); });
+	}
 }
 
 void TempestCommandMatrix::RefreshSelectedBrowser()
@@ -1103,6 +1310,219 @@ void TempestCommandMatrix::DuplicateSelectedSource()
 			SetStatus(QStringLiteral("Source duplicated"));
 		}
 	});
+}
+
+void TempestCommandMatrix::RefreshLayoutConsole()
+{
+	if (!layoutConsolePanel || !layoutPosX || !layoutPosY || !layoutWidth || !layoutHeight || !layoutRotation ||
+	    !layoutCropLeft || !layoutCropRight || !layoutCropTop || !layoutCropBottom)
+		return;
+
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	obs_source_t *source = item ? obs_sceneitem_get_source(item) : nullptr;
+	const bool editable = source && !obs_sceneitem_locked(item);
+	layoutConsolePanel->setEnabled(editable);
+	if (!source)
+		return;
+
+	obs_transform_info info;
+	obs_sceneitem_crop crop;
+	obs_sceneitem_get_info2(item, &info);
+	obs_sceneitem_get_crop(item, &crop);
+	const double sourceWidth = double(obs_source_get_width(source));
+	const double sourceHeight = double(obs_source_get_height(source));
+	const double width = sourceWidth * info.scale.x;
+	const double height = sourceHeight * info.scale.y;
+
+	layoutSyncing = true;
+	layoutPosX->setValue(info.pos.x);
+	layoutPosY->setValue(info.pos.y);
+	layoutWidth->setValue(width);
+	layoutHeight->setValue(height);
+	layoutRotation->setValue(info.rot);
+	layoutCropLeft->setValue(crop.left);
+	layoutCropRight->setValue(crop.right);
+	layoutCropTop->setValue(crop.top);
+	layoutCropBottom->setValue(crop.bottom);
+	if (std::abs(height) > 0.0001)
+		layoutAspectRatio = width / height;
+	else if (sourceHeight > 0.0)
+		layoutAspectRatio = sourceWidth / sourceHeight;
+	layoutSyncing = false;
+}
+
+void TempestCommandMatrix::RegisterTransformUndo(obs_scene_t *scene, obs_data_t *undoData, obs_data_t *redoData,
+						 const QString &actionName)
+{
+	if (!main || !scene || !undoData || !redoData)
+		return;
+	const std::string undoJson(obs_data_get_json(undoData));
+	const std::string redoJson(obs_data_get_json(redoData));
+	if (undoJson == redoJson)
+		return;
+	auto restoreTransform = [](const std::string &json) {
+		OBSDataAutoRelease state = obs_data_create_from_json(json.c_str());
+		const char *sceneUuid = state ? obs_data_get_string(state, "scene_uuid") : nullptr;
+		OBSSourceAutoRelease sceneSource = sceneUuid ? obs_get_source_by_uuid(sceneUuid) : nullptr;
+		if (sceneSource && OBSBasic::Get())
+			OBSBasic::Get()->SetCurrentScene(sceneSource.Get(), true);
+		obs_scene_load_transform_states(json.c_str());
+	};
+	main->undo_s.add_action(actionName, restoreTransform, restoreTransform, undoJson, redoJson);
+}
+
+void TempestCommandMatrix::ApplyLayoutConsole()
+{
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	obs_source_t *source = item ? obs_sceneitem_get_source(item) : nullptr;
+	if (!item || !source || obs_sceneitem_locked(item) || !main)
+		return;
+	OBSScene scene = main->GetCurrentScene();
+	if (!scene)
+		return;
+
+	OBSDataAutoRelease undoState = obs_scene_save_transform_states(scene, false);
+	obs_transform_info info;
+	obs_sceneitem_crop crop;
+	obs_sceneitem_get_info2(item, &info);
+	obs_sceneitem_get_crop(item, &crop);
+	const uint32_t sourceWidth = obs_source_get_width(source);
+	const uint32_t sourceHeight = obs_source_get_height(source);
+	if (sourceWidth > 0)
+		info.scale.x = float(layoutWidth->value() / double(sourceWidth));
+	if (sourceHeight > 0)
+		info.scale.y = float(layoutHeight->value() / double(sourceHeight));
+	info.pos.x = float(layoutPosX->value());
+	info.pos.y = float(layoutPosY->value());
+	info.rot = float(layoutRotation->value());
+	crop.left = uint32_t(layoutCropLeft->value());
+	crop.right = uint32_t(layoutCropRight->value());
+	crop.top = uint32_t(layoutCropTop->value());
+	crop.bottom = uint32_t(layoutCropBottom->value());
+
+	obs_sceneitem_defer_update_begin(item);
+	obs_sceneitem_set_info2(item, &info);
+	obs_sceneitem_set_crop(item, &crop);
+	obs_sceneitem_defer_update_end(item);
+	obs_sceneitem_force_update_transform(item);
+	OBSDataAutoRelease redoState = obs_scene_save_transform_states(scene, false);
+	RegisterTransformUndo(
+		scene, undoState, redoState,
+		QStringLiteral("Tempest Layout // %1").arg(QString::fromUtf8(obs_source_get_name(source))));
+	SetStatus(QStringLiteral("Precision transform applied"));
+	RefreshLayoutConsole();
+}
+
+void TempestCommandMatrix::NudgeSelectedSource(float deltaX, float deltaY)
+{
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	obs_source_t *source = item ? obs_sceneitem_get_source(item) : nullptr;
+	if (!item || !source || obs_sceneitem_locked(item) || !main)
+		return;
+	OBSScene scene = main->GetCurrentScene();
+	if (!scene)
+		return;
+	OBSDataAutoRelease undoState = obs_scene_save_transform_states(scene, false);
+	vec2 position;
+	obs_sceneitem_get_pos(item, &position);
+	position.x += deltaX;
+	position.y += deltaY;
+	obs_sceneitem_set_pos(item, &position);
+	OBSDataAutoRelease redoState = obs_scene_save_transform_states(scene, false);
+	RegisterTransformUndo(
+		scene, undoState, redoState,
+		QStringLiteral("Tempest Nudge // %1").arg(QString::fromUtf8(obs_source_get_name(source))));
+	RefreshLayoutConsole();
+}
+
+void TempestCommandMatrix::SnapSelectedSource(int horizontal, int vertical)
+{
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	obs_source_t *source = item ? obs_sceneitem_get_source(item) : nullptr;
+	if (!item || !source || obs_sceneitem_locked(item) || !main)
+		return;
+	OBSScene scene = main->GetCurrentScene();
+	obs_video_info videoInfo = {};
+	if (!scene || !obs_get_video_info(&videoInfo))
+		return;
+
+	OBSDataAutoRelease undoState = obs_scene_save_transform_states(scene, false);
+	vec3 topLeft, bottomRight;
+	GetSceneItemBox(item, topLeft, bottomRight);
+	const float margin = float(std::clamp(layoutSafeMargin->value(), 0.0, 25.0) / 100.0);
+	const float safeLeft = float(videoInfo.base_width) * margin;
+	const float safeRight = float(videoInfo.base_width) * (1.0f - margin);
+	const float safeTop = float(videoInfo.base_height) * margin;
+	const float safeBottom = float(videoInfo.base_height) * (1.0f - margin);
+	float offsetX = 0.0f;
+	float offsetY = 0.0f;
+	if (horizontal < 0)
+		offsetX = safeLeft - topLeft.x;
+	else if (horizontal > 0)
+		offsetX = safeRight - bottomRight.x;
+	else
+		offsetX = float(videoInfo.base_width) * 0.5f - (topLeft.x + bottomRight.x) * 0.5f;
+	if (vertical < 0)
+		offsetY = safeTop - topLeft.y;
+	else if (vertical > 0)
+		offsetY = safeBottom - bottomRight.y;
+	else
+		offsetY = float(videoInfo.base_height) * 0.5f - (topLeft.y + bottomRight.y) * 0.5f;
+
+	vec2 position;
+	obs_sceneitem_get_pos(item, &position);
+	position.x += offsetX;
+	position.y += offsetY;
+	obs_sceneitem_set_pos(item, &position);
+	OBSDataAutoRelease redoState = obs_scene_save_transform_states(scene, false);
+	RegisterTransformUndo(scene, undoState, redoState,
+			      QStringLiteral("Tempest Snap // %1").arg(QString::fromUtf8(obs_source_get_name(source))));
+	SetStatus(QStringLiteral("Source snapped to safe-zone anchor"));
+	RefreshLayoutConsole();
+}
+
+void TempestCommandMatrix::SaveLayoutSnapshot(const char *slot)
+{
+	if (!main)
+		return;
+	OBSScene scene = main->GetCurrentScene();
+	obs_source_t *sceneSource = scene ? obs_scene_get_source(scene) : nullptr;
+	const char *sceneUuid = sceneSource ? obs_source_get_uuid(sceneSource) : nullptr;
+	if (!scene || !sceneUuid)
+		return;
+	OBSDataAutoRelease state = obs_scene_save_transform_states(scene, true);
+	const QString key =
+		QStringLiteral("LayoutSnapshot_%1_%2").arg(QString::fromUtf8(sceneUuid), QString::fromUtf8(slot));
+	config_t *config = App()->GetUserConfig();
+	config_set_string(config, ConfigSection, key.toUtf8().constData(), obs_data_get_json(state));
+	config_save_safe(config, "tmp", nullptr);
+	SetStatus(QStringLiteral("Scene layout saved // SLOT %1").arg(QString::fromUtf8(slot)));
+}
+
+void TempestCommandMatrix::RecallLayoutSnapshot(const char *slot)
+{
+	if (!main)
+		return;
+	OBSScene scene = main->GetCurrentScene();
+	obs_source_t *sceneSource = scene ? obs_scene_get_source(scene) : nullptr;
+	const char *sceneUuid = sceneSource ? obs_source_get_uuid(sceneSource) : nullptr;
+	if (!scene || !sceneUuid)
+		return;
+	const QString key =
+		QStringLiteral("LayoutSnapshot_%1_%2").arg(QString::fromUtf8(sceneUuid), QString::fromUtf8(slot));
+	config_t *config = App()->GetUserConfig();
+	const char *savedState = config_get_string(config, ConfigSection, key.toUtf8().constData());
+	if (!savedState || !*savedState) {
+		SetStatus(QStringLiteral("No scene layout stored in slot %1").arg(QString::fromUtf8(slot)), true);
+		return;
+	}
+	OBSDataAutoRelease undoState = obs_scene_save_transform_states(scene, true);
+	obs_scene_load_transform_states(savedState);
+	OBSDataAutoRelease redoState = obs_scene_save_transform_states(scene, true);
+	RegisterTransformUndo(scene, undoState, redoState,
+			      QStringLiteral("Tempest Scene Layout // Slot %1").arg(QString::fromUtf8(slot)));
+	SetStatus(QStringLiteral("Scene layout recalled // SLOT %1").arg(QString::fromUtf8(slot)));
+	RefreshLayoutConsole();
 }
 
 void TempestCommandMatrix::RelayoutRoutingGrids()
@@ -1674,6 +2094,14 @@ void TempestCommandMatrix::UpdateActiveScene()
 	const QString currentName = current ? QString::fromUtf8(obs_source_get_name(current)) : QStringLiteral("NONE");
 	currentSceneLabel->setText(QStringLiteral("ACTIVE // %1").arg(currentName.toUpper()));
 	RefreshSourcePanel(currentUuid, currentName);
+	const bool editingLayout =
+		(layoutPosX && layoutPosX->hasFocus()) || (layoutPosY && layoutPosY->hasFocus()) ||
+		(layoutWidth && layoutWidth->hasFocus()) || (layoutHeight && layoutHeight->hasFocus()) ||
+		(layoutRotation && layoutRotation->hasFocus()) || (layoutCropLeft && layoutCropLeft->hasFocus()) ||
+		(layoutCropRight && layoutCropRight->hasFocus()) || (layoutCropTop && layoutCropTop->hasFocus()) ||
+		(layoutCropBottom && layoutCropBottom->hasFocus());
+	if (layoutConsolePanel && layoutConsolePanel->isVisible() && !editingLayout)
+		RefreshLayoutConsole();
 	for (auto it = sceneButtons.begin(); it != sceneButtons.end(); ++it) {
 		if (it.value())
 			it.value()->setChecked(it.key() == currentUuid);

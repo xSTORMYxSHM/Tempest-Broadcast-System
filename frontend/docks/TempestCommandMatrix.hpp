@@ -12,6 +12,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QGridLayout;
 class QLabel;
 class QPushButton;
@@ -138,6 +139,14 @@ private:
 	void ApplySelectedMediaAction(const char *action);
 	void ToggleSelectedMute();
 	void DuplicateSelectedSource();
+	void RefreshLayoutConsole();
+	void ApplyLayoutConsole();
+	void NudgeSelectedSource(float deltaX, float deltaY);
+	void SnapSelectedSource(int horizontal, int vertical);
+	void SaveLayoutSnapshot(const char *slot);
+	void RecallLayoutSnapshot(const char *slot);
+	void RegisterTransformUndo(obs_scene_t *scene, obs_data_t *undoData, obs_data_t *redoData,
+				   const QString &actionName);
 	void SetStatus(const QString &message, bool error = false);
 	ProtocolWidgets *FindProtocol(const QString &id);
 
@@ -173,6 +182,20 @@ private:
 	QPointer<QPushButton> inspectorPauseButton;
 	QPointer<QPushButton> inspectorRestartButton;
 	QPointer<QPushButton> inspectorMuteButton;
+	QPointer<QPushButton> layoutToggleButton;
+	QPointer<QWidget> layoutConsolePanel;
+	QPointer<QDoubleSpinBox> layoutPosX;
+	QPointer<QDoubleSpinBox> layoutPosY;
+	QPointer<QDoubleSpinBox> layoutWidth;
+	QPointer<QDoubleSpinBox> layoutHeight;
+	QPointer<QDoubleSpinBox> layoutRotation;
+	QPointer<QDoubleSpinBox> layoutCropLeft;
+	QPointer<QDoubleSpinBox> layoutCropRight;
+	QPointer<QDoubleSpinBox> layoutCropTop;
+	QPointer<QDoubleSpinBox> layoutCropBottom;
+	QPointer<QDoubleSpinBox> layoutNudgeStep;
+	QPointer<QDoubleSpinBox> layoutSafeMargin;
+	QPointer<QCheckBox> layoutAspectLock;
 	QPointer<QWidget> basicViewPage;
 	QPointer<QWidget> protocolViewPage;
 	QPointer<QCheckBox> isolateOverlay;
@@ -190,4 +213,6 @@ private:
 	quint64 executionRevision = 0;
 	void *webSocketVendor = nullptr;
 	bool webSocketReady = false;
+	bool layoutSyncing = false;
+	double layoutAspectRatio = 1.0;
 };
