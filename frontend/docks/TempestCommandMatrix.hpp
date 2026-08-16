@@ -92,6 +92,23 @@ private:
 		QPointer<QComboBox> sceneCombo;
 	};
 
+	struct SourceReaction {
+		QString sceneUuid;
+		QString sourceUuid;
+		QString sourceName;
+		int64_t itemId = 0;
+		QString signal = QStringLiteral("master");
+		QString effect = QStringLiteral("scale");
+		double amount = 12.0;
+		double threshold = 0.08;
+		bool enabled = true;
+		bool baselineCaptured = false;
+		bool baselineVisible = true;
+		bool visibilityActive = true;
+		bool runtimeApplied = false;
+		obs_transform_info baseline = {};
+	};
+
 	static bool EnumScene(void *data, obs_source_t *source);
 	static bool EnumSource(void *data, obs_source_t *source);
 	static bool EnumSceneSource(obs_scene_t *scene, obs_sceneitem_t *item, void *data);
@@ -145,6 +162,19 @@ private:
 	void SnapSelectedSource(int horizontal, int vertical);
 	void SaveLayoutSnapshot(const char *slot);
 	void RecallLayoutSnapshot(const char *slot);
+	QString SelectedReactionKey() const;
+	obs_sceneitem_t *FindReactionItem(const SourceReaction &reaction) const;
+	void LoadSourceReactions();
+	void SaveSourceReactions();
+	void RefreshReactionConsole();
+	void UpdateReactionAmountField();
+	void ApplyReactionBinding();
+	void CaptureReactionBaseline();
+	void TestReactionBinding();
+	void RemoveReactionBinding();
+	void ApplyReactionLevels(float master, float desktop, float microphone, float beat);
+	void RestoreReaction(SourceReaction &reaction);
+	void RestoreAllReactions();
 	void RegisterTransformUndo(obs_scene_t *scene, obs_data_t *undoData, obs_data_t *redoData,
 				   const QString &actionName);
 	void SetStatus(const QString &message, bool error = false);
@@ -196,6 +226,14 @@ private:
 	QPointer<QDoubleSpinBox> layoutNudgeStep;
 	QPointer<QDoubleSpinBox> layoutSafeMargin;
 	QPointer<QCheckBox> layoutAspectLock;
+	QPointer<QPushButton> reactionToggleButton;
+	QPointer<QWidget> reactionConsolePanel;
+	QPointer<QCheckBox> reactionEnabled;
+	QPointer<QComboBox> reactionSignal;
+	QPointer<QComboBox> reactionEffect;
+	QPointer<QDoubleSpinBox> reactionAmount;
+	QPointer<QDoubleSpinBox> reactionThreshold;
+	QPointer<QLabel> reactionStatusLabel;
 	QPointer<QWidget> basicViewPage;
 	QPointer<QWidget> protocolViewPage;
 	QPointer<QCheckBox> isolateOverlay;
@@ -204,6 +242,7 @@ private:
 	QVector<ProtocolWidgets> protocols;
 	QHash<QString, QString> configuredSceneUuids;
 	QHash<QString, ProtocolActionConfig> actionConfigs;
+	QHash<QString, SourceReaction> sourceReactions;
 	QHash<obs_hotkey_id, QString> protocolHotkeys;
 	QHash<QString, QPointer<QPushButton>> sceneButtons;
 	QVector<SceneInfo> currentScenes;
@@ -214,5 +253,9 @@ private:
 	void *webSocketVendor = nullptr;
 	bool webSocketReady = false;
 	bool layoutSyncing = false;
+	bool reactionSyncing = false;
 	double layoutAspectRatio = 1.0;
+	double reactionPhase = 0.0;
+	QString reactionTestKey;
+	qint64 reactionTestUntil = 0;
 };

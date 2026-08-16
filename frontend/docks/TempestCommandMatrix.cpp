@@ -23,6 +23,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDateTime>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -31,6 +32,9 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProcess>
@@ -136,6 +140,7 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 											    : QStringLiteral("basic"),
 		    false);
 	LoadActionConfigs();
+	LoadSourceReactions();
 
 	connect(isolateOverlay, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
 	connect(startCountdown, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
@@ -149,6 +154,7 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 
 TempestCommandMatrix::~TempestCommandMatrix()
 {
+	RestoreAllReactions();
 	UnregisterHotkeys();
 #ifdef TEMPEST_WEBSOCKET_AVAILABLE
 	if (webSocketVendor) {
@@ -190,6 +196,8 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 			obs_data_set_string(eventData, "origin", origin.toUtf8().constData());
 			EmitRouterEvent("SignalTriggered", eventData);
 		});
+	connect(signalReactor, &TempestSignalReactor::LevelsUpdated, this, &TempestCommandMatrix::ApplyReactionLevels);
+	RefreshReactionConsole();
 }
 
 void TempestCommandMatrix::RunProtocol(const QString &protocolId)
@@ -826,6 +834,106 @@ void TempestCommandMatrix::BuildInterface()
 		config_save_safe(config, "tmp", nullptr);
 	});
 
+	reactionToggleButton = new QPushButton(QStringLiteral("REACTIVE BINDING"), sourceInspectorPanel);
+	reactionToggleButton->setProperty("layoutToggle", true);
+	reactionToggleButton->setCheckable(true);
+	reactionToggleButton->setAccessibleName(QStringLiteral("Toggle reactive source binding controls"));
+	inspectorLayout->addWidget(reactionToggleButton);
+
+	reactionConsolePanel = new QWidget(sourceInspectorPanel);
+	reactionConsolePanel->setObjectName(QStringLiteral("matrixReactionConsole"));
+	reactionConsolePanel->setAccessibleName(QStringLiteral("Reactive source binding console"));
+	auto *reactionConsole = new QVBoxLayout(reactionConsolePanel);
+	reactionConsole->setContentsMargins(6, 6, 6, 6);
+	reactionConsole->setSpacing(5);
+
+	auto *reactionForm = new QFormLayout();
+	reactionForm->setContentsMargins(0, 0, 0, 0);
+	reactionForm->setHorizontalSpacing(6);
+	reactionForm->setVerticalSpacing(4);
+	reactionEnabled = new QCheckBox(QStringLiteral("REACTION ENABLED"), reactionConsolePanel);
+	reactionEnabled->setAccessibleName(QStringLiteral("Enable selected source reaction"));
+	reactionSignal = new QComboBox(reactionConsolePanel);
+	reactionSignal->addItem(QStringLiteral("MASTER ENERGY"), QStringLiteral("master"));
+	reactionSignal->addItem(QStringLiteral("DESKTOP AUDIO"), QStringLiteral("desktop"));
+	reactionSignal->addItem(QStringLiteral("MICROPHONE"), QStringLiteral("microphone"));
+	reactionSignal->addItem(QStringLiteral("BEAT TRANSIENT"), QStringLiteral("beat"));
+	reactionSignal->setAccessibleName(QStringLiteral("Reactive source signal channel"));
+	reactionEffect = new QComboBox(reactionConsolePanel);
+	reactionEffect->addItem(QStringLiteral("PULSE SCALE"), QStringLiteral("scale"));
+	reactionEffect->addItem(QStringLiteral("VERTICAL LIFT"), QStringLiteral("lift"));
+	reactionEffect->addItem(QStringLiteral("HORIZONTAL SWAY"), QStringLiteral("sway"));
+	reactionEffect->addItem(QStringLiteral("ROTATION"), QStringLiteral("rotate"));
+	reactionEffect->addItem(QStringLiteral("THRESHOLD VISIBILITY"), QStringLiteral("visibility"));
+	reactionEffect->setAccessibleName(QStringLiteral("Reactive source visual effect"));
+	reactionAmount = new QDoubleSpinBox(reactionConsolePanel);
+	reactionAmount->setKeyboardTracking(false);
+	reactionAmount->setAccessibleName(QStringLiteral("Reactive source effect amount"));
+	reactionThreshold = new QDoubleSpinBox(reactionConsolePanel);
+	reactionThreshold->setRange(0.0, 1.0);
+	reactionThreshold->setDecimals(2);
+	reactionThreshold->setSingleStep(0.01);
+	reactionThreshold->setValue(0.08);
+	reactionThreshold->setAccessibleName(QStringLiteral("Reactive source signal threshold"));
+	reactionForm->addRow(reactionEnabled);
+	reactionForm->addRow(QStringLiteral("SIGNAL"), reactionSignal);
+	reactionForm->addRow(QStringLiteral("EFFECT"), reactionEffect);
+	reactionForm->addRow(QStringLiteral("AMOUNT"), reactionAmount);
+	reactionForm->addRow(QStringLiteral("GATE"), reactionThreshold);
+	reactionConsole->addLayout(reactionForm);
+
+	reactionStatusLabel =
+		new QLabel(QStringLiteral("NO BINDING // SELECT SETTINGS AND APPLY"), reactionConsolePanel);
+	reactionStatusLabel->setObjectName(QStringLiteral("matrixInspectorType"));
+	reactionStatusLabel->setWordWrap(true);
+	reactionStatusLabel->setAccessibleName(QStringLiteral("Reactive source binding status"));
+	reactionConsole->addWidget(reactionStatusLabel);
+
+	auto *reactionButtons = new QGridLayout();
+	reactionButtons->setContentsMargins(0, 0, 0, 0);
+	reactionButtons->setSpacing(4);
+	auto addReactionButton = [this, reactionButtons](const QString &text, const QString &accessibleName, int row,
+							 int column) {
+		auto *button = new QPushButton(text, reactionConsolePanel);
+		button->setProperty("layoutMini", true);
+		button->setAccessibleName(accessibleName);
+		button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		reactionButtons->addWidget(button, row, column);
+		return button;
+	};
+	auto *applyReaction = addReactionButton(QStringLiteral("APPLY BINDING"),
+						QStringLiteral("Apply selected source reaction binding"), 0, 0);
+	auto *captureReaction = addReactionButton(QStringLiteral("CAPTURE BASE"),
+						  QStringLiteral("Capture selected source reaction base transform"), 0,
+						  1);
+	auto *testReaction = addReactionButton(QStringLiteral("TEST"),
+					       QStringLiteral("Test selected source reaction binding"), 1, 0);
+	auto *removeReaction = addReactionButton(QStringLiteral("REMOVE"),
+						 QStringLiteral("Remove selected source reaction binding"), 1, 1);
+	reactionConsole->addLayout(reactionButtons);
+	inspectorLayout->addWidget(reactionConsolePanel);
+
+	const bool reactionExpanded = config_get_bool(matrixConfig, ConfigSection, "ReactionExpanded");
+	reactionToggleButton->setChecked(reactionExpanded);
+	reactionConsolePanel->setVisible(reactionExpanded);
+	reactionToggleButton->setText(reactionExpanded ? QStringLiteral("REACTIVE BINDING // OPEN")
+						       : QStringLiteral("REACTIVE BINDING"));
+	connect(reactionToggleButton, &QPushButton::toggled, this, [this](bool expanded) {
+		if (reactionConsolePanel)
+			reactionConsolePanel->setVisible(expanded);
+		reactionToggleButton->setText(expanded ? QStringLiteral("REACTIVE BINDING // OPEN")
+						       : QStringLiteral("REACTIVE BINDING"));
+		config_t *config = App()->GetUserConfig();
+		config_set_bool(config, ConfigSection, "ReactionExpanded", expanded);
+		config_save_safe(config, "tmp", nullptr);
+	});
+	connect(reactionEffect, &QComboBox::currentIndexChanged, this, [this](int) { UpdateReactionAmountField(); });
+	connect(applyReaction, &QPushButton::clicked, this, &TempestCommandMatrix::ApplyReactionBinding);
+	connect(captureReaction, &QPushButton::clicked, this, &TempestCommandMatrix::CaptureReactionBaseline);
+	connect(testReaction, &QPushButton::clicked, this, &TempestCommandMatrix::TestReactionBinding);
+	connect(removeReaction, &QPushButton::clicked, this, &TempestCommandMatrix::RemoveReactionBinding);
+	UpdateReactionAmountField();
+
 	connect(inspectorFitButton, &QPushButton::clicked, this, [this]() { TriggerMainAction("actionFitToScreen"); });
 	connect(inspectorCenterButton, &QPushButton::clicked, this,
 		[this]() { TriggerMainAction("actionCenterToScreen"); });
@@ -1193,6 +1301,7 @@ void TempestCommandMatrix::UpdateSourceInspector()
 		inspectorRestartButton->setVisible(false);
 		inspectorMuteButton->setVisible(false);
 		RefreshLayoutConsole();
+		RefreshReactionConsole();
 		return;
 	}
 
@@ -1238,6 +1347,7 @@ void TempestCommandMatrix::UpdateSourceInspector()
 		inspectorMuteButton->setText(obs_source_muted(source) ? QStringLiteral("UNMUTE AUDIO")
 								      : QStringLiteral("MUTE AUDIO"));
 	RefreshLayoutConsole();
+	RefreshReactionConsole();
 }
 
 void TempestCommandMatrix::TriggerMainAction(const char *objectName)
@@ -1523,6 +1633,368 @@ void TempestCommandMatrix::RecallLayoutSnapshot(const char *slot)
 			      QStringLiteral("Tempest Scene Layout // Slot %1").arg(QString::fromUtf8(slot)));
 	SetStatus(QStringLiteral("Scene layout recalled // SLOT %1").arg(QString::fromUtf8(slot)));
 	RefreshLayoutConsole();
+}
+
+QString TempestCommandMatrix::SelectedReactionKey() const
+{
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	obs_scene_t *scene = item ? obs_sceneitem_get_scene(item) : nullptr;
+	obs_source_t *sceneSource = scene ? obs_scene_get_source(scene) : nullptr;
+	const char *sceneUuid = sceneSource ? obs_source_get_uuid(sceneSource) : nullptr;
+	if (!item || !sceneUuid)
+		return {};
+	return QStringLiteral("%1:%2").arg(QString::fromUtf8(sceneUuid)).arg(obs_sceneitem_get_id(item));
+}
+
+obs_sceneitem_t *TempestCommandMatrix::FindReactionItem(const SourceReaction &reaction) const
+{
+	if (reaction.sceneUuid.isEmpty() || reaction.itemId <= 0)
+		return nullptr;
+	OBSSourceAutoRelease sceneSource = obs_get_source_by_uuid(reaction.sceneUuid.toUtf8().constData());
+	obs_scene_t *scene = sceneSource ? obs_group_or_scene_from_source(sceneSource) : nullptr;
+	return scene ? obs_scene_find_sceneitem_by_id(scene, reaction.itemId) : nullptr;
+}
+
+void TempestCommandMatrix::LoadSourceReactions()
+{
+	const char *raw = config_get_string(App()->GetUserConfig(), ConfigSection, "SourceReactions");
+	const QJsonDocument document = QJsonDocument::fromJson(raw ? QByteArray(raw) : QByteArray());
+	if (!document.isArray())
+		return;
+
+	static const QStringList validSignals = {QStringLiteral("master"), QStringLiteral("desktop"),
+						 QStringLiteral("microphone"), QStringLiteral("beat")};
+	static const QStringList validEffects = {QStringLiteral("scale"), QStringLiteral("lift"),
+						 QStringLiteral("sway"), QStringLiteral("rotate"),
+						 QStringLiteral("visibility")};
+	for (const QJsonValue &value : document.array()) {
+		const QJsonObject object = value.toObject();
+		SourceReaction reaction;
+		reaction.sceneUuid = object.value(QStringLiteral("sceneUuid")).toString();
+		reaction.sourceUuid = object.value(QStringLiteral("sourceUuid")).toString();
+		reaction.sourceName = object.value(QStringLiteral("sourceName")).toString();
+		reaction.itemId = object.value(QStringLiteral("itemId")).toVariant().toLongLong();
+		reaction.signal = object.value(QStringLiteral("signal")).toString(QStringLiteral("master"));
+		reaction.effect = object.value(QStringLiteral("effect")).toString(QStringLiteral("scale"));
+		reaction.amount = object.value(QStringLiteral("amount")).toDouble(12.0);
+		reaction.threshold = object.value(QStringLiteral("threshold")).toDouble(0.08);
+		reaction.enabled = object.value(QStringLiteral("enabled")).toBool(true);
+		if (!validSignals.contains(reaction.signal))
+			reaction.signal = QStringLiteral("master");
+		if (!validEffects.contains(reaction.effect))
+			reaction.effect = QStringLiteral("scale");
+		const QJsonObject baseline = object.value(QStringLiteral("baseline")).toObject();
+		if (!baseline.isEmpty()) {
+			reaction.baseline.pos.x = float(baseline.value(QStringLiteral("x")).toDouble());
+			reaction.baseline.pos.y = float(baseline.value(QStringLiteral("y")).toDouble());
+			reaction.baseline.rot = float(baseline.value(QStringLiteral("rotation")).toDouble());
+			reaction.baseline.scale.x = float(baseline.value(QStringLiteral("scaleX")).toDouble(1.0));
+			reaction.baseline.scale.y = float(baseline.value(QStringLiteral("scaleY")).toDouble(1.0));
+			reaction.baseline.alignment = uint32_t(baseline.value(QStringLiteral("alignment")).toInt());
+			reaction.baseline.bounds_type =
+				static_cast<obs_bounds_type>(baseline.value(QStringLiteral("boundsType")).toInt());
+			reaction.baseline.bounds_alignment =
+				uint32_t(baseline.value(QStringLiteral("boundsAlignment")).toInt());
+			reaction.baseline.bounds.x = float(baseline.value(QStringLiteral("boundsX")).toDouble());
+			reaction.baseline.bounds.y = float(baseline.value(QStringLiteral("boundsY")).toDouble());
+			reaction.baseline.crop_to_bounds = baseline.value(QStringLiteral("cropToBounds")).toBool();
+			reaction.baselineVisible = baseline.value(QStringLiteral("visible")).toBool(true);
+			reaction.visibilityActive = reaction.baselineVisible;
+			reaction.baselineCaptured = true;
+		}
+		if (!reaction.sceneUuid.isEmpty() && reaction.itemId > 0) {
+			const QString key = QStringLiteral("%1:%2").arg(reaction.sceneUuid).arg(reaction.itemId);
+			sourceReactions.insert(key, reaction);
+		}
+	}
+}
+
+void TempestCommandMatrix::SaveSourceReactions()
+{
+	QJsonArray array;
+	QStringList keys = sourceReactions.keys();
+	keys.sort(Qt::CaseInsensitive);
+	for (const QString &key : keys) {
+		const SourceReaction &reaction = sourceReactions[key];
+		QJsonObject object;
+		object.insert(QStringLiteral("sceneUuid"), reaction.sceneUuid);
+		object.insert(QStringLiteral("sourceUuid"), reaction.sourceUuid);
+		object.insert(QStringLiteral("sourceName"), reaction.sourceName);
+		object.insert(QStringLiteral("itemId"), QString::number(reaction.itemId));
+		object.insert(QStringLiteral("signal"), reaction.signal);
+		object.insert(QStringLiteral("effect"), reaction.effect);
+		object.insert(QStringLiteral("amount"), reaction.amount);
+		object.insert(QStringLiteral("threshold"), reaction.threshold);
+		object.insert(QStringLiteral("enabled"), reaction.enabled);
+		if (reaction.baselineCaptured) {
+			QJsonObject baseline;
+			baseline.insert(QStringLiteral("x"), reaction.baseline.pos.x);
+			baseline.insert(QStringLiteral("y"), reaction.baseline.pos.y);
+			baseline.insert(QStringLiteral("rotation"), reaction.baseline.rot);
+			baseline.insert(QStringLiteral("scaleX"), reaction.baseline.scale.x);
+			baseline.insert(QStringLiteral("scaleY"), reaction.baseline.scale.y);
+			baseline.insert(QStringLiteral("alignment"), int(reaction.baseline.alignment));
+			baseline.insert(QStringLiteral("boundsType"), int(reaction.baseline.bounds_type));
+			baseline.insert(QStringLiteral("boundsAlignment"), int(reaction.baseline.bounds_alignment));
+			baseline.insert(QStringLiteral("boundsX"), reaction.baseline.bounds.x);
+			baseline.insert(QStringLiteral("boundsY"), reaction.baseline.bounds.y);
+			baseline.insert(QStringLiteral("cropToBounds"), reaction.baseline.crop_to_bounds);
+			baseline.insert(QStringLiteral("visible"), reaction.baselineVisible);
+			object.insert(QStringLiteral("baseline"), baseline);
+		}
+		array.append(object);
+	}
+	const QByteArray json = QJsonDocument(array).toJson(QJsonDocument::Compact);
+	config_t *config = App()->GetUserConfig();
+	config_set_string(config, ConfigSection, "SourceReactions", json.constData());
+	config_save_safe(config, "tmp", nullptr);
+}
+
+void TempestCommandMatrix::RefreshReactionConsole()
+{
+	if (!reactionConsolePanel || !reactionEnabled || !reactionSignal || !reactionEffect || !reactionAmount ||
+	    !reactionThreshold || !reactionStatusLabel)
+		return;
+
+	const QString key = SelectedReactionKey();
+	const auto found = sourceReactions.constFind(key);
+	reactionSyncing = true;
+	if (found == sourceReactions.cend()) {
+		reactionEnabled->setChecked(true);
+		reactionSignal->setCurrentIndex(0);
+		reactionEffect->setCurrentIndex(0);
+		reactionAmount->setValue(12.0);
+		reactionThreshold->setValue(0.08);
+		reactionStatusLabel->setText(signalReactor ? QStringLiteral("NO BINDING // SELECT SETTINGS AND APPLY")
+							   : QStringLiteral("SIGNAL REACTOR LINK PENDING"));
+	} else {
+		const SourceReaction &reaction = found.value();
+		reactionEnabled->setChecked(reaction.enabled);
+		SetComboData(reactionSignal, reaction.signal);
+		SetComboData(reactionEffect, reaction.effect);
+		reactionAmount->setValue(reaction.amount);
+		reactionThreshold->setValue(reaction.threshold);
+		reactionStatusLabel->setText(QStringLiteral("BOUND // %1 -> %2 // BASE %3")
+						     .arg(reaction.signal.toUpper(), reaction.effect.toUpper(),
+							  reaction.baselineCaptured ? QStringLiteral("CAPTURED")
+										    : QStringLiteral("PENDING")));
+	}
+	reactionSyncing = false;
+	UpdateReactionAmountField();
+}
+
+void TempestCommandMatrix::UpdateReactionAmountField()
+{
+	if (!reactionAmount || !reactionEffect)
+		return;
+	const QString effect = reactionEffect->currentData().toString();
+	const bool usesAmount = effect != QStringLiteral("visibility");
+	reactionAmount->setEnabled(usesAmount);
+	if (effect == QStringLiteral("scale")) {
+		reactionAmount->setRange(0.1, 100.0);
+		reactionAmount->setDecimals(1);
+		reactionAmount->setSingleStep(1.0);
+		reactionAmount->setSuffix(QStringLiteral(" %"));
+	} else if (effect == QStringLiteral("rotate")) {
+		reactionAmount->setRange(0.1, 180.0);
+		reactionAmount->setDecimals(1);
+		reactionAmount->setSingleStep(0.5);
+		reactionAmount->setSuffix(QStringLiteral(" deg"));
+	} else if (usesAmount) {
+		reactionAmount->setRange(1.0, 1000.0);
+		reactionAmount->setDecimals(1);
+		reactionAmount->setSingleStep(5.0);
+		reactionAmount->setSuffix(QStringLiteral(" px"));
+	} else {
+		reactionAmount->setSuffix({});
+	}
+}
+
+void TempestCommandMatrix::ApplyReactionBinding()
+{
+	if (reactionSyncing)
+		return;
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	obs_source_t *source = item ? obs_sceneitem_get_source(item) : nullptr;
+	obs_scene_t *scene = item ? obs_sceneitem_get_scene(item) : nullptr;
+	obs_source_t *sceneSource = scene ? obs_scene_get_source(scene) : nullptr;
+	const char *sceneUuid = sceneSource ? obs_source_get_uuid(sceneSource) : nullptr;
+	const QString key = SelectedReactionKey();
+	if (!item || !source || !sceneUuid || key.isEmpty())
+		return;
+
+	auto existing = sourceReactions.find(key);
+	if (existing != sourceReactions.end())
+		RestoreReaction(existing.value());
+	SourceReaction reaction;
+	reaction.sceneUuid = QString::fromUtf8(sceneUuid);
+	const char *sourceUuid = obs_source_get_uuid(source);
+	const char *sourceName = obs_source_get_name(source);
+	reaction.sourceUuid = sourceUuid ? QString::fromUtf8(sourceUuid) : QString();
+	reaction.sourceName = sourceName ? QString::fromUtf8(sourceName) : QStringLiteral("Unnamed source");
+	reaction.itemId = obs_sceneitem_get_id(item);
+	reaction.signal = reactionSignal->currentData().toString();
+	reaction.effect = reactionEffect->currentData().toString();
+	reaction.amount = reactionAmount->value();
+	reaction.threshold = reactionThreshold->value();
+	reaction.enabled = reactionEnabled->isChecked();
+	obs_sceneitem_get_info2(item, &reaction.baseline);
+	reaction.baselineVisible = obs_sceneitem_visible(item);
+	reaction.visibilityActive = reaction.baselineVisible;
+	reaction.baselineCaptured = true;
+	sourceReactions.insert(key, reaction);
+	SaveSourceReactions();
+	SetStatus(QStringLiteral("Reactive binding saved // %1 -> %2")
+			  .arg(reaction.signal.toUpper(), reaction.effect.toUpper()));
+	RefreshReactionConsole();
+}
+
+void TempestCommandMatrix::CaptureReactionBaseline()
+{
+	const QString key = SelectedReactionKey();
+	auto found = sourceReactions.find(key);
+	obs_sceneitem_t *item = SelectedInspectorItem();
+	if (found == sourceReactions.end() || !item) {
+		SetStatus(QStringLiteral("Apply a reaction binding before capturing its base"), true);
+		return;
+	}
+	if (found->enabled) {
+		SetStatus(QStringLiteral("Disable and apply the binding before capturing a new base"), true);
+		return;
+	}
+	obs_sceneitem_get_info2(item, &found->baseline);
+	found->baselineVisible = obs_sceneitem_visible(item);
+	found->visibilityActive = found->baselineVisible;
+	found->baselineCaptured = true;
+	found->runtimeApplied = false;
+	SaveSourceReactions();
+	SetStatus(QStringLiteral("Reaction base captured // %1").arg(found->sourceName));
+	RefreshReactionConsole();
+}
+
+void TempestCommandMatrix::TestReactionBinding()
+{
+	const QString key = SelectedReactionKey();
+	if (!sourceReactions.contains(key)) {
+		SetStatus(QStringLiteral("Apply a reaction binding before testing it"), true);
+		return;
+	}
+	reactionTestKey = key;
+	reactionTestUntil = QDateTime::currentMSecsSinceEpoch() + 1200;
+	ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f);
+	QTimer::singleShot(1250, this, [this]() { ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f); });
+	SetStatus(QStringLiteral("Reaction test pulse sent"));
+}
+
+void TempestCommandMatrix::RemoveReactionBinding()
+{
+	const QString key = SelectedReactionKey();
+	auto found = sourceReactions.find(key);
+	if (found == sourceReactions.end()) {
+		SetStatus(QStringLiteral("Selected source has no reaction binding"), true);
+		return;
+	}
+	RestoreReaction(found.value());
+	const QString sourceName = found->sourceName;
+	sourceReactions.erase(found);
+	SaveSourceReactions();
+	SetStatus(QStringLiteral("Reactive binding removed // %1").arg(sourceName));
+	RefreshReactionConsole();
+	RefreshLayoutConsole();
+}
+
+void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, float microphone, float beat)
+{
+	reactionPhase = std::fmod(reactionPhase + 0.28, 6.283185307179586);
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	bool capturedBaseline = false;
+	for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
+		SourceReaction &reaction = it.value();
+		obs_sceneitem_t *item = FindReactionItem(reaction);
+		if (!item)
+			continue;
+		if (!reaction.baselineCaptured) {
+			obs_sceneitem_get_info2(item, &reaction.baseline);
+			reaction.baselineVisible = obs_sceneitem_visible(item);
+			reaction.visibilityActive = reaction.baselineVisible;
+			reaction.baselineCaptured = true;
+			capturedBaseline = true;
+		}
+		const bool testing = it.key() == reactionTestKey && now < reactionTestUntil;
+		if (!reaction.enabled && !testing) {
+			RestoreReaction(reaction);
+			continue;
+		}
+		float level = master;
+		if (reaction.signal == QStringLiteral("desktop"))
+			level = desktop;
+		else if (reaction.signal == QStringLiteral("microphone"))
+			level = microphone;
+		else if (reaction.signal == QStringLiteral("beat"))
+			level = beat;
+		if (testing)
+			level = 1.0f;
+		level = std::clamp(level, 0.0f, 1.5f);
+
+		if (reaction.effect == QStringLiteral("visibility")) {
+			const float onThreshold = float(reaction.threshold);
+			const float offThreshold = onThreshold * 0.75f;
+			if (reaction.visibilityActive)
+				reaction.visibilityActive = level >= offThreshold;
+			else
+				reaction.visibilityActive = level >= onThreshold;
+			const bool visible = reaction.baselineVisible && reaction.visibilityActive;
+			if (obs_sceneitem_visible(item) != visible)
+				obs_sceneitem_set_visible(item, visible);
+			reaction.runtimeApplied = true;
+			continue;
+		}
+
+		const double denominator = std::max(0.001, 1.0 - reaction.threshold);
+		const float response = float(std::clamp((double(level) - reaction.threshold) / denominator, 0.0, 1.0));
+		if (response <= 0.0f) {
+			RestoreReaction(reaction);
+			continue;
+		}
+		obs_transform_info transformed = reaction.baseline;
+		if (reaction.effect == QStringLiteral("scale")) {
+			const float multiplier = 1.0f + float(reaction.amount / 100.0) * response;
+			transformed.scale.x *= multiplier;
+			transformed.scale.y *= multiplier;
+		} else if (reaction.effect == QStringLiteral("lift")) {
+			transformed.pos.y -= float(reaction.amount) * response;
+		} else if (reaction.effect == QStringLiteral("sway")) {
+			transformed.pos.x += float(std::sin(reactionPhase) * reaction.amount * response);
+		} else if (reaction.effect == QStringLiteral("rotate")) {
+			transformed.rot += float(std::sin(reactionPhase) * reaction.amount * response);
+		}
+		obs_sceneitem_set_info2(item, &transformed);
+		reaction.runtimeApplied = true;
+	}
+	if (now >= reactionTestUntil)
+		reactionTestKey.clear();
+	if (capturedBaseline)
+		SaveSourceReactions();
+}
+
+void TempestCommandMatrix::RestoreReaction(SourceReaction &reaction)
+{
+	if (!reaction.runtimeApplied || !reaction.baselineCaptured)
+		return;
+	obs_sceneitem_t *item = FindReactionItem(reaction);
+	if (item) {
+		obs_sceneitem_set_info2(item, &reaction.baseline);
+		if (obs_sceneitem_visible(item) != reaction.baselineVisible)
+			obs_sceneitem_set_visible(item, reaction.baselineVisible);
+	}
+	reaction.visibilityActive = reaction.baselineVisible;
+	reaction.runtimeApplied = false;
+}
+
+void TempestCommandMatrix::RestoreAllReactions()
+{
+	for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it)
+		RestoreReaction(it.value());
 }
 
 void TempestCommandMatrix::RelayoutRoutingGrids()

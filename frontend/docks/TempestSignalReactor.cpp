@@ -511,6 +511,7 @@ void TempestSignalReactor::PublishTelemetry()
 		manualPulse = 0.0f;
 	}
 	const float master = std::clamp(std::max({desktop, microphone, manualPulse}), 0.0f, 1.5f);
+	emit LevelsUpdated(master, desktop, microphone, beat);
 	desktopMeter->setValue((int)(std::min(desktop, 1.0f) * 1000.0f));
 	microphoneMeter->setValue((int)(std::min(microphone, 1.0f) * 1000.0f));
 	beatMeter->setValue((int)(std::min(beat, 1.0f) * 1000.0f));

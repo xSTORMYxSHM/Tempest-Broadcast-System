@@ -32,6 +32,7 @@ public:
 
 signals:
 	void PulseTriggered(float strength, const QString &origin);
+	void LevelsUpdated(float master, float desktop, float microphone, float beat);
 
 private slots:
 	void RefreshAudioSources();
