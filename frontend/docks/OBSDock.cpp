@@ -10,13 +10,12 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
-#include <QKeySequence>
 #include <QLabel>
 #include <QLayout>
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QScrollArea>
-#include <QShortcut>
+#include <QTimer>
 #include <QToolButton>
 #include <QVariant>
 #include <QVBoxLayout>
@@ -101,7 +100,7 @@ void OBSDock::EnableContentScaling(const QString &configKey)
 	auto *scaleLayout = new QHBoxLayout(scaleBar);
 	scaleLayout->setContentsMargins(6, 3, 6, 3);
 	scaleLayout->setSpacing(4);
-	auto *scaleCaption = new QLabel(QStringLiteral("DOCK SCALE"), scaleBar);
+	auto *scaleCaption = new QLabel(QStringLiteral("APP SCALE"), scaleBar);
 	scaleCaption->setObjectName(QStringLiteral("tempestDockScaleCaption"));
 	scaleLayout->addWidget(scaleCaption);
 	scaleLayout->addStretch(1);
@@ -111,7 +110,7 @@ void OBSDock::EnableContentScaling(const QString &configKey)
 	scaleResetButton = new QToolButton(scaleBar);
 	scaleResetButton->setObjectName(QStringLiteral("tempestDockScaleReset"));
 	scaleResetButton->setAccessibleName(QStringLiteral("Reset dock scale"));
-	scaleResetButton->setToolTip(QStringLiteral("Reset to 100%. Ctrl+mouse wheel also changes dock scale."));
+	scaleResetButton->setToolTip(QStringLiteral("Application UI scale. Ctrl++ / Ctrl+- changes it everywhere."));
 	auto *scaleUp = new QToolButton(scaleBar);
 	scaleUp->setText(QStringLiteral("+"));
 	scaleUp->setAccessibleName(QStringLiteral("Increase dock scale"));
@@ -132,22 +131,10 @@ void OBSDock::EnableContentScaling(const QString &configKey)
 	scaledContent = content;
 
 	connect(scaleDown, &QToolButton::clicked, this,
-		[this]() { ApplyContentScale(contentScalePercent - DockScaleStep); });
+		[this]() { RequestApplicationScale(contentScalePercent - DockScaleStep); });
 	connect(scaleUp, &QToolButton::clicked, this,
-		[this]() { ApplyContentScale(contentScalePercent + DockScaleStep); });
-	connect(scaleResetButton, &QToolButton::clicked, this, [this]() { ApplyContentScale(100); });
-
-	auto *zoomIn = new QShortcut(QKeySequence::ZoomIn, this);
-	zoomIn->setContext(Qt::WidgetWithChildrenShortcut);
-	connect(zoomIn, &QShortcut::activated, this,
-		[this]() { ApplyContentScale(contentScalePercent + DockScaleStep); });
-	auto *zoomOut = new QShortcut(QKeySequence::ZoomOut, this);
-	zoomOut->setContext(Qt::WidgetWithChildrenShortcut);
-	connect(zoomOut, &QShortcut::activated, this,
-		[this]() { ApplyContentScale(contentScalePercent - DockScaleStep); });
-	auto *zoomReset = new QShortcut(QKeySequence(QStringLiteral("Ctrl+0")), this);
-	zoomReset->setContext(Qt::WidgetWithChildrenShortcut);
-	connect(zoomReset, &QShortcut::activated, this, [this]() { ApplyContentScale(100); });
+		[this]() { RequestApplicationScale(contentScalePercent + DockScaleStep); });
+	connect(scaleResetButton, &QToolButton::clicked, this, [this]() { RequestApplicationScale(100); });
 
 	CaptureScaleMetrics();
 	InstallScaleEventFilters();
@@ -155,6 +142,15 @@ void OBSDock::EnableContentScaling(const QString &configKey)
 	const QByteArray key = contentScaleConfigKey.toUtf8();
 	const int savedScale = (int)config_get_int(config, DockScaleConfigSection, key.constData());
 	ApplyContentScale(savedScale >= MinimumDockScale && savedScale <= MaximumDockScale ? savedScale : 100, false);
+}
+
+void OBSDock::RequestApplicationScale(int percent)
+{
+	const int requested = std::clamp(percent, MinimumDockScale, MaximumDockScale);
+	if (receivers(SIGNAL(ApplicationScaleRequested(int))) > 0)
+		emit ApplicationScaleRequested(requested);
+	else
+		ApplyContentScale(requested);
 }
 
 void OBSDock::CaptureScaleMetrics()
@@ -276,6 +272,13 @@ void OBSDock::InstallScaleEventFilters()
 
 bool OBSDock::eventFilter(QObject *watched, QEvent *event)
 {
+	if (scaledContent && event->type() == QEvent::ChildAdded && !scaleRefreshQueued) {
+		scaleRefreshQueued = true;
+		QTimer::singleShot(0, this, [this]() {
+			scaleRefreshQueued = false;
+			ApplyContentScale(contentScalePercent, false);
+		});
+	}
 	if (scaledContent && event->type() == QEvent::Wheel) {
 		auto *wheel = static_cast<QWheelEvent *>(event);
 		QWidget *target = qobject_cast<QWidget *>(watched);
@@ -283,7 +286,7 @@ bool OBSDock::eventFilter(QObject *watched, QEvent *event)
 		    (target == scaledContent || scaledContent->isAncestorOf(target) ||
 		     (contentScroll && target == contentScroll->viewport()))) {
 			const int direction = wheel->angleDelta().y() >= 0 ? DockScaleStep : -DockScaleStep;
-			ApplyContentScale(contentScalePercent + direction);
+			RequestApplicationScale(contentScalePercent + direction);
 			wheel->accept();
 			return true;
 		}

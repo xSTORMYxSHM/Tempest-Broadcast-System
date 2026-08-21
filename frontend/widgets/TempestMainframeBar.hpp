@@ -6,6 +6,7 @@
 
 class QLabel;
 class QPushButton;
+class QResizeEvent;
 class QTimer;
 class OBSBasic;
 
@@ -15,10 +16,15 @@ class TempestMainframeBar : public QFrame {
 public:
 	explicit TempestMainframeBar(OBSBasic *main);
 	void SetCommandWorkspace(bool commandMode);
+	void SetUiScalePercent(int percent);
 
 signals:
 	void WorkspaceRequested(bool commandMode);
 	void DockManagerRequested();
+	void UiScaleRequested(int percent);
+
+protected:
+	void resizeEvent(QResizeEvent *event) override;
 
 private slots:
 	void ToggleArm(bool armed);
@@ -31,6 +37,7 @@ private:
 	void BuildInterface();
 	void SetTransmissionState(const QString &state, const QString &detail, const QString &color);
 	void UpdateActionButtons();
+	void ApplyAdaptiveVisibility();
 	QString ElapsedText() const;
 
 	QPointer<OBSBasic> main;
@@ -40,15 +47,21 @@ private:
 	QPointer<QLabel> sceneLabel;
 	QPointer<QLabel> telemetryLabel;
 	QPointer<QLabel> recordStateLabel;
+	QPointer<QLabel> identitySublineLabel;
 	QPointer<QPushButton> commandWorkspaceButton;
 	QPointer<QPushButton> engineeringWorkspaceButton;
 	QPointer<QPushButton> dockManagerButton;
+	QPointer<QPushButton> uiScaleResetButton;
 	QPointer<QPushButton> armButton;
 	QPointer<QPushButton> streamButton;
 	QPointer<QPushButton> recordButton;
 	QPointer<QPushButton> emergencyButton;
 	QPointer<QTimer> telemetryTimer;
 	QElapsedTimer streamElapsed;
+	QString baseStyleSheet;
+	int uiScalePercent = 100;
+	int baseMinimumHeight = 68;
+	int baseMaximumHeight = 76;
 	bool streamStarting = false;
 	bool streamStopping = false;
 	bool recording = false;

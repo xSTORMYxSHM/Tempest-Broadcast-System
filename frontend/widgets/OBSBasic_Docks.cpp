@@ -35,15 +35,39 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFont>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QPushButton>
+#include <QScreen>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
+
+namespace {
+constexpr char TempestUiConfigSection[] = "TempestUI";
+constexpr char TempestUiScaleKey[] = "ScalePercent";
+constexpr char TempestAutoSizeKey[] = "AutoSizeOnStartup";
+constexpr int MinimumTempestUiScale = 60;
+constexpr int MaximumTempestUiScale = 160;
+constexpr int TempestUiScaleStep = 10;
+
+QFont ScaledApplicationFont(QFont font, qreal scale)
+{
+	if (font.pixelSize() > 0)
+		font.setPixelSize(std::max(1, qRound(font.pixelSize() * scale)));
+	else if (font.pointSizeF() > 0)
+		font.setPointSizeF(std::max(1.0, font.pointSizeF() * scale));
+	return font;
+}
+} // namespace
 
 void setupDockAction(QDockWidget *dock)
 {
@@ -65,6 +89,116 @@ void setupDockAction(QDockWidget *dock)
 
 	// Make the action unable to be disabled
 	QObject::connect(action, &QAction::enabledChanged, action, neverDisable);
+}
+
+void OBSBasic::InitializeTempestUiScaling()
+{
+	if (!qApp->property("tempestBaseApplicationFont").isValid())
+		qApp->setProperty("tempestBaseApplicationFont", qApp->font());
+
+	const QList<OBSDock *> docks = {tempestCommandMatrix, tempestControlDeck,      tempestSignalReactor,
+					tempestMediaBay,      tempestSequenceDirector, tempestAssetVault,
+					tempestHUDComposer};
+	for (OBSDock *dock : docks)
+		RegisterTempestScaleDock(dock);
+
+	connect(tempestMainframeBar, &TempestMainframeBar::UiScaleRequested, this,
+		[this](int percent) { SetTempestUiScalePercent(percent); });
+	qApp->installEventFilter(this);
+
+	config_t *config = App()->GetUserConfig();
+	if (!config_has_user_value(config, TempestUiConfigSection, TempestAutoSizeKey))
+		config_set_bool(config, TempestUiConfigSection, TempestAutoSizeKey, true);
+	const int savedScale = (int)config_get_int(config, TempestUiConfigSection, TempestUiScaleKey);
+	SetTempestUiScalePercent(
+		savedScale >= MinimumTempestUiScale && savedScale <= MaximumTempestUiScale ? savedScale : 100, false);
+}
+
+bool OBSBasic::eventFilter(QObject *watched, QEvent *event)
+{
+	if (event->type() == QEvent::KeyPress) {
+		auto *key = static_cast<QKeyEvent *>(event);
+		const Qt::KeyboardModifiers modifiers = key->modifiers();
+		if ((modifiers & Qt::ControlModifier) && !(modifiers & (Qt::AltModifier | Qt::MetaModifier))) {
+			int adjustment = 0;
+			bool handled = true;
+			switch (key->key()) {
+			case Qt::Key_Plus:
+			case Qt::Key_Equal:
+				adjustment = TempestUiScaleStep;
+				break;
+			case Qt::Key_Minus:
+				adjustment = -TempestUiScaleStep;
+				break;
+			case Qt::Key_0:
+				break;
+			default:
+				handled = false;
+				break;
+			}
+			if (handled) {
+				SetTempestUiScalePercent(adjustment == 0 ? 100 : tempestUiScalePercent + adjustment);
+				key->accept();
+				return true;
+			}
+		}
+	}
+	return OBSMainWindow::eventFilter(watched, event);
+}
+
+void OBSBasic::RegisterTempestScaleDock(OBSDock *dock)
+{
+	if (!dock || !dock->HasContentScaling())
+		return;
+	if (!dock->property("tempestApplicationScaleConnected").toBool()) {
+		connect(dock, &OBSDock::ApplicationScaleRequested, this,
+			[this](int percent) { SetTempestUiScalePercent(percent); });
+		dock->setProperty("tempestApplicationScaleConnected", true);
+	}
+	dock->SetContentScalePercent(tempestUiScalePercent, false);
+}
+
+void OBSBasic::SetTempestUiScalePercent(int percent, bool save)
+{
+	tempestUiScalePercent = std::clamp(percent, MinimumTempestUiScale, MaximumTempestUiScale);
+	const qreal scale = tempestUiScalePercent / 100.0;
+	const QFont baseFont = qApp->property("tempestBaseApplicationFont").value<QFont>();
+	if (!baseFont.family().isEmpty())
+		qApp->setFont(ScaledApplicationFont(baseFont, scale));
+	if (tempestMainframeBar)
+		tempestMainframeBar->SetUiScalePercent(tempestUiScalePercent);
+
+	for (OBSDock *dock : findChildren<OBSDock *>()) {
+		if (dock->HasContentScaling())
+			dock->SetContentScalePercent(tempestUiScalePercent, false);
+	}
+	if (auto *dock = qobject_cast<OBSDock *>(tempestStreamInfoDock.data()); dock && dock->HasContentScaling())
+		dock->SetContentScalePercent(tempestUiScalePercent, false);
+
+	if (save) {
+		config_t *config = App()->GetUserConfig();
+		config_set_int(config, TempestUiConfigSection, TempestUiScaleKey, tempestUiScalePercent);
+		config_save_safe(config, "tmp", nullptr);
+	}
+}
+
+void OBSBasic::ApplyTempestStartupSizing()
+{
+	if (!config_get_bool(App()->GetUserConfig(), TempestUiConfigSection, TempestAutoSizeKey) || isFullScreen())
+		return;
+
+	QScreen *targetScreen = screen() ? screen() : QGuiApplication::primaryScreen();
+	if (!targetScreen)
+		return;
+	const QRect available = targetScreen->availableGeometry();
+	const qreal sizeScale = std::clamp(tempestUiScalePercent / 100.0, 0.8, 1.35);
+	QSize desired(qRound(1920 * sizeScale), qRound(1080 * sizeScale));
+	desired.setWidth(std::min(desired.width(), available.width()));
+	desired.setHeight(std::min(desired.height(), available.height()));
+	if (isMaximized())
+		showNormal();
+	resize(desired);
+	move(available.center() - QPoint(desired.width() / 2, desired.height() / 2));
 }
 
 void OBSBasic::ConfigureTempestCommandLayout()
@@ -129,7 +263,6 @@ void OBSBasic::OpenTempestDockManager()
 		QPointer<QDockWidget> dock;
 		QPointer<QCheckBox> visible;
 		QPointer<QCheckBox> floating;
-		QPointer<QComboBox> scale;
 	};
 
 	const QVector<DockEntry> entries = {
@@ -146,7 +279,8 @@ void OBSBasic::OpenTempestDockManager()
 	QDialog dialog(this);
 	dialog.setWindowTitle(QStringLiteral("Mainframe Dock Layout Director"));
 	dialog.setModal(true);
-	dialog.resize(720, 500);
+	const qreal dialogScale = tempestUiScalePercent / 100.0;
+	dialog.resize(qRound(680 * dialogScale), qRound(500 * dialogScale));
 	dialog.setStyleSheet(QStringLiteral(R"(
 		QDialog { background: #07131e; color: #bdf6ff; }
 		QLabel#layoutTitle { color: #45d9ff; font-size: 16px; font-weight: 700; letter-spacing: 2px; }
@@ -170,18 +304,36 @@ void OBSBasic::OpenTempestDockManager()
 	root->addWidget(title);
 	root->addWidget(subtitle);
 
+	auto *applicationScaleRow = new QHBoxLayout();
+	auto *applicationScaleLabel = new QLabel(QStringLiteral("APPLICATION UI SCALE"), &dialog);
+	applicationScaleLabel->setObjectName(QStringLiteral("layoutHeader"));
+	auto *applicationScale = new QComboBox(&dialog);
+	for (int percent = MinimumTempestUiScale; percent <= MaximumTempestUiScale; percent += TempestUiScaleStep)
+		applicationScale->addItem(QStringLiteral("%1%").arg(percent), percent);
+	applicationScale->setCurrentIndex(applicationScale->findData(tempestUiScalePercent));
+	applicationScale->setAccessibleName(QStringLiteral("Application UI scale"));
+	auto *autoSizeOnStartup = new QCheckBox(QStringLiteral("AUTO-SIZE WINDOW ON STARTUP"), &dialog);
+	autoSizeOnStartup->setChecked(
+		config_get_bool(App()->GetUserConfig(), TempestUiConfigSection, TempestAutoSizeKey));
+	autoSizeOnStartup->setToolTip(
+		QStringLiteral("Fit a 1920x1080 workstation to the available screen and current UI scale."));
+	applicationScaleRow->addWidget(applicationScaleLabel);
+	applicationScaleRow->addWidget(applicationScale);
+	applicationScaleRow->addStretch(1);
+	applicationScaleRow->addWidget(autoSizeOnStartup);
+	root->addLayout(applicationScaleRow);
+
 	auto *grid = new QGridLayout();
 	grid->setHorizontalSpacing(12);
 	grid->setVerticalSpacing(7);
 	const QStringList headings = {QStringLiteral("DOCK"), QStringLiteral("VISIBLE"), QStringLiteral("FLOATING"),
-				      QStringLiteral("SCALE"), QStringLiteral("ACTION")};
+				      QStringLiteral("ACTION")};
 	for (int column = 0; column < headings.size(); ++column) {
 		auto *heading = new QLabel(headings[column], &dialog);
 		heading->setObjectName(QStringLiteral("layoutHeader"));
 		grid->addWidget(heading, 0, column);
 	}
 	grid->setColumnStretch(0, 1);
-	grid->setColumnStretch(3, 1);
 
 	QVector<DockControls> controls;
 	for (int index = 0; index < entries.size(); ++index) {
@@ -192,25 +344,16 @@ void OBSBasic::OpenTempestDockManager()
 			name->setText(QStringLiteral("%1 // UNAVAILABLE").arg(entry.label));
 		auto *visible = new QCheckBox(&dialog);
 		auto *floating = new QCheckBox(&dialog);
-		auto *scale = new QComboBox(&dialog);
-		for (int percent = 60; percent <= 160; percent += 10)
-			scale->addItem(QStringLiteral("%1%").arg(percent), percent);
 		auto *focus = new QPushButton(QStringLiteral("FOCUS"), &dialog);
 		visible->setAccessibleName(QStringLiteral("%1 visible").arg(entry.label));
 		floating->setAccessibleName(QStringLiteral("%1 floating").arg(entry.label));
-		scale->setAccessibleName(QStringLiteral("%1 scale").arg(entry.label));
 		focus->setAccessibleName(QStringLiteral("Focus %1").arg(entry.label));
 
-		OBSDock *scalableDock = entry.dock ? qobject_cast<OBSDock *>(entry.dock.data()) : nullptr;
 		const bool available = entry.dock != nullptr;
-		const bool scalable = scalableDock && scalableDock->HasContentScaling();
 		visible->setChecked(available && !entry.dock->isHidden());
 		floating->setChecked(available && entry.dock->isFloating());
-		const int scaleIndex = scalable ? scale->findData(scalableDock->ContentScalePercent()) : -1;
-		scale->setCurrentIndex(scaleIndex >= 0 ? scaleIndex : scale->findData(100));
 		visible->setEnabled(available);
 		floating->setEnabled(available);
-		scale->setEnabled(scalable);
 		focus->setEnabled(available);
 		connect(focus, &QPushButton::clicked, &dialog, [guarded = entry.dock]() {
 			if (!guarded)
@@ -224,16 +367,15 @@ void OBSBasic::OpenTempestDockManager()
 		grid->addWidget(name, row, 0);
 		grid->addWidget(visible, row, 1, Qt::AlignCenter);
 		grid->addWidget(floating, row, 2, Qt::AlignCenter);
-		grid->addWidget(scale, row, 3);
-		grid->addWidget(focus, row, 4);
-		controls.push_back({entry.dock, visible, floating, scale});
+		grid->addWidget(focus, row, 3);
+		controls.push_back({entry.dock, visible, floating});
 	}
 	root->addLayout(grid);
 	root->addStretch(1);
 
 	auto *utilityRow = new QHBoxLayout();
 	auto *showAll = new QPushButton(QStringLiteral("SHOW ALL"), &dialog);
-	auto *resetScales = new QPushButton(QStringLiteral("RESET ALL SCALES"), &dialog);
+	auto *resetScales = new QPushButton(QStringLiteral("RESET UI SCALE"), &dialog);
 	auto *recover = new QPushButton(QStringLiteral("RECOVER COMMAND LAYOUT"), &dialog);
 	recover->setToolTip(QStringLiteral("Dock every Mainframe panel back into the canonical Command workspace."));
 	utilityRow->addWidget(showAll);
@@ -246,12 +388,8 @@ void OBSBasic::OpenTempestDockManager()
 				control.visible->setChecked(true);
 		}
 	});
-	connect(resetScales, &QPushButton::clicked, &dialog, [&controls]() {
-		for (DockControls &control : controls) {
-			if (control.scale && control.scale->isEnabled())
-				control.scale->setCurrentIndex(control.scale->findData(100));
-		}
-	});
+	connect(resetScales, &QPushButton::clicked, &dialog,
+		[applicationScale]() { applicationScale->setCurrentIndex(applicationScale->findData(100)); });
 	bool recoverCommandLayout = false;
 	connect(recover, &QPushButton::clicked, &dialog, [&dialog, &recoverCommandLayout]() {
 		recoverCommandLayout = true;
@@ -265,13 +403,11 @@ void OBSBasic::OpenTempestDockManager()
 	root->addWidget(buttons);
 	if (dialog.exec() != QDialog::Accepted)
 		return;
+	SetTempestUiScalePercent(applicationScale->currentData().toInt());
+	config_set_bool(App()->GetUserConfig(), TempestUiConfigSection, TempestAutoSizeKey,
+			autoSizeOnStartup->isChecked());
 
 	if (recoverCommandLayout) {
-		for (DockControls &control : controls) {
-			if (auto *dock = control.dock ? qobject_cast<OBSDock *>(control.dock.data()) : nullptr;
-			    dock && dock->HasContentScaling())
-				dock->SetContentScalePercent(100);
-		}
 		tempestCommandDockState.clear();
 		tempestCommandWorkspace = true;
 		ConfigureTempestCommandLayout();
@@ -281,9 +417,6 @@ void OBSBasic::OpenTempestDockManager()
 		for (DockControls &control : controls) {
 			if (!control.dock)
 				continue;
-			if (auto *dock = qobject_cast<OBSDock *>(control.dock.data());
-			    dock && dock->HasContentScaling())
-				dock->SetContentScalePercent(control.scale->currentData().toInt());
 			control.dock->setFloating(control.floating->isChecked());
 			control.dock->setVisible(control.visible->isChecked());
 			if (control.visible->isChecked() && control.floating->isChecked()) {
@@ -323,6 +456,8 @@ void OBSBasic::IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal)
 	if (auto *browserDock = qobject_cast<BrowserDock *>(dock); browserDock && !browserDock->HasContentScaling())
 		browserDock->EnableContentScaling(dock->objectName());
 #endif
+	if (auto *scalableDock = qobject_cast<OBSDock *>(dock))
+		RegisterTempestScaleDock(scalableDock);
 	const bool visible = reveal || dock->isVisible();
 	dock->setFloating(false);
 	addDockWidget(Qt::RightDockWidgetArea, dock);

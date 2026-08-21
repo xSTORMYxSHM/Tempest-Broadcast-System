@@ -21,16 +21,23 @@ public:
 	void EnableContentScaling(const QString &configKey);
 	int ContentScalePercent() const { return contentScalePercent; }
 	bool HasContentScaling() const { return !scaledContent.isNull(); }
-	void SetContentScalePercent(int percent) { ApplyContentScale(percent); }
+	void SetContentScalePercent(int percent, bool saveDockValue = false)
+	{
+		ApplyContentScale(percent, saveDockValue);
+	}
 
 	virtual void closeEvent(QCloseEvent *event);
 	virtual void showEvent(QShowEvent *event);
 	bool eventFilter(QObject *watched, QEvent *event) override;
 	virtual void contentScaleChanged() {}
 
+signals:
+	void ApplicationScaleRequested(int percent);
+
 private:
 	void CaptureScaleMetrics();
 	void ApplyContentScale(int percent, bool save = true);
+	void RequestApplicationScale(int percent);
 	void InstallScaleEventFilters();
 
 	QPointer<QWidget> scaledContent;
@@ -39,4 +46,5 @@ private:
 	QString contentScaleConfigKey;
 	QSize baseDockMinimumSize;
 	int contentScalePercent = 100;
+	bool scaleRefreshQueued = false;
 };

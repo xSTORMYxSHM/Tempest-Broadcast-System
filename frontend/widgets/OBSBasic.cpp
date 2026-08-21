@@ -401,6 +401,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
 	tempestCommandMatrix->SetHUDComposer(tempestHUDComposer);
 	tempestControlDeck->raise();
+	InitializeTempestUiScaling();
 
 	startingDockLayout = saveState();
 
@@ -1305,6 +1306,7 @@ void OBSBasic::OBSInit()
 	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
 	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;
 	SetTempestWorkspace(commandWorkspace, true);
+	QTimer::singleShot(0, this, &OBSBasic::ApplyTempestStartupSizing);
 
 	if (!config_has_user_value(App()->GetUserConfig(), "TempestControlDeck", "DockInitialized")) {
 		tempestControlDeck->setVisible(true);

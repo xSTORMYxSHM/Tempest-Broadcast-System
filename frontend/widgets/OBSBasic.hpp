@@ -47,6 +47,7 @@
 extern volatile bool recording_paused;
 
 class ColorSelect;
+class OBSDock;
 class OBSAbout;
 class OBSBasicAdvAudio;
 class OBSBasicFilters;
@@ -473,6 +474,12 @@ private:
 	void OpenTempestDockManager();
 	void IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal = false);
 	void SaveTempestWorkspaceState();
+	bool eventFilter(QObject *watched, QEvent *event) override;
+	void InitializeTempestUiScaling();
+	void RegisterTempestScaleDock(OBSDock *dock);
+	void SetTempestUiScalePercent(int percent, bool save = true);
+	void ApplyTempestStartupSizing();
+	int tempestUiScalePercent = 100;
 
 public:
 	void AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool extraBrowser = false);

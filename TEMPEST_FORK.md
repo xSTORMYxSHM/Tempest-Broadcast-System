@@ -95,13 +95,15 @@ The default 1920x1080 workspace is headed by the native **Mainframe Command Nexu
 
 Each workspace stores its dock layout independently. Plugins and advanced dialogs remain available in Engineering mode while Command mode presents the Tempest-first operating surface.
 
-### Scalable Tempest docks
+### Application-wide UI scaling
 
-Every native Tempest dock uses the same persistent content-scaling surface in both docked and floating states. The compact **Dock Scale** bar supports 60% through 160% scaling in 10% steps; the percentage button resets that dock to 100%. `Ctrl` plus the mouse wheel, the platform Zoom In/Zoom Out shortcuts, and `Ctrl+0` provide the same controls from the keyboard. Scale is saved independently for the Transmission Matrix, Control Deck, Media Bay, Sequence Director, Asset Vault, and HUD Composer.
+The Mainframe uses one persistent application UI scale across the top command bar, native Tempest docks, floating panels, and the inherited OBS interface. The compact **- / percentage / +** controls in the Command Nexus and every Tempest dock support 60% through 160% scaling in 10% steps. The native Zoom In/Zoom Out shortcuts (`Ctrl++` or `Ctrl+=`, and `Ctrl+-`) plus `Ctrl+0` increase, decrease, and reset the scale from anywhere in the application; `Ctrl` plus the mouse wheel provides the same adjustment while a Tempest dock is under the pointer.
 
-Scaling adjusts typography, control dimensions, margins, and layout spacing together. Each surface also gains horizontal and vertical overflow scrolling, so a detached dock remains usable when resized below its preferred content size.
+Scaling adjusts application typography plus Tempest control dimensions, panel minimums, maximums, margins, layout spacing, and stylesheet metrics together. Dynamically added dock controls inherit the current scale, and each Tempest surface retains horizontal and vertical overflow scrolling so a compact dock remains usable even at large text sizes. The command bar progressively hides secondary telemetry before its operational controls can be crowded out.
 
-The Command Nexus **Layout** button opens the native **Dock Layout Director**. It manages visibility, docked or floating state, per-dock scale, and focus for the complete Tempest dock suite, with Stream Information included whenever Twitch authentication makes that dock available. **Recover Command Layout** returns all panels to the canonical Command workspace and resets their scales, providing an in-app recovery path for hidden or off-screen floating docks.
+The saved percentage is restored before the workspace appears. With **Auto-size window on startup** enabled, the Mainframe restores a normal window from its 1920x1080 workstation target, expands with the selected UI scale, clamps to the active display's available work area, and centers itself. Full-screen sessions keep their restored state; operators who prefer a maximized window can disable auto-sizing in the Layout Director.
+
+The Command Nexus **Layout** button opens the native **Dock Layout Director**. It manages the single application UI scale, startup auto-sizing, visibility, docked or floating state, and focus for the complete Tempest dock suite, with Stream Information included whenever Twitch authentication makes that dock available. **Recover Command Layout** returns all panels to the canonical Command workspace without discarding the operator's accessibility scale.
 
 ### Twitch Stream Information dock
 
