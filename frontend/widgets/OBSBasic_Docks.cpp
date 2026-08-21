@@ -47,6 +47,7 @@
 #include <QScreen>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWindow>
 
 #include <algorithm>
 #include <cmath>
@@ -58,6 +59,10 @@ constexpr char TempestAutoSizeKey[] = "AutoSizeOnStartup";
 constexpr int MinimumTempestUiScale = 60;
 constexpr int MaximumTempestUiScale = 160;
 constexpr int TempestUiScaleStep = 10;
+constexpr int StandardWorkstationWidth = 1920;
+constexpr int StandardWorkstationHeight = 1080;
+constexpr qreal UltrawideAspectThreshold = 2.0;
+constexpr qreal MaximumWorkstationAspect = 32.0 / 9.0;
 
 QFont ScaledApplicationFont(QFont font, qreal scale)
 {
@@ -191,14 +196,26 @@ void OBSBasic::ApplyTempestStartupSizing()
 	if (!targetScreen)
 		return;
 	const QRect available = targetScreen->availableGeometry();
+	const qreal availableAspect = available.height() > 0 ? available.width() / (qreal)available.height()
+							     : 16.0 / 9.0;
+	const qreal workstationAspect = availableAspect >= UltrawideAspectThreshold
+						? std::min(availableAspect, MaximumWorkstationAspect)
+						: StandardWorkstationWidth / (qreal)StandardWorkstationHeight;
 	const qreal sizeScale = std::clamp(tempestUiScalePercent / 100.0, 0.8, 1.35);
-	QSize desired(qRound(1920 * sizeScale), qRound(1080 * sizeScale));
-	desired.setWidth(std::min(desired.width(), available.width()));
-	desired.setHeight(std::min(desired.height(), available.height()));
+	QSize desired(qRound(StandardWorkstationHeight * workstationAspect * sizeScale),
+		      qRound(StandardWorkstationHeight * sizeScale));
+	const QMargins frameMargins = windowHandle() ? windowHandle()->frameMargins() : QMargins();
+	const QSize maximumContentSize(std::max(1, available.width() - frameMargins.left() - frameMargins.right()),
+				       std::max(1, available.height() - frameMargins.top() - frameMargins.bottom()));
+	desired.setWidth(std::min(desired.width(), maximumContentSize.width()));
+	desired.setHeight(std::min(desired.height(), maximumContentSize.height()));
 	if (isMaximized())
 		showNormal();
 	resize(desired);
-	move(available.center() - QPoint(desired.width() / 2, desired.height() / 2));
+	const QSize outerSize(desired.width() + frameMargins.left() + frameMargins.right(),
+			      desired.height() + frameMargins.top() + frameMargins.bottom());
+	const QPoint frameTopLeft = available.center() - QPoint(outerSize.width() / 2, outerSize.height() / 2);
+	move(frameTopLeft + QPoint(frameMargins.left(), frameMargins.top()));
 }
 
 void OBSBasic::ConfigureTempestCommandLayout()
