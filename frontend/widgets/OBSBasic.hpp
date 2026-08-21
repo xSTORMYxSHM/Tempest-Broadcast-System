@@ -468,6 +468,10 @@ private:
 	QByteArray tempestCommandDockState;
 	QByteArray tempestEngineeringDockState;
 	bool tempestCommandWorkspace = true;
+	QString tempestResponsiveProfile;
+	QString tempestResponsiveBreakpoint;
+	bool tempestResponsiveProfilesInitialized = false;
+	bool tempestResponsiveRefreshQueued = false;
 
 	void SetTempestWorkspace(bool commandMode, bool initial = false);
 	void ConfigureTempestCommandLayout();
@@ -479,6 +483,13 @@ private:
 	void RegisterTempestScaleDock(OBSDock *dock);
 	void SetTempestUiScalePercent(int percent, bool save = true);
 	void ApplyTempestStartupSizing();
+	void InitializeTempestResponsiveWorkspaceProfiles();
+	QString DetectTempestResponsiveProfile() const;
+	bool LoadTempestResponsiveProfileStates(const QString &profile);
+	void StoreTempestResponsiveProfileStates(const QString &profile);
+	void SetTempestResponsiveProfile(const QString &profile, bool force = false);
+	void ScheduleTempestResponsiveWorkspaceRefresh();
+	void ApplyTempestResponsiveDockPriorities(bool force = false);
 	int tempestUiScalePercent = 100;
 
 public:

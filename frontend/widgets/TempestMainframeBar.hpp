@@ -17,6 +17,7 @@ public:
 	explicit TempestMainframeBar(OBSBasic *main);
 	void SetCommandWorkspace(bool commandMode);
 	void SetUiScalePercent(int percent);
+	void SetResponsiveProfile(const QString &profileLabel, bool automatic);
 
 signals:
 	void WorkspaceRequested(bool commandMode);

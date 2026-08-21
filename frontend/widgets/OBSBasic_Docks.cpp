@@ -56,13 +56,42 @@ namespace {
 constexpr char TempestUiConfigSection[] = "TempestUI";
 constexpr char TempestUiScaleKey[] = "ScalePercent";
 constexpr char TempestAutoSizeKey[] = "AutoSizeOnStartup";
+constexpr char TempestResponsiveConfigSection[] = "TempestResponsiveLayouts";
+constexpr char TempestAutoProfileKey[] = "AutoSwitchProfiles";
+constexpr char TempestAutoReflowKey[] = "AutoReflowDocks";
+constexpr char TempestManualProfileKey[] = "ManualProfile";
+constexpr char TempestActiveProfileKey[] = "ActiveProfile";
 constexpr int MinimumTempestUiScale = 60;
 constexpr int MaximumTempestUiScale = 160;
 constexpr int TempestUiScaleStep = 10;
 constexpr int StandardWorkstationWidth = 1920;
 constexpr int StandardWorkstationHeight = 1080;
 constexpr qreal UltrawideAspectThreshold = 2.0;
+constexpr qreal SuperUltrawideAspectThreshold = 3.0;
 constexpr qreal MaximumWorkstationAspect = 32.0 / 9.0;
+
+QString NormalizedResponsiveProfile(const QString &profile)
+{
+	if (profile == QStringLiteral("ultrawide") || profile == QStringLiteral("super_ultrawide"))
+		return profile;
+	return QStringLiteral("standard");
+}
+
+QString ResponsiveProfileLabel(const QString &profile)
+{
+	if (profile == QStringLiteral("super_ultrawide"))
+		return QStringLiteral("SUPER ULTRAWIDE");
+	if (profile == QStringLiteral("ultrawide"))
+		return QStringLiteral("ULTRAWIDE");
+	return QStringLiteral("STANDARD 16:9");
+}
+
+QByteArray ResponsiveStateKey(bool commandMode, const QString &profile)
+{
+	return QStringLiteral("%1_%2")
+		.arg(commandMode ? QStringLiteral("Command") : QStringLiteral("Engineering"), profile)
+		.toUtf8();
+}
 
 QFont ScaledApplicationFont(QFont font, qreal scale)
 {
@@ -121,6 +150,10 @@ void OBSBasic::InitializeTempestUiScaling()
 
 bool OBSBasic::eventFilter(QObject *watched, QEvent *event)
 {
+	if (watched == this && (event->type() == QEvent::Resize || event->type() == QEvent::Move ||
+				event->type() == QEvent::WindowStateChange))
+		ScheduleTempestResponsiveWorkspaceRefresh();
+
 	if (event->type() == QEvent::KeyPress) {
 		auto *key = static_cast<QKeyEvent *>(event);
 		const Qt::KeyboardModifiers modifiers = key->modifiers();
@@ -184,6 +217,204 @@ void OBSBasic::SetTempestUiScalePercent(int percent, bool save)
 		config_t *config = App()->GetUserConfig();
 		config_set_int(config, TempestUiConfigSection, TempestUiScaleKey, tempestUiScalePercent);
 		config_save_safe(config, "tmp", nullptr);
+	}
+	ScheduleTempestResponsiveWorkspaceRefresh();
+}
+
+QString OBSBasic::DetectTempestResponsiveProfile() const
+{
+	QScreen *targetScreen = screen() ? screen() : QGuiApplication::primaryScreen();
+	if (!targetScreen)
+		return QStringLiteral("standard");
+	const QRect available = targetScreen->availableGeometry();
+	const qreal aspect = available.height() > 0 ? available.width() / (qreal)available.height() : 16.0 / 9.0;
+	if (aspect >= SuperUltrawideAspectThreshold)
+		return QStringLiteral("super_ultrawide");
+	if (aspect >= UltrawideAspectThreshold)
+		return QStringLiteral("ultrawide");
+	return QStringLiteral("standard");
+}
+
+bool OBSBasic::LoadTempestResponsiveProfileStates(const QString &profile)
+{
+	config_t *config = App()->GetUserConfig();
+	auto loadState = [config, &profile](bool commandMode) {
+		const QByteArray key = ResponsiveStateKey(commandMode, profile);
+		const char *encoded = config_get_string(config, TempestResponsiveConfigSection, key.constData());
+		return encoded && *encoded ? QByteArray::fromBase64(QByteArray(encoded)) : QByteArray();
+	};
+	tempestCommandDockState = loadState(true);
+	tempestEngineeringDockState = loadState(false);
+	return !tempestCommandDockState.isEmpty() || !tempestEngineeringDockState.isEmpty();
+}
+
+void OBSBasic::StoreTempestResponsiveProfileStates(const QString &profile)
+{
+	if (profile.isEmpty())
+		return;
+	config_t *config = App()->GetUserConfig();
+	const QByteArray commandKey = ResponsiveStateKey(true, profile);
+	const QByteArray engineeringKey = ResponsiveStateKey(false, profile);
+	config_set_string(config, TempestResponsiveConfigSection, commandKey.constData(),
+			  tempestCommandDockState.toBase64().constData());
+	config_set_string(config, TempestResponsiveConfigSection, engineeringKey.constData(),
+			  tempestEngineeringDockState.toBase64().constData());
+}
+
+void OBSBasic::InitializeTempestResponsiveWorkspaceProfiles()
+{
+	config_t *config = App()->GetUserConfig();
+	if (!config_has_user_value(config, TempestResponsiveConfigSection, TempestAutoProfileKey))
+		config_set_bool(config, TempestResponsiveConfigSection, TempestAutoProfileKey, true);
+	if (!config_has_user_value(config, TempestResponsiveConfigSection, TempestAutoReflowKey))
+		config_set_bool(config, TempestResponsiveConfigSection, TempestAutoReflowKey, true);
+
+	const QByteArray legacyCommandState = tempestCommandDockState;
+	const QByteArray legacyEngineeringState = tempestEngineeringDockState;
+	auto hasStoredProfile = [config](const QString &profile) {
+		const QByteArray commandKey = ResponsiveStateKey(true, profile);
+		const QByteArray engineeringKey = ResponsiveStateKey(false, profile);
+		return config_has_user_value(config, TempestResponsiveConfigSection, commandKey.constData()) ||
+		       config_has_user_value(config, TempestResponsiveConfigSection, engineeringKey.constData());
+	};
+	auto seedProfile = [this, &legacyCommandState, &legacyEngineeringState](const QString &profile) {
+		tempestCommandDockState = legacyCommandState;
+		tempestEngineeringDockState = legacyEngineeringState;
+		StoreTempestResponsiveProfileStates(profile);
+	};
+
+	if (!hasStoredProfile(QStringLiteral("standard")))
+		seedProfile(QStringLiteral("standard"));
+	const QString detectedProfile = DetectTempestResponsiveProfile();
+	if (!hasStoredProfile(detectedProfile))
+		seedProfile(detectedProfile);
+
+	const bool automatic = config_get_bool(config, TempestResponsiveConfigSection, TempestAutoProfileKey);
+	const QString manualProfile = NormalizedResponsiveProfile(
+		QString::fromUtf8(config_get_string(config, TempestResponsiveConfigSection, TempestManualProfileKey)));
+	tempestResponsiveProfile = automatic ? detectedProfile : manualProfile;
+	if (!LoadTempestResponsiveProfileStates(tempestResponsiveProfile)) {
+		tempestCommandDockState = legacyCommandState;
+		tempestEngineeringDockState = legacyEngineeringState;
+	}
+	tempestResponsiveProfilesInitialized = true;
+	config_set_string(config, TempestResponsiveConfigSection, TempestActiveProfileKey,
+			  tempestResponsiveProfile.toUtf8().constData());
+	if (tempestMainframeBar)
+		tempestMainframeBar->SetResponsiveProfile(ResponsiveProfileLabel(tempestResponsiveProfile), automatic);
+	if (windowHandle()) {
+		connect(windowHandle(), &QWindow::screenChanged, this,
+			[this](QScreen *) { ScheduleTempestResponsiveWorkspaceRefresh(); });
+	}
+}
+
+void OBSBasic::SetTempestResponsiveProfile(const QString &profile, bool force)
+{
+	const QString normalized = NormalizedResponsiveProfile(profile);
+	if (!tempestResponsiveProfilesInitialized)
+		return;
+	config_t *config = App()->GetUserConfig();
+	const bool automatic = config_get_bool(config, TempestResponsiveConfigSection, TempestAutoProfileKey);
+	if (normalized == tempestResponsiveProfile) {
+		if (tempestMainframeBar)
+			tempestMainframeBar->SetResponsiveProfile(ResponsiveProfileLabel(normalized), automatic);
+		ApplyTempestResponsiveDockPriorities(force);
+		return;
+	}
+
+	SaveTempestWorkspaceState();
+	tempestResponsiveProfile = normalized;
+	const bool hasState = LoadTempestResponsiveProfileStates(tempestResponsiveProfile);
+	if (tempestCommandWorkspace) {
+		if (hasState && !tempestCommandDockState.isEmpty() && restoreState(tempestCommandDockState)) {
+			menuBar()->setVisible(false);
+		} else {
+			tempestCommandDockState.clear();
+			ConfigureTempestCommandLayout();
+		}
+	} else if (hasState && !tempestEngineeringDockState.isEmpty() && restoreState(tempestEngineeringDockState)) {
+		menuBar()->setVisible(true);
+	} else {
+		on_resetDocks_triggered(true);
+		menuBar()->setVisible(true);
+	}
+	if (tempestStreamInfoDock)
+		IntegrateTempestStreamInfoDock(tempestStreamInfoDock);
+	if (tempestMainframeBar)
+		tempestMainframeBar->SetResponsiveProfile(ResponsiveProfileLabel(tempestResponsiveProfile), automatic);
+	config_set_string(config, TempestResponsiveConfigSection, TempestActiveProfileKey,
+			  tempestResponsiveProfile.toUtf8().constData());
+	tempestResponsiveBreakpoint.clear();
+	ApplyTempestResponsiveDockPriorities(true);
+	SaveTempestWorkspaceState();
+	config_save_safe(config, "tmp", nullptr);
+}
+
+void OBSBasic::ScheduleTempestResponsiveWorkspaceRefresh()
+{
+	if (!tempestResponsiveProfilesInitialized || tempestResponsiveRefreshQueued)
+		return;
+	tempestResponsiveRefreshQueued = true;
+	QTimer::singleShot(120, this, [this]() {
+		tempestResponsiveRefreshQueued = false;
+		if (isMinimized())
+			return;
+		config_t *config = App()->GetUserConfig();
+		const bool automatic = config_get_bool(config, TempestResponsiveConfigSection, TempestAutoProfileKey);
+		const QString configuredProfile =
+			automatic ? DetectTempestResponsiveProfile()
+				  : NormalizedResponsiveProfile(QString::fromUtf8(config_get_string(
+					    config, TempestResponsiveConfigSection, TempestManualProfileKey)));
+		if (configuredProfile != tempestResponsiveProfile)
+			SetTempestResponsiveProfile(configuredProfile);
+		else
+			ApplyTempestResponsiveDockPriorities();
+	});
+}
+
+void OBSBasic::ApplyTempestResponsiveDockPriorities(bool force)
+{
+	if (!tempestCommandWorkspace || !tempestResponsiveProfilesInitialized)
+		return;
+	if (!force && !config_get_bool(App()->GetUserConfig(), TempestResponsiveConfigSection, TempestAutoReflowKey))
+		return;
+	const int logicalWidth = qRound(width() * 100.0 / std::max(60, tempestUiScalePercent));
+	const QString breakpoint = logicalWidth < 1800    ? QStringLiteral("compact")
+				   : logicalWidth >= 2300 ? QStringLiteral("wide")
+							  : QStringLiteral("standard");
+	if (!force && breakpoint == tempestResponsiveBreakpoint)
+		return;
+	tempestResponsiveBreakpoint = breakpoint;
+
+	const qreal scale = tempestUiScalePercent / 100.0;
+	auto scaled = [scale](int value) {
+		return qRound(value * scale);
+	};
+	int leftWidth;
+	int commandWidth;
+	if (breakpoint == QStringLiteral("compact")) {
+		leftWidth = std::clamp(width() * 16 / 100, scaled(230), scaled(290));
+		commandWidth = std::clamp(width() * 22 / 100, scaled(310), scaled(390));
+		if (!ui->mixerDock->isFloating() && !tempestMediaBay->isFloating()) {
+			tabifyDockWidget(ui->mixerDock, tempestMediaBay);
+			ui->mixerDock->raise();
+		}
+	} else {
+		const bool wide = breakpoint == QStringLiteral("wide");
+		leftWidth = std::clamp(width() * (wide ? 16 : 15) / 100, scaled(wide ? 300 : 260),
+				       scaled(wide ? 440 : 320));
+		commandWidth = std::clamp(width() * (wide ? 18 : 20) / 100, scaled(wide ? 370 : 350),
+					  scaled(wide ? 540 : 430));
+		if (!ui->mixerDock->isFloating() && !tempestMediaBay->isFloating())
+			splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
+	}
+	const int mixerHeight = std::clamp(height() * 24 / 100, scaled(190), scaled(290));
+	resizeDocks({tempestCommandMatrix, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
+	resizeDocks({ui->mixerDock}, {mixerHeight}, Qt::Vertical);
+	if (breakpoint != QStringLiteral("compact")) {
+		const int mixerShare = breakpoint == QStringLiteral("wide") ? 65 : 60;
+		resizeDocks({ui->mixerDock, tempestMediaBay},
+			    {width() * mixerShare / 100, width() * (100 - mixerShare) / 100}, Qt::Horizontal);
 	}
 }
 
@@ -262,12 +493,8 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	controlsDock->setVisible(false);
 	statsDock->setVisible(false);
 
-	const int leftWidth = std::clamp(width() * 15 / 100, 260, 320);
-	const int commandWidth = std::clamp(width() * 20 / 100, 350, 430);
-	const int mixerHeight = std::clamp(height() * 24 / 100, 210, 280);
-	resizeDocks({tempestCommandMatrix, tempestControlDeck}, {leftWidth, commandWidth}, Qt::Horizontal);
-	resizeDocks({ui->mixerDock}, {mixerHeight}, Qt::Vertical);
-	resizeDocks({ui->mixerDock, tempestMediaBay}, {width() * 3 / 5, width() * 2 / 5}, Qt::Horizontal);
+	tempestResponsiveBreakpoint.clear();
+	ApplyTempestResponsiveDockPriorities(true);
 }
 
 void OBSBasic::OpenTempestDockManager()
@@ -297,7 +524,7 @@ void OBSBasic::OpenTempestDockManager()
 	dialog.setWindowTitle(QStringLiteral("Mainframe Dock Layout Director"));
 	dialog.setModal(true);
 	const qreal dialogScale = tempestUiScalePercent / 100.0;
-	dialog.resize(qRound(680 * dialogScale), qRound(500 * dialogScale));
+	dialog.resize(qRound(760 * dialogScale), qRound(590 * dialogScale));
 	dialog.setStyleSheet(QStringLiteral(R"(
 		QDialog { background: #07131e; color: #bdf6ff; }
 		QLabel#layoutTitle { color: #45d9ff; font-size: 16px; font-weight: 700; letter-spacing: 2px; }
@@ -315,11 +542,45 @@ void OBSBasic::OpenTempestDockManager()
 	auto *title = new QLabel(QStringLiteral("DOCK LAYOUT DIRECTOR"), &dialog);
 	title->setObjectName(QStringLiteral("layoutTitle"));
 	auto *subtitle = new QLabel(
-		QStringLiteral("Visibility, floating state, scale, and recovery for the Mainframe workstation."),
+		QStringLiteral(
+			"Monitor profiles, responsive reflow, visibility, scale, and recovery for the Mainframe workstation."),
 		&dialog);
 	subtitle->setObjectName(QStringLiteral("layoutSubtitle"));
 	root->addWidget(title);
 	root->addWidget(subtitle);
+	config_t *config = App()->GetUserConfig();
+
+	auto *profileRow = new QHBoxLayout();
+	auto *profileLabel = new QLabel(QStringLiteral("RESPONSIVE PROFILE"), &dialog);
+	profileLabel->setObjectName(QStringLiteral("layoutHeader"));
+	auto *responsiveProfile = new QComboBox(&dialog);
+	responsiveProfile->addItem(
+		QStringLiteral("AUTOMATIC // %1").arg(ResponsiveProfileLabel(DetectTempestResponsiveProfile())),
+		QStringLiteral("auto"));
+	responsiveProfile->addItem(QStringLiteral("STANDARD // 16:9"), QStringLiteral("standard"));
+	responsiveProfile->addItem(QStringLiteral("ULTRAWIDE // 21:9"), QStringLiteral("ultrawide"));
+	responsiveProfile->addItem(QStringLiteral("SUPER ULTRAWIDE // 32:9"), QStringLiteral("super_ultrawide"));
+	const bool automaticProfiles = config_get_bool(config, TempestResponsiveConfigSection, TempestAutoProfileKey);
+	const QString selectedProfile =
+		automaticProfiles
+			? QStringLiteral("auto")
+			: NormalizedResponsiveProfile(QString::fromUtf8(
+				  config_get_string(config, TempestResponsiveConfigSection, TempestManualProfileKey)));
+	responsiveProfile->setCurrentIndex(responsiveProfile->findData(selectedProfile));
+	responsiveProfile->setAccessibleName(QStringLiteral("Responsive workspace profile"));
+	auto *autoReflow = new QCheckBox(QStringLiteral("LIVE DOCK REFLOW"), &dialog);
+	autoReflow->setChecked(config_get_bool(config, TempestResponsiveConfigSection, TempestAutoReflowKey));
+	autoReflow->setToolTip(QStringLiteral(
+		"Tab compact panels and expand operational docks when the window crosses layout breakpoints."));
+	auto *safeAreaGuides = new QCheckBox(QStringLiteral("CANVAS SAFE-AREA GUIDES"), &dialog);
+	safeAreaGuides->setChecked(config_get_bool(config, "BasicWindow", "ShowSafeAreas"));
+	safeAreaGuides->setToolTip(
+		QStringLiteral("Show broadcast-safe guides inside the 16:9 stream canvas on every display shape."));
+	profileRow->addWidget(profileLabel);
+	profileRow->addWidget(responsiveProfile, 1);
+	profileRow->addWidget(autoReflow);
+	profileRow->addWidget(safeAreaGuides);
+	root->addLayout(profileRow);
 
 	auto *applicationScaleRow = new QHBoxLayout();
 	auto *applicationScaleLabel = new QLabel(QStringLiteral("APPLICATION UI SCALE"), &dialog);
@@ -330,10 +591,9 @@ void OBSBasic::OpenTempestDockManager()
 	applicationScale->setCurrentIndex(applicationScale->findData(tempestUiScalePercent));
 	applicationScale->setAccessibleName(QStringLiteral("Application UI scale"));
 	auto *autoSizeOnStartup = new QCheckBox(QStringLiteral("AUTO-SIZE WINDOW ON STARTUP"), &dialog);
-	autoSizeOnStartup->setChecked(
-		config_get_bool(App()->GetUserConfig(), TempestUiConfigSection, TempestAutoSizeKey));
+	autoSizeOnStartup->setChecked(config_get_bool(config, TempestUiConfigSection, TempestAutoSizeKey));
 	autoSizeOnStartup->setToolTip(
-		QStringLiteral("Fit a 1920x1080 workstation to the available screen and current UI scale."));
+		QStringLiteral("Fit the 1920x1080 baseline to the selected monitor profile and current UI scale."));
 	applicationScaleRow->addWidget(applicationScaleLabel);
 	applicationScaleRow->addWidget(applicationScale);
 	applicationScaleRow->addStretch(1);
@@ -414,15 +674,24 @@ void OBSBasic::OpenTempestDockManager()
 	});
 
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-	buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("APPLY LAYOUT"));
+	buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("APPLY + SAVE PROFILE"));
 	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
 	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 	root->addWidget(buttons);
 	if (dialog.exec() != QDialog::Accepted)
 		return;
 	SetTempestUiScalePercent(applicationScale->currentData().toInt());
-	config_set_bool(App()->GetUserConfig(), TempestUiConfigSection, TempestAutoSizeKey,
-			autoSizeOnStartup->isChecked());
+	config_set_bool(config, TempestUiConfigSection, TempestAutoSizeKey, autoSizeOnStartup->isChecked());
+	const QString profileSelection = responsiveProfile->currentData().toString();
+	const bool useAutomaticProfile = profileSelection == QStringLiteral("auto");
+	config_set_bool(config, TempestResponsiveConfigSection, TempestAutoProfileKey, useAutomaticProfile);
+	if (!useAutomaticProfile)
+		config_set_string(config, TempestResponsiveConfigSection, TempestManualProfileKey,
+				  profileSelection.toUtf8().constData());
+	config_set_bool(config, TempestResponsiveConfigSection, TempestAutoReflowKey, autoReflow->isChecked());
+	config_set_bool(config, "BasicWindow", "ShowSafeAreas", safeAreaGuides->isChecked());
+	UpdatePreviewSafeAreas();
+	SetTempestResponsiveProfile(useAutomaticProfile ? DetectTempestResponsiveProfile() : profileSelection, true);
 
 	if (recoverCommandLayout) {
 		tempestCommandDockState.clear();
@@ -443,7 +712,7 @@ void OBSBasic::OpenTempestDockManager()
 		}
 	}
 	SaveTempestWorkspaceState();
-	config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+	config_save_safe(config, "tmp", nullptr);
 }
 
 void OBSBasic::IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal)
@@ -518,6 +787,10 @@ void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
 
 	tempestCommandToolbar->setVisible(true);
 	tempestMainframeBar->SetCommandWorkspace(commandMode);
+	if (commandMode) {
+		tempestResponsiveBreakpoint.clear();
+		ApplyTempestResponsiveDockPriorities(true);
+	}
 	config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace",
 			  commandMode ? "command" : "engineering");
 	config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
@@ -536,6 +809,8 @@ void OBSBasic::SaveTempestWorkspaceState()
 			  tempestEngineeringDockState.toBase64().constData());
 	config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace",
 			  tempestCommandWorkspace ? "command" : "engineering");
+	if (tempestResponsiveProfilesInitialized)
+		StoreTempestResponsiveProfileStates(tempestResponsiveProfile);
 }
 
 void OBSBasic::on_resetDocks_triggered(bool force)

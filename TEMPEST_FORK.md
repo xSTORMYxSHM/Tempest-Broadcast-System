@@ -105,6 +105,12 @@ The saved percentage is restored before the workspace appears. With **Auto-size 
 
 The Command Nexus **Layout** button opens the native **Dock Layout Director**. It manages the single application UI scale, startup auto-sizing, visibility, docked or floating state, and focus for the complete Tempest dock suite, with Stream Information included whenever Twitch authentication makes that dock available. **Recover Command Layout** returns all panels to the canonical Command workspace without discarding the operator's accessibility scale.
 
+### Responsive workspace profiles
+
+The Layout Director maintains independent Command and Engineering dock states for **Standard 16:9**, **Ultrawide**, and **Super Ultrawide** displays. Automatic mode detects the active monitor from its available work-area aspect ratio, saves the outgoing profile (including floating dock geometry), restores the matching profile after a monitor move, and identifies the active profile in the Command Nexus. Manual profile selection is available for unusual monitor arrangements.
+
+With **Live Dock Reflow** enabled, the Command workspace uses compact, standard, and wide breakpoints. Compact windows tab the Media Bay behind the Audio Mixer to protect the canvas and primary controls; standard and wide windows split those panels again and allocate progressively more width to the Transmission Matrix and right-side command stack. Reflow only runs when a breakpoint changes, so ordinary resizing does not continually disturb the layout. **Canvas Safe-area Guides** exposes OBS's broadcast-safe 16:9 canvas guides directly in the Layout Director, which is particularly useful when the application workspace itself is ultrawide.
+
 ### Twitch Stream Information dock
 
 The standard authenticated OBS/Twitch **Stream Information** dock remains the owner of title, Go Live notification, category, audience, tags, language, content labels, rerun, and branded-content controls. When base OBS creates its `twitchInfo` dock, TBS detects it asynchronously, docks it into the right-side Mainframe operations stack beside the Control Deck, Sequence Director, Asset Vault, and HUD Composer, and includes it in both Command and Engineering workspace state. Its normal Docks menu action remains available.

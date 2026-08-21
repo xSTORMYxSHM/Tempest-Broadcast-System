@@ -296,6 +296,17 @@ void TempestMainframeBar::SetUiScalePercent(int percent)
 	ApplyAdaptiveVisibility();
 }
 
+void TempestMainframeBar::SetResponsiveProfile(const QString &profileLabel, bool automatic)
+{
+	if (!identitySublineLabel)
+		return;
+	identitySublineLabel->setText(QStringLiteral("BROADCAST COMMAND NEXUS // %1%2")
+					      .arg(profileLabel, automatic ? QStringLiteral(" AUTO") : QString()));
+	identitySublineLabel->setToolTip(
+		QStringLiteral("Responsive workspace profile: %1%2")
+			.arg(profileLabel, automatic ? QStringLiteral(" (automatic)") : QString()));
+}
+
 void TempestMainframeBar::resizeEvent(QResizeEvent *event)
 {
 	QFrame::resizeEvent(event);

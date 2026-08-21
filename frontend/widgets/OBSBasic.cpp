@@ -1303,10 +1303,14 @@ void OBSBasic::OBSInit()
 		on_resetDocks_triggered(true);
 		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 7);
 	}
+	InitializeTempestResponsiveWorkspaceProfiles();
 	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
 	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;
 	SetTempestWorkspace(commandWorkspace, true);
-	QTimer::singleShot(0, this, &OBSBasic::ApplyTempestStartupSizing);
+	QTimer::singleShot(0, this, [this]() {
+		ApplyTempestStartupSizing();
+		ScheduleTempestResponsiveWorkspaceRefresh();
+	});
 
 	if (!config_has_user_value(App()->GetUserConfig(), "TempestControlDeck", "DockInitialized")) {
 		tempestControlDeck->setVisible(true);
