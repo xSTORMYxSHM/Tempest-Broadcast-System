@@ -40,6 +40,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSizePolicy>
@@ -170,6 +171,10 @@ TempestCommandMatrix::~TempestCommandMatrix()
 							"ControlSequence");
 		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
 							"TriggerSignal");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"TriggerReactionEvent");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"ClearReactionEvent");
 	}
 #endif
 }
@@ -197,6 +202,31 @@ void TempestCommandMatrix::SetSignalReactor(TempestSignalReactor *reactor)
 			EmitRouterEvent("SignalTriggered", eventData);
 		});
 	connect(signalReactor, &TempestSignalReactor::LevelsUpdated, this, &TempestCommandMatrix::ApplyReactionLevels);
+	connect(signalReactor, &TempestSignalReactor::ExternalEventTriggered, this,
+		[this](const QString &type, const QString &name, float strength, int durationMs, const QString &circuit,
+		       const QString &accent, const QString &effect, const QString &origin) {
+			reactionExternalEventStrength = std::clamp(strength, 0.05f, 1.5f);
+			reactionExternalEventCircuit = circuit;
+			reactionExternalEventUntil = QDateTime::currentMSecsSinceEpoch() + durationMs;
+			OBSDataAutoRelease eventData = obs_data_create();
+			obs_data_set_string(eventData, "type", type.toUtf8().constData());
+			obs_data_set_string(eventData, "name", name.toUtf8().constData());
+			obs_data_set_double(eventData, "strength", strength);
+			obs_data_set_int(eventData, "durationMs", durationMs);
+			obs_data_set_string(eventData, "circuit", circuit.toUtf8().constData());
+			obs_data_set_string(eventData, "accent", accent.toUtf8().constData());
+			obs_data_set_string(eventData, "effect", effect.toUtf8().constData());
+			obs_data_set_string(eventData, "origin", origin.toUtf8().constData());
+			EmitRouterEvent("ReactionEventTriggered", eventData);
+			SetStatus(QStringLiteral("External reaction // %1 // %2").arg(name, circuit.toUpper()));
+		});
+	connect(signalReactor, &TempestSignalReactor::ExternalEventCleared, this, [this]() {
+		reactionExternalEventUntil = 0;
+		reactionExternalEventStrength = 0.0f;
+		reactionExternalEventCircuit.clear();
+		ApplyReactionLevels(0.0f, 0.0f, 0.0f, 0.0f);
+		EmitRouterEvent("ReactionEventCleared", nullptr);
+	});
 	reactionNetworkArmed = signalReactor->SourceNetworkArmed();
 	reactionNetworkIntensity = signalReactor->SourceNetworkIntensity();
 	reactionNetworkActiveSceneOnly = signalReactor->SourceNetworkActiveSceneOnly();
@@ -372,8 +402,14 @@ void TempestCommandMatrix::RegisterExternalControls()
 		obs_websocket_vendor_register_request(vendor, "ControlSequence", WebSocketControlSequence, this);
 	const bool signalReady = signalReactor && obs_websocket_vendor_register_request(vendor, "TriggerSignal",
 											WebSocketTriggerSignal, this);
+	const bool reactionEventReady = signalReactor &&
+					obs_websocket_vendor_register_request(vendor, "TriggerReactionEvent",
+									      WebSocketTriggerReactionEvent, this);
+	const bool clearReactionEventReady =
+		signalReactor &&
+		obs_websocket_vendor_register_request(vendor, "ClearReactionEvent", WebSocketClearReactionEvent, this);
 	webSocketReady = protocolReady && sceneReady && overlayReady && sequenceReady && sequenceControlReady &&
-			 signalReady;
+			 signalReady && reactionEventReady && clearReactionEventReady;
 #endif
 	SetRouterState();
 }
@@ -401,6 +437,97 @@ void TempestCommandMatrix::WebSocketTriggerSignal(obs_data_t *request, obs_data_
 		Qt::QueuedConnection);
 	obs_data_set_double(response, "strength", requestedStrength);
 	SetRouterResponse(response, true, "signal command queued");
+}
+
+void TempestCommandMatrix::WebSocketTriggerReactionEvent(obs_data_t *request, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->signalReactor) {
+		SetRouterResponse(response, false, "signal reactor is unavailable");
+		return;
+	}
+	const QString type = QString::fromUtf8(obs_data_get_string(request, "type")).trimmed().toLower();
+	const QString name = QString::fromUtf8(obs_data_get_string(request, "name")).trimmed();
+	const QString circuit = QString::fromUtf8(obs_data_get_string(request, "circuit")).trimmed().toLower();
+	const QString accent = QString::fromUtf8(obs_data_get_string(request, "accent")).trimmed().toUpper();
+	const QString effect = QString::fromUtf8(obs_data_get_string(request, "effect")).trimmed().toLower();
+	const QString origin = QString::fromUtf8(obs_data_get_string(request, "origin")).trimmed();
+	const QString dedupeId = QString::fromUtf8(obs_data_get_string(request, "dedupeId")).trimmed();
+	const double strength = obs_data_has_user_value(request, "strength") ? obs_data_get_double(request, "strength")
+									     : 0.0;
+	const int64_t durationMs =
+		obs_data_has_user_value(request, "durationMs") ? obs_data_get_int(request, "durationMs") : 0;
+	const int64_t cooldownMs =
+		obs_data_has_user_value(request, "cooldownMs") ? obs_data_get_int(request, "cooldownMs") : -1;
+	if (type.isEmpty() || type.size() > 48) {
+		SetRouterResponse(response, false, "type is required and must be 48 characters or fewer");
+		return;
+	}
+	if (name.size() > 96 || origin.size() > 48 || dedupeId.size() > 128) {
+		SetRouterResponse(response, false, "name, origin, or dedupeId is too long");
+		return;
+	}
+	if (!std::isfinite(strength) || strength < 0.0 || strength > 1.5) {
+		SetRouterResponse(response, false, "strength must be omitted or between 0.05 and 1.5");
+		return;
+	}
+	if (strength > 0.0 && strength < 0.05) {
+		SetRouterResponse(response, false, "strength must be omitted or between 0.05 and 1.5");
+		return;
+	}
+	if (durationMs < 0 || durationMs > 30000 || cooldownMs < -1 || cooldownMs > 10000) {
+		SetRouterResponse(response, false, "durationMs or cooldownMs is outside the supported range");
+		return;
+	}
+	const QStringList validCircuits = {QString(),
+					   QStringLiteral("all"),
+					   QStringLiteral("core"),
+					   QStringLiteral("frame"),
+					   QStringLiteral("chat"),
+					   QStringLiteral("plates"),
+					   QStringLiteral("alerts")};
+	const QStringList validEffects = {QString(),
+					  QStringLiteral("pulse"),
+					  QStringLiteral("glow"),
+					  QStringLiteral("glitch"),
+					  QStringLiteral("spectrum"),
+					  QStringLiteral("surge")};
+	if (!validCircuits.contains(circuit) || !validEffects.contains(effect) ||
+	    (!accent.isEmpty() && !QRegularExpression(QStringLiteral("^#[0-9A-F]{6}$")).match(accent).hasMatch())) {
+		SetRouterResponse(response, false, "circuit, effect, or accent is invalid");
+		return;
+	}
+	QPointer<TempestSignalReactor> guarded(matrix->signalReactor);
+	QMetaObject::invokeMethod(
+		matrix,
+		[guarded, type, name, strength, durationMs, circuit, accent, effect, origin, dedupeId, cooldownMs]() {
+			if (guarded)
+				guarded->TriggerExternalEvent(type, name, float(strength), int(durationMs), circuit,
+							      accent, effect, origin, dedupeId, int(cooldownMs));
+		},
+		Qt::QueuedConnection);
+	obs_data_set_string(response, "type", type.toUtf8().constData());
+	obs_data_set_string(response, "circuit",
+			    (circuit.isEmpty() ? QStringLiteral("preset") : circuit).toUtf8().constData());
+	SetRouterResponse(response, true, "reaction event queued");
+}
+
+void TempestCommandMatrix::WebSocketClearReactionEvent(obs_data_t *, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->signalReactor) {
+		SetRouterResponse(response, false, "signal reactor is unavailable");
+		return;
+	}
+	QPointer<TempestSignalReactor> guarded(matrix->signalReactor);
+	QMetaObject::invokeMethod(
+		matrix,
+		[guarded]() {
+			if (guarded)
+				guarded->ClearExternalEvent();
+		},
+		Qt::QueuedConnection);
+	SetRouterResponse(response, true, "reaction event clear queued");
 }
 
 void TempestCommandMatrix::WebSocketRunProtocol(obs_data_t *request, obs_data_t *response, void *data)
@@ -2301,6 +2428,7 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 	reactionPhase = std::fmod(reactionPhase + 0.28, 6.283185307179586);
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const bool testingNetwork = now < reactionNetworkTestUntil;
+	const bool externalEventActive = now < reactionExternalEventUntil;
 	QHash<QString, float> circuitActivity;
 	bool capturedBaseline = false;
 	for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {
@@ -2320,12 +2448,17 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 						    reaction.circuit == reactionNetworkTestCircuit;
 		const bool testingNetworkRig = testingNetwork &&
 					       (reactionNetworkTestCircuit.isEmpty() || testingTargetedCircuit);
+		const bool externalEventTargets = externalEventActive &&
+						  (reactionExternalEventCircuit.isEmpty() ||
+						   reactionExternalEventCircuit == QStringLiteral("all") ||
+						   reaction.circuit == reactionExternalEventCircuit);
 		if (reactionNetworkActiveSceneOnly && reaction.sceneUuid != reactionActiveSceneUuid &&
 		    !testingSelected) {
 			RestoreReaction(reaction);
 			continue;
 		}
-		if (!ReactionCircuitActive(reaction.circuit) && !testingSelected && !testingTargetedCircuit) {
+		if (!ReactionCircuitActive(reaction.circuit) && !testingSelected && !testingTargetedCircuit &&
+		    !externalEventTargets) {
 			RestoreReaction(reaction);
 			continue;
 		}
@@ -2337,7 +2470,7 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			RestoreReaction(reaction);
 			continue;
 		}
-		if (!reactionNetworkArmed && !testingSelected && !testingNetworkRig) {
+		if (!reactionNetworkArmed && !testingSelected && !testingNetworkRig && !externalEventTargets) {
 			RestoreReaction(reaction);
 			continue;
 		}
@@ -2348,6 +2481,8 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 			level = microphone;
 		else if (reaction.signal == QStringLiteral("beat"))
 			level = beat;
+		if (externalEventTargets)
+			level = std::max(level, reactionExternalEventStrength);
 		if (testingSelected || testingNetworkRig)
 			level = 1.0f;
 		level = std::clamp(level, 0.0f, 1.5f);

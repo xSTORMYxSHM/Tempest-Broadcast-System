@@ -28,6 +28,13 @@ public:
 	void RegisterHotkeys();
 	void UnregisterHotkeys();
 	void TriggerPulse(float strength, const QString &origin = QStringLiteral("external"));
+	bool TriggerExternalEvent(const QString &type, const QString &name = QString(), float strength = 0.0f,
+				  int durationMs = 0, const QString &circuit = QString(),
+				  const QString &accent = QString(), const QString &effect = QString(),
+				  const QString &origin = QStringLiteral("warudo"), const QString &dedupeId = QString(),
+				  int cooldownMs = -1);
+	void ClearExternalEvent();
+	bool ExternalEventBridgeArmed() const;
 	void SetWebSocketReady(bool ready);
 	void SetSourceBindingSummary(int total, int enabled, int active, int activeEnabled);
 	void SetSourceCircuitSummary(const QString &circuit, int total, int scoped, int enabled);
@@ -50,6 +57,10 @@ public:
 
 signals:
 	void PulseTriggered(float strength, const QString &origin);
+	void ExternalEventTriggered(const QString &type, const QString &name, float strength, int durationMs,
+				    const QString &circuit, const QString &accent, const QString &effect,
+				    const QString &origin);
+	void ExternalEventCleared();
 	void LevelsUpdated(float master, float desktop, float microphone, float beat);
 	void SourceNetworkArmedChanged(bool armed);
 	void SourceNetworkIntensityChanged(float intensity);
@@ -121,6 +132,11 @@ private:
 	QHash<QString, int> sourceNetworkCircuitScoped;
 	QHash<QString, int> sourceNetworkCircuitEnabled;
 	QPointer<QDoubleSpinBox> sourceNetworkIntensity;
+	QPointer<QCheckBox> externalEventBridgeArmed;
+	QPointer<QComboBox> externalDanceCircuit;
+	QPointer<QComboBox> externalTwitchCircuit;
+	QPointer<QDoubleSpinBox> externalEventCooldown;
+	QPointer<QLabel> externalEventStatus;
 	QPointer<QLabel> sourceNetworkStatus;
 	QPointer<QLabel> statusLabel;
 	QPointer<QLabel> controlLabel;
@@ -132,6 +148,8 @@ private:
 	SignalChannel microphoneChannel;
 	QHash<obs_hotkey_id, float> pulseHotkeys;
 	QHash<obs_hotkey_id, QString> networkHotkeys;
+	QHash<obs_hotkey_id, QString> externalEventHotkeys;
+	QHash<QString, qint64> externalEventLastTrigger;
 	QString configuredDesktopUuid;
 	QString configuredMicrophoneUuid;
 	QString telemetryPath;
@@ -139,6 +157,15 @@ private:
 	float beatBaseline = 0.0f;
 	float beatLevel = 0.0f;
 	QString sourceNetworkSoloCircuit;
+	QString activeExternalEventType;
+	QString activeExternalEventName;
+	QString activeExternalEventCircuit;
+	QString activeExternalEventAccent;
+	QString activeExternalEventEffect;
+	QString activeExternalEventOrigin;
+	qint64 activeExternalEventUntil = 0;
+	quint64 externalEventSequence = 0;
+	float activeExternalEventStrength = 0.0f;
 	bool audioSourcesLoaded = false;
 	bool loadingState = false;
 	bool webSocketReady = false;

@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSignalBlocker>
 #include <QTimer>
@@ -309,6 +310,60 @@ void TempestSignalReactor::BuildInterface()
 	networkLayout->addLayout(networkButtons);
 	layout->addWidget(networkFrame);
 
+	auto *externalFrame = new QFrame(root);
+	externalFrame->setObjectName(QStringLiteral("reactorChannel"));
+	externalFrame->setAccessibleName(QStringLiteral("Warudo and Twitch reaction event bridge"));
+	auto *externalLayout = new QVBoxLayout(externalFrame);
+	externalLayout->setContentsMargins(8, 8, 8, 8);
+	externalLayout->setSpacing(6);
+	auto *externalLabel = new QLabel(QStringLiteral("EXTERNAL EVENT BRIDGE // WARUDO + TWITCH"), externalFrame);
+	externalLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	externalEventStatus = new QLabel(QStringLiteral("EVENT BUS // STANDBY"), externalFrame);
+	externalEventStatus->setObjectName(QStringLiteral("reactorStatus"));
+	externalEventStatus->setWordWrap(true);
+	externalEventBridgeArmed = new QCheckBox(QStringLiteral("ACCEPT EXTERNAL REACTION EVENTS"), externalFrame);
+	externalEventBridgeArmed->setAccessibleName(QStringLiteral("Accept Warudo and Twitch reaction events"));
+	auto populateCircuitSelector = [](QComboBox *selector) {
+		selector->addItem(QStringLiteral("ALL HUD CIRCUITS"), QStringLiteral("all"));
+		selector->addItem(QStringLiteral("FRAME"), QStringLiteral("frame"));
+		selector->addItem(QStringLiteral("ALERTS"), QStringLiteral("alerts"));
+		selector->addItem(QStringLiteral("PLATES"), QStringLiteral("plates"));
+		selector->addItem(QStringLiteral("CHAT"), QStringLiteral("chat"));
+		selector->addItem(QStringLiteral("CORE"), QStringLiteral("core"));
+	};
+	externalDanceCircuit = new QComboBox(externalFrame);
+	externalTwitchCircuit = new QComboBox(externalFrame);
+	populateCircuitSelector(externalDanceCircuit);
+	populateCircuitSelector(externalTwitchCircuit);
+	externalDanceCircuit->setAccessibleName(QStringLiteral("Sound alert dance target circuit"));
+	externalTwitchCircuit->setAccessibleName(QStringLiteral("Twitch interaction target circuit"));
+	externalEventCooldown = new QDoubleSpinBox(externalFrame);
+	externalEventCooldown->setRange(0.0, 10.0);
+	externalEventCooldown->setSingleStep(0.1);
+	externalEventCooldown->setDecimals(1);
+	externalEventCooldown->setSuffix(QStringLiteral(" s"));
+	externalEventCooldown->setAccessibleName(QStringLiteral("External event duplicate cooldown"));
+	auto *externalForm = new QFormLayout();
+	externalForm->addRow(QStringLiteral("Dance target"), externalDanceCircuit);
+	externalForm->addRow(QStringLiteral("Twitch target"), externalTwitchCircuit);
+	externalForm->addRow(QStringLiteral("Duplicate cooldown"), externalEventCooldown);
+	auto *externalButtons = new QHBoxLayout();
+	auto *testDance = new QPushButton(QStringLiteral("TEST DANCE"), externalFrame);
+	auto *testTwitch = new QPushButton(QStringLiteral("TEST TWITCH"), externalFrame);
+	auto *clearExternal = new QPushButton(QStringLiteral("CLEAR"), externalFrame);
+	testDance->setAccessibleName(QStringLiteral("Test Warudo sound alert dance reaction"));
+	testTwitch->setAccessibleName(QStringLiteral("Test Twitch interaction reaction"));
+	clearExternal->setAccessibleName(QStringLiteral("Clear current external reaction event"));
+	externalButtons->addWidget(testDance);
+	externalButtons->addWidget(testTwitch);
+	externalButtons->addWidget(clearExternal);
+	externalLayout->addWidget(externalLabel);
+	externalLayout->addWidget(externalEventStatus);
+	externalLayout->addWidget(externalEventBridgeArmed);
+	externalLayout->addLayout(externalForm);
+	externalLayout->addLayout(externalButtons);
+	layout->addWidget(externalFrame);
+
 	auto *pulseRow = new QHBoxLayout();
 	pulseButton = new QPushButton(QStringLiteral("TEST PULSE"), root);
 	peakButton = new QPushButton(QStringLiteral("TEST PEAK"), root);
@@ -327,7 +382,7 @@ void TempestSignalReactor::BuildInterface()
 
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Desktop and microphone energy feed the master bus. The Beat bus extracts fast music transients from Desktop Energy. Assign Pulse and Peak in Settings > Hotkeys, or call tempest-mainframe / TriggerSignal after enabling the OBS WebSocket server."),
+			"Desktop and microphone energy feed the master bus. The Beat bus extracts fast music transients from Desktop Energy. Warudo can trigger the named Sound Alert Dance and Twitch Interaction hotkeys; richer clients can call tempest-mainframe / TriggerReactionEvent."),
 		root);
 	hint->setObjectName(QStringLiteral("reactorHint"));
 	hint->setWordWrap(true);
@@ -388,6 +443,27 @@ void TempestSignalReactor::BuildInterface()
 	connect(resetMixer, &QPushButton::clicked, this, &TempestSignalReactor::ResetSourceNetworkCircuitGains);
 	connect(testNetwork, &QPushButton::clicked, this, &TempestSignalReactor::TestSourceNetwork);
 	connect(restoreNetwork, &QPushButton::clicked, this, &TempestSignalReactor::DisarmAndRestoreSourceNetwork);
+	connect(externalEventBridgeArmed, &QCheckBox::toggled, this, [this](bool armed) {
+		SaveState();
+		if (!armed)
+			ClearExternalEvent();
+	});
+	connect(externalDanceCircuit, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::SaveState);
+	connect(externalTwitchCircuit, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::SaveState);
+	connect(externalEventCooldown, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(testDance, &QPushButton::clicked, this, [this]() {
+		TriggerExternalEvent(QStringLiteral("sound_alert_dance"), QStringLiteral("SOUND ALERT DANCE"), 1.2f,
+				     6000, externalDanceCircuit->currentData().toString(), QStringLiteral("#FF3EC8"),
+				     QStringLiteral("spectrum"), QStringLiteral("dock"), QStringLiteral("dock-dance"),
+				     0);
+	});
+	connect(testTwitch, &QPushButton::clicked, this, [this]() {
+		TriggerExternalEvent(QStringLiteral("twitch_interaction"), QStringLiteral("TWITCH INTERACTION"), 1.0f,
+				     2600, externalTwitchCircuit->currentData().toString(), QStringLiteral("#9B8CFF"),
+				     QStringLiteral("glitch"), QStringLiteral("dock"), QStringLiteral("dock-twitch"),
+				     0);
+	});
+	connect(clearExternal, &QPushButton::clicked, this, &TempestSignalReactor::ClearExternalEvent);
 	connect(pulseButton, &QPushButton::clicked, this, [this]() { TriggerPulse(0.65f, QStringLiteral("dock")); });
 	connect(peakButton, &QPushButton::clicked, this, [this]() { TriggerPulse(1.0f, QStringLiteral("dock")); });
 }
@@ -438,6 +514,25 @@ void TempestSignalReactor::RegisterHotkeys()
 		networkHotkeys.insert(id, QString::fromUtf8(definition.action));
 		LoadHotkey(id, QByteArray(definition.name));
 	}
+	struct EventDefinition {
+		const char *name;
+		const char *description;
+		const char *eventType;
+	};
+	constexpr EventDefinition eventDefinitions[] = {
+		{"TempestMainframe.ExternalEvent.SoundAlertDance",
+		 "Tempest Mainframe: Warudo Sound Alert Dance Reaction", "sound_alert_dance"},
+		{"TempestMainframe.ExternalEvent.TwitchInteraction", "Tempest Mainframe: Twitch Interaction Reaction",
+		 "twitch_interaction"},
+	};
+	for (const EventDefinition &definition : eventDefinitions) {
+		const obs_hotkey_id id =
+			obs_hotkey_register_frontend(definition.name, definition.description, HotkeyCallback, this);
+		if (id == OBS_INVALID_HOTKEY_ID)
+			continue;
+		externalEventHotkeys.insert(id, QString::fromUtf8(definition.eventType));
+		LoadHotkey(id, QByteArray(definition.name));
+	}
 	UpdateControlBridgeState();
 }
 
@@ -449,6 +544,9 @@ void TempestSignalReactor::UnregisterHotkeys()
 	for (auto it = networkHotkeys.cbegin(); it != networkHotkeys.cend(); ++it)
 		obs_hotkey_unregister(it.key());
 	networkHotkeys.clear();
+	for (auto it = externalEventHotkeys.cbegin(); it != externalEventHotkeys.cend(); ++it)
+		obs_hotkey_unregister(it.key());
+	externalEventHotkeys.clear();
 	UpdateControlBridgeState();
 }
 
@@ -474,12 +572,13 @@ void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotk
 	auto *reactor = static_cast<TempestSignalReactor *>(data);
 	const float strength = reactor->pulseHotkeys.value(id, 0.0f);
 	const QString networkAction = reactor->networkHotkeys.value(id);
-	if (strength <= 0.0f && networkAction.isEmpty())
+	const QString externalEventType = reactor->externalEventHotkeys.value(id);
+	if (strength <= 0.0f && networkAction.isEmpty() && externalEventType.isEmpty())
 		return;
 	QPointer<TempestSignalReactor> guarded(reactor);
 	QMetaObject::invokeMethod(
 		reactor,
-		[guarded, strength, networkAction]() {
+		[guarded, strength, networkAction, externalEventType]() {
 			if (!guarded)
 				return;
 			if (strength > 0.0f) {
@@ -496,6 +595,18 @@ void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotk
 				guarded->CycleSourceNetworkCircuitProfile();
 			} else if (networkAction == QStringLiteral("mixer-reset")) {
 				guarded->ResetSourceNetworkCircuitGains();
+			} else if (externalEventType == QStringLiteral("sound_alert_dance")) {
+				guarded->TriggerExternalEvent(externalEventType, QStringLiteral("SOUND ALERT DANCE"),
+							      1.2f, 6000,
+							      guarded->externalDanceCircuit->currentData().toString(),
+							      QStringLiteral("#FF3EC8"), QStringLiteral("spectrum"),
+							      QStringLiteral("warudo-hotkey"));
+			} else if (externalEventType == QStringLiteral("twitch_interaction")) {
+				guarded->TriggerExternalEvent(externalEventType, QStringLiteral("TWITCH INTERACTION"),
+							      1.0f, 2600,
+							      guarded->externalTwitchCircuit->currentData().toString(),
+							      QStringLiteral("#9B8CFF"), QStringLiteral("glitch"),
+							      QStringLiteral("warudo-hotkey"));
 			}
 		},
 		Qt::QueuedConnection);
@@ -535,6 +646,23 @@ void TempestSignalReactor::LoadState()
 	sourceNetworkIntensity->setValue(config_has_user_value(config, ConfigSection, "SourceNetworkIntensity")
 						 ? std::clamp(savedNetworkIntensity, 0.0, 200.0)
 						 : 100.0);
+	externalEventBridgeArmed->setChecked(
+		!config_has_user_value(config, ConfigSection, "ExternalEventBridgeArmed") ||
+		config_get_bool(config, ConfigSection, "ExternalEventBridgeArmed"));
+	const QString savedDanceCircuit =
+		QString::fromUtf8(config_get_string(config, ConfigSection, "ExternalDanceCircuit"));
+	const QString savedTwitchCircuit =
+		QString::fromUtf8(config_get_string(config, ConfigSection, "ExternalTwitchCircuit"));
+	const int danceCircuitIndex = externalDanceCircuit->findData(savedDanceCircuit);
+	const int twitchCircuitIndex = externalTwitchCircuit->findData(savedTwitchCircuit);
+	externalDanceCircuit->setCurrentIndex(danceCircuitIndex >= 0 ? danceCircuitIndex : 0);
+	externalTwitchCircuit->setCurrentIndex(twitchCircuitIndex >= 0
+						       ? twitchCircuitIndex
+						       : externalTwitchCircuit->findData(QStringLiteral("alerts")));
+	const double savedExternalCooldown = config_get_double(config, ConfigSection, "ExternalEventCooldown");
+	externalEventCooldown->setValue(config_has_user_value(config, ConfigSection, "ExternalEventCooldown")
+						? std::clamp(savedExternalCooldown, 0.0, 10.0)
+						: 0.8);
 	const char *desktopUuid = config_get_string(config, ConfigSection, "DesktopSourceUuid");
 	const char *microphoneUuid = config_get_string(config, ConfigSection, "MicrophoneSourceUuid");
 	configuredDesktopUuid = QString::fromUtf8(desktopUuid ? desktopUuid : "");
@@ -566,6 +694,12 @@ void TempestSignalReactor::SaveState()
 		config_set_double(config, ConfigSection, key.constData(), it.value()->value());
 	}
 	config_set_double(config, ConfigSection, "SourceNetworkIntensity", sourceNetworkIntensity->value());
+	config_set_bool(config, ConfigSection, "ExternalEventBridgeArmed", externalEventBridgeArmed->isChecked());
+	config_set_string(config, ConfigSection, "ExternalDanceCircuit",
+			  externalDanceCircuit->currentData().toString().toUtf8().constData());
+	config_set_string(config, ConfigSection, "ExternalTwitchCircuit",
+			  externalTwitchCircuit->currentData().toString().toUtf8().constData());
+	config_set_double(config, ConfigSection, "ExternalEventCooldown", externalEventCooldown->value());
 	if (audioSourcesLoaded) {
 		configuredDesktopUuid = desktopSource->currentData().toString();
 		configuredMicrophoneUuid = microphoneSource->currentData().toString();
@@ -699,6 +833,113 @@ void TempestSignalReactor::TriggerPulse(float strength, const QString &origin)
 	if (!reactorEnabled->isChecked())
 		reactorEnabled->setChecked(true);
 	emit PulseTriggered(boundedStrength, origin);
+}
+
+bool TempestSignalReactor::TriggerExternalEvent(const QString &type, const QString &name, float strength,
+						int durationMs, const QString &circuit, const QString &accent,
+						const QString &effect, const QString &origin, const QString &dedupeId,
+						int cooldownMs)
+{
+	if (!ExternalEventBridgeArmed()) {
+		if (externalEventStatus)
+			externalEventStatus->setText(QStringLiteral("EVENT BUS // BLOCKED // BRIDGE DISARMED"));
+		return false;
+	}
+
+	const QString eventType = type.trimmed().toLower().left(48);
+	const bool danceEvent = eventType == QStringLiteral("sound_alert_dance") ||
+				eventType == QStringLiteral("dance") || eventType == QStringLiteral("sound_alert");
+	const bool twitchEvent = eventType == QStringLiteral("twitch_interaction") ||
+				 eventType == QStringLiteral("twitch");
+	const float defaultStrength = danceEvent ? 1.2f : twitchEvent ? 1.0f : 0.9f;
+	const int defaultDuration = danceEvent ? 6000 : twitchEvent ? 2600 : 2200;
+	QString routedCircuit = circuit.trimmed().toLower();
+	if (routedCircuit.isEmpty())
+		routedCircuit = danceEvent && externalDanceCircuit     ? externalDanceCircuit->currentData().toString()
+				: twitchEvent && externalTwitchCircuit ? externalTwitchCircuit->currentData().toString()
+								       : QStringLiteral("all");
+	const QStringList validCircuits = {QStringLiteral("all"),  QStringLiteral("core"),   QStringLiteral("frame"),
+					   QStringLiteral("chat"), QStringLiteral("plates"), QStringLiteral("alerts")};
+	if (!validCircuits.contains(routedCircuit))
+		routedCircuit = QStringLiteral("all");
+	QString routedAccent = accent.trimmed().toUpper();
+	if (!QRegularExpression(QStringLiteral("^#[0-9A-F]{6}$")).match(routedAccent).hasMatch())
+		routedAccent = danceEvent    ? QStringLiteral("#FF3EC8")
+			       : twitchEvent ? QStringLiteral("#9B8CFF")
+					     : QStringLiteral("#45D9FF");
+	QString routedEffect = effect.trimmed().toLower();
+	const QStringList validEffects = {QStringLiteral("pulse"), QStringLiteral("glow"), QStringLiteral("glitch"),
+					  QStringLiteral("spectrum"), QStringLiteral("surge")};
+	if (!validEffects.contains(routedEffect))
+		routedEffect = danceEvent    ? QStringLiteral("spectrum")
+			       : twitchEvent ? QStringLiteral("glitch")
+					     : QStringLiteral("surge");
+
+	const int boundedCooldown =
+		cooldownMs >= 0 ? std::clamp(cooldownMs, 0, 10000)
+				: qRound((externalEventCooldown ? externalEventCooldown->value() : 0.8) * 1000.0);
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const QString eventKey = (dedupeId.trimmed().isEmpty()
+					  ? QStringLiteral("%1:%2").arg(eventType, name.trimmed().toLower())
+					  : dedupeId.trimmed())
+					 .left(128);
+	const qint64 lastTrigger = externalEventLastTrigger.value(eventKey, 0);
+	if (boundedCooldown > 0 && lastTrigger > 0 && now - lastTrigger < boundedCooldown) {
+		const int remaining = int(boundedCooldown - (now - lastTrigger));
+		if (externalEventStatus)
+			externalEventStatus->setText(
+				QStringLiteral("EVENT BUS // DUPLICATE SUPPRESSED // %1 ms").arg(remaining));
+		return false;
+	}
+	externalEventLastTrigger[eventKey] = now;
+
+	activeExternalEventType = eventType.isEmpty() ? QStringLiteral("custom") : eventType;
+	activeExternalEventName = (name.trimmed().isEmpty() ? activeExternalEventType : name.trimmed()).left(96);
+	activeExternalEventCircuit = routedCircuit;
+	activeExternalEventAccent = routedAccent;
+	activeExternalEventEffect = routedEffect;
+	activeExternalEventOrigin =
+		(origin.trimmed().isEmpty() ? QStringLiteral("external") : origin.trimmed()).left(48);
+	activeExternalEventStrength = std::clamp(strength > 0.0f ? strength : defaultStrength, 0.05f, 1.5f);
+	const int boundedDuration = std::clamp(durationMs > 0 ? durationMs : defaultDuration, 250, 30000);
+	activeExternalEventUntil = now + boundedDuration;
+	const quint64 sequence = ++externalEventSequence;
+	TriggerPulse(activeExternalEventStrength, activeExternalEventOrigin);
+	if (externalEventStatus) {
+		const QString state =
+			QStringLiteral("EVENT LIVE // %1 // %2 // %3 // %4 ms")
+				.arg(activeExternalEventName.toUpper(), routedCircuit.toUpper(), routedEffect.toUpper())
+				.arg(boundedDuration);
+		externalEventStatus->setText(state);
+		externalEventStatus->setAccessibleName(state);
+	}
+	emit ExternalEventTriggered(activeExternalEventType, activeExternalEventName, activeExternalEventStrength,
+				    boundedDuration, activeExternalEventCircuit, activeExternalEventAccent,
+				    activeExternalEventEffect, activeExternalEventOrigin);
+	QTimer::singleShot(boundedDuration, this, [this, sequence]() {
+		if (externalEventSequence == sequence)
+			ClearExternalEvent();
+	});
+	return true;
+}
+
+void TempestSignalReactor::ClearExternalEvent()
+{
+	const bool wasActive = activeExternalEventUntil > 0;
+	activeExternalEventUntil = 0;
+	activeExternalEventStrength = 0.0f;
+	++externalEventSequence;
+	if (externalEventStatus) {
+		externalEventStatus->setText(QStringLiteral("EVENT BUS // STANDBY"));
+		externalEventStatus->setAccessibleName(QStringLiteral("External event bus standby"));
+	}
+	if (wasActive)
+		emit ExternalEventCleared();
+}
+
+bool TempestSignalReactor::ExternalEventBridgeArmed() const
+{
+	return externalEventBridgeArmed && externalEventBridgeArmed->isChecked();
 }
 
 void TempestSignalReactor::SetWebSocketReady(bool ready)
@@ -978,12 +1219,13 @@ void TempestSignalReactor::UpdateControlBridgeState()
 {
 	if (!controlLabel)
 		return;
-	const bool hotkeysReady = pulseHotkeys.size() == 2 && networkHotkeys.size() == 6;
+	const bool hotkeysReady = pulseHotkeys.size() == 2 && networkHotkeys.size() == 6 &&
+				  externalEventHotkeys.size() == 2;
 	QString state;
 	if (hotkeysReady && webSocketReady)
-		state = QStringLiteral("CONTROL BRIDGE // 8 HOTKEYS + WEBSOCKET VENDOR API READY");
+		state = QStringLiteral("CONTROL BRIDGE // 10 HOTKEYS + WEBSOCKET EVENT API READY");
 	else if (hotkeysReady)
-		state = QStringLiteral("CONTROL BRIDGE // 8 HOTKEYS READY");
+		state = QStringLiteral("CONTROL BRIDGE // 10 HOTKEYS READY");
 	else
 		state = QStringLiteral("CONTROL BRIDGE // INITIALIZING");
 	controlLabel->setText(state);
@@ -1041,6 +1283,18 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("microphone"), microphone);
 	telemetry.insert(QStringLiteral("beat"), beat);
 	telemetry.insert(QStringLiteral("pulse"), manualPulse);
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const bool externalEventActive = ExternalEventBridgeArmed() && now < activeExternalEventUntil;
+	telemetry.insert(QStringLiteral("externalEventActive"), externalEventActive);
+	telemetry.insert(QStringLiteral("externalEventType"), activeExternalEventType);
+	telemetry.insert(QStringLiteral("externalEventName"), activeExternalEventName);
+	telemetry.insert(QStringLiteral("externalEventCircuit"), activeExternalEventCircuit);
+	telemetry.insert(QStringLiteral("externalEventAccent"), activeExternalEventAccent);
+	telemetry.insert(QStringLiteral("externalEventEffect"), activeExternalEventEffect);
+	telemetry.insert(QStringLiteral("externalEventOrigin"), activeExternalEventOrigin);
+	telemetry.insert(QStringLiteral("externalEventStrength"), activeExternalEventStrength);
+	telemetry.insert(QStringLiteral("externalEventSequence"), static_cast<qint64>(externalEventSequence));
+	telemetry.insert(QStringLiteral("externalEventEndsAt"), activeExternalEventUntil);
 	telemetry.insert(QStringLiteral("sourceNetworkArmed"), SourceNetworkArmed());
 	telemetry.insert(QStringLiteral("sourceNetworkIntensity"), SourceNetworkIntensity());
 	telemetry.insert(QStringLiteral("sourceNetworkActiveSceneOnly"), SourceNetworkActiveSceneOnly());

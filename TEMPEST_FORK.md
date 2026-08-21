@@ -232,6 +232,11 @@ Send an OBS WebSocket `CallVendorRequest` with one of these vendor request types
 - `SetOverlayState` — `{ "mode": "starting|live|brb|ending", "transmission": "...", "status": "...", "messages": "line one\nline two", "startCountdown": false }`
 - `RunSequence` — `{ "sequence": "starting|live|brb|ending" }`
 - `ControlSequence` — `{ "action": "hold|resume|toggleHold|next|restart|stop" }`
+- `TriggerSignal` — `{ "strength": 0.05..1.5 }`
+- `TriggerReactionEvent` — typed Warudo/Twitch event with optional strength, duration, circuit, accent, effect, origin, dedupe ID, and cooldown
+- `ClearReactionEvent` — immediately clears the active external reaction event
+
+Warudo setup and request examples are documented in [TEMPEST_WARUDO_BRIDGE.md](TEMPEST_WARUDO_BRIDGE.md).
 
 For example, the request data passed to `CallVendorRequest` is:
 

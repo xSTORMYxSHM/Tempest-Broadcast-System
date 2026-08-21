@@ -135,6 +135,8 @@ private:
 	static void WebSocketRunSequence(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketControlSequence(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketTriggerSignal(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketTriggerReactionEvent(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketClearReactionEvent(obs_data_t *request, obs_data_t *response, void *data);
 
 	void BuildInterface();
 	QVector<SceneInfo> EnumerateScenes() const;
@@ -294,6 +296,9 @@ private:
 	qint64 reactionTestUntil = 0;
 	qint64 reactionNetworkTestUntil = 0;
 	QString reactionNetworkTestCircuit;
+	qint64 reactionExternalEventUntil = 0;
+	float reactionExternalEventStrength = 0.0f;
+	QString reactionExternalEventCircuit;
 	bool reactionNetworkArmed = true;
 	bool reactionNetworkActiveSceneOnly = true;
 	double reactionNetworkIntensity = 1.0;
