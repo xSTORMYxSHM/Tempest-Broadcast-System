@@ -1,6 +1,8 @@
 # Tempest Warudo reaction bridge
 
-Tempest Broadcast System accepts Warudo and Twitch interaction events through the Mainframe Signal Reactor. The bridge reuses OBS WebSocket and the existing OBS hotkey system, so it does not require another background middleware service.
+Tempest Mainframe Studio is the primary owner of Twitch and Sound Alerts integrations. Studio normalizes the event once, then routes coordinated performance commands to Warudo and reaction commands to Tempest Broadcast through its authenticated localhost Bridge. Broadcast does not independently ingest viewer-facing Twitch events.
+
+The OBS WebSocket and hotkey paths below remain available as low-level operator and compatibility fallbacks. They should not be used as a second Twitch ingestion path when Studio is active.
 
 ## Existing `obs-events` plugin path
 
@@ -36,7 +38,7 @@ Clients that support OBS WebSocket 5 vendor calls can use `CallVendorRequest` wi
 }
 ```
 
-Supported circuits are `all`, `core`, `frame`, `chat`, `plates`, and `alerts`. Supported effects are `pulse`, `glow`, `glitch`, `spectrum`, and `surge`. Duration is limited to 250–30000 ms and cooldown to 0–10000 ms.
+Supported circuits are `all`, `core`, `frame`, `chat`, `plates`, and `alerts`. Supported effects are `pulse`, `glow`, `glitch`, `spectrum`, and `surge`. Duration is limited to 250–300000 ms so Studio's full Warudo performance cues can complete; cooldown is limited to 0–10000 ms.
 
 Use `ClearReactionEvent` to end the current event immediately:
 

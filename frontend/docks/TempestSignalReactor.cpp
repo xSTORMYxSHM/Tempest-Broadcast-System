@@ -901,7 +901,7 @@ bool TempestSignalReactor::TriggerExternalEvent(const QString &type, const QStri
 	activeExternalEventOrigin =
 		(origin.trimmed().isEmpty() ? QStringLiteral("external") : origin.trimmed()).left(48);
 	activeExternalEventStrength = std::clamp(strength > 0.0f ? strength : defaultStrength, 0.05f, 1.5f);
-	const int boundedDuration = std::clamp(durationMs > 0 ? durationMs : defaultDuration, 250, 30000);
+	const int boundedDuration = std::clamp(durationMs > 0 ? durationMs : defaultDuration, 250, 300000);
 	activeExternalEventUntil = now + boundedDuration;
 	const quint64 sequence = ++externalEventSequence;
 	TriggerPulse(activeExternalEventStrength, activeExternalEventOrigin);

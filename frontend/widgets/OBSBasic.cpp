@@ -26,6 +26,7 @@
 #include "plugin-manager/PluginManager.hpp"
 #include <docks/TempestControlDeck.hpp>
 #include <docks/TempestSignalReactor.hpp>
+#include <docks/TempestStudioBridge.hpp>
 #include <docks/TempestCommandMatrix.hpp>
 #include <docks/TempestMediaBay.hpp>
 #include <docks/TempestSequenceDirector.hpp>
@@ -382,6 +383,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	tempestSignalReactor = new TempestSignalReactor(this, this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestSignalReactor);
 	tabifyDockWidget(tempestControlDeck, tempestSignalReactor);
+	tempestStudioBridge = new TempestStudioBridge(this, tempestSignalReactor, this);
+	addDockWidget(Qt::RightDockWidgetArea, tempestStudioBridge);
+	tabifyDockWidget(tempestSignalReactor, tempestStudioBridge);
 	tempestCommandMatrix = new TempestCommandMatrix(this, tempestControlDeck, this);
 	tempestCommandMatrix->SetSignalReactor(tempestSignalReactor);
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
@@ -575,6 +579,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(statsDock);
 	SETUP_DOCK(tempestControlDeck);
 	SETUP_DOCK(tempestSignalReactor);
+	SETUP_DOCK(tempestStudioBridge);
 	SETUP_DOCK(tempestCommandMatrix);
 	SETUP_DOCK(tempestMediaBay);
 	SETUP_DOCK(tempestSequenceDirector);
@@ -2180,7 +2185,7 @@ void OBSBasic::UpdateTitleBar()
 	const char *profile = config_get_string(App()->GetUserConfig(), "Basic", "Profile");
 	const char *sceneCollection = config_get_string(App()->GetUserConfig(), "Basic", "SceneCollection");
 
-	name << "Tempest Broadcast System " << App()->GetVersionString(false);
+	name << "Tempest Broadcast System " << TEMPEST_PRODUCT_VERSION << " // OBS " << App()->GetVersionString(false);
 	if (safe_mode)
 		name << " (" << Str("TitleBar.SafeMode") << ")";
 	if (App()->IsPortableMode())

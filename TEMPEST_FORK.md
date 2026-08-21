@@ -2,6 +2,8 @@
 
 Tempest Broadcast System is a private Windows broadcast workstation for the Tempest Mainframe. It is built from OBS Studio and retains the upstream OBS license, authorship, and plugin compatibility.
 
+Current Tempest product version: **0.15.0**. The separate OBS engine version remains visible in the title bar so upstream compatibility can still be diagnosed accurately.
+
 ## Identity and isolation
 
 - Executable: `tempest-broadcast-system.exe`
@@ -13,6 +15,21 @@ Tempest Broadcast System is a private Windows broadcast workstation for the Temp
 - Upstream automatic updates and the What's New feed are disabled.
 
 The fork can run beside a normal OBS Studio installation without sharing profiles, scene collections, logs, crash reports, or plugin-manager settings.
+
+## Tempest Mainframe Studio Bridge
+
+The native **Tempest Studio Bridge** dock is Broadcast's authenticated adapter to Tempest Mainframe Studio. It discovers Studio's local token file, connects to `ws://127.0.0.1:4765/v1/socket`, reconnects automatically, advertises its capabilities, publishes OBS output health, and accepts these Studio workflow commands:
+
+- `broadcast.reaction.trigger`
+- `broadcast.reaction.clear`
+- `broadcast.audio.play`
+- `broadcast.status`
+
+Studio owns viewer-facing Twitch OAuth, EventSub, chat, rewards, cheers, subscriptions, Sound Alerts normalization, deduplication, cooldowns, and cross-program workflow routing. Broadcast continues to own OBS/Twitch stream-service authentication, Stream Information, streaming credentials, scenes, sources, and output state.
+
+Reaction commands are idempotent by workflow run, action, and phase. Broadcast installs a local lease timer for every active reaction and restores the reactor state even if Studio disconnects before sending its release command. A missing named audio source is reported as a degraded action rather than crashing the broadcast. Video, Spout, NDI, and continuous audio frames remain outside the JSON Bridge.
+
+The dock participates in application-wide UI scaling and is available from the standard Docks menu. Its token field stores only the path to Studio's token file; the token itself is loaded for the active connection and is not copied into Broadcast's profile configuration.
 
 ## Local source workflow
 

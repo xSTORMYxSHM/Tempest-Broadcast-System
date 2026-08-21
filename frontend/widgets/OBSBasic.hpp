@@ -59,6 +59,7 @@ class OBSMissingFiles;
 class OBSProjector;
 class TempestControlDeck;
 class TempestSignalReactor;
+class TempestStudioBridge;
 class TempestCommandMatrix;
 class TempestMediaBay;
 class TempestSequenceDirector;
@@ -456,6 +457,7 @@ private:
 	QPointer<OBSDock> mixerDock;
 	QPointer<TempestControlDeck> tempestControlDeck;
 	QPointer<TempestSignalReactor> tempestSignalReactor;
+	QPointer<TempestStudioBridge> tempestStudioBridge;
 	QPointer<TempestCommandMatrix> tempestCommandMatrix;
 	QPointer<TempestMediaBay> tempestMediaBay;
 	QPointer<TempestSequenceDirector> tempestSequenceDirector;

@@ -13,6 +13,10 @@ endif()
 
 find_package(FFmpeg REQUIRED COMPONENTS avcodec avutil avformat)
 find_package(CURL REQUIRED)
+find_package(Asio 1.12.1 REQUIRED)
+find_package(Websocketpp 0.8 REQUIRED)
+
+set(TEMPEST_PRODUCT_VERSION "0.15.0" CACHE STRING "Tempest Broadcast product version")
 
 if(NOT TARGET OBS::json11)
   add_subdirectory("${CMAKE_SOURCE_DIR}/deps/json11" json11)
@@ -40,6 +44,14 @@ target_link_libraries(
     OBS::frontend-api
     OBS::json11
     OBS::bpm
+    Asio::Asio
+    Websocketpp::Websocketpp
+)
+
+target_compile_definitions(
+  obs-studio
+  PRIVATE ASIO_STANDALONE TEMPEST_PRODUCT_VERSION="${TEMPEST_PRODUCT_VERSION}"
+          $<$<PLATFORM_ID:Windows>:_WEBSOCKETPP_CPP11_STL_> $<$<PLATFORM_ID:Windows>:_WIN32_WINNT=0x0603>
 )
 
 if(TARGET OBS::websocket-api)
