@@ -2,7 +2,7 @@
 
 Tempest Broadcast System is an independent Windows live-production workstation built from OBS Studio. It retains OBS scene, source, encoder, recording, streaming, and plugin compatibility while adding a Tempest-focused command workspace, reactive overlays, asset management, automation, and optional Tempest Studio integration.
 
-Version **0.20.0** is being prepared as the first public preview and currently inherits the OBS Studio **32.1.2** engine. The supported public target is 64-bit Windows 10 or Windows 11.
+Version **0.20.0** is the first public preview and inherits the OBS Studio **32.1.2** engine. The supported public target is 64-bit Windows 10 or Windows 11.
 
 ## Highlights
 

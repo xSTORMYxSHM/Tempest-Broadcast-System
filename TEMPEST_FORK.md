@@ -41,7 +41,7 @@ The dock participates in application-wide UI scaling and is available from the s
 
 - Development branch: `main`
 - Official OBS remote: `upstream`
-- No publishing remote is currently configured; public binaries must ship beside a complete source archive from the exact release commit.
+- The public repository is `https://github.com/xSTORMYxSHM/Tempest-Broadcast-System`; public binaries ship beside a complete source archive from the exact release commit.
 
 The public release requirements, clean-build process, privacy boundary, and known preview limitations are documented in `PUBLIC_RELEASE.md`.
 
