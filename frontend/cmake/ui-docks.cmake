@@ -1,0 +1,22 @@
+target_sources(
+  obs-studio
+  PRIVATE
+    docks/OBSDock.cpp
+    docks/OBSDock.hpp
+    docks/TempestControlDeck.cpp
+    docks/TempestControlDeck.hpp
+    docks/TempestSignalReactor.cpp
+    docks/TempestSignalReactor.hpp
+    docks/TempestStudioBridge.cpp
+    docks/TempestStudioBridge.hpp
+    docks/TempestCommandMatrix.cpp
+    docks/TempestCommandMatrix.hpp
+    docks/TempestMediaBay.cpp
+    docks/TempestMediaBay.hpp
+    docks/TempestSequenceDirector.cpp
+    docks/TempestSequenceDirector.hpp
+    docks/TempestAssetVault.cpp
+    docks/TempestAssetVault.hpp
+    docks/TempestHUDComposer.cpp
+    docks/TempestHUDComposer.hpp
+)

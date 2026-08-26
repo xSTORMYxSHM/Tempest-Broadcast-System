@@ -1,0 +1,23 @@
+Tempest Broadcast System 0.20.0
+Copyright (C) Lain Bailey
+
+Tempest Broadcast System is a modified distribution of OBS Studio.
+OBS Studio is Copyright (C) its contributors and is available from:
+https://github.com/obsproject/obs-studio
+
+The program is free software distributed under the GNU General Public
+License, version 2 or (at your option) any later version. The complete
+license is included in COPYING. Upstream and third-party authorship is
+preserved in AUTHORS and in the license files accompanying the source.
+
+This project is independent and is not sponsored, endorsed, or supported
+by the OBS Project. OBS and the OBS logo are trademarks of their respective
+owners. Tempest Mainframe names and artwork identify this distribution;
+the GPL does not grant permission to imply endorsement by its publisher.
+
+Every public binary release must be accompanied by the complete
+corresponding source code for that exact build, including build scripts and
+the pinned source of bundled submodules. The official release process places
+that source archive beside the Windows binary archive.
+
+This software is provided without warranty. See COPYING for details.

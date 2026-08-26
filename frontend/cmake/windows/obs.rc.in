@@ -1,0 +1,26 @@
+IDI_ICON1 ICON DISCARDABLE "cmake/windows/tempest-broadcast-system.ico"
+
+1 VERSIONINFO
+FILEVERSION ${TEMPEST_VERSION_MAJOR},${TEMPEST_VERSION_MINOR},${TEMPEST_VERSION_PATCH},0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Tempest Mainframe"
+      VALUE "FileDescription", "Tempest Broadcast System"
+      VALUE "FileVersion", "${TEMPEST_PRODUCT_VERSION}"
+      VALUE "InternalName", "tempest-broadcast-system"
+      VALUE "OriginalFilename", "tempest-broadcast-system.exe"
+      VALUE "ProductName", "Tempest Broadcast System"
+      VALUE "ProductVersion", "${TEMPEST_PRODUCT_VERSION}"
+      VALUE "Comments", "Open-source Tempest Broadcast live production workstation, built on OBS Studio"
+      VALUE "LegalCopyright", "${OBS_LEGAL_COPYRIGHT}"
+    END
+  END
+
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 0x04B0
+  END
+END
