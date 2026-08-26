@@ -207,7 +207,7 @@ try {
 
     Push-Location $temporaryRoot
     try {
-        Invoke-Checked $cmake -E tar cf $sourceDestination --format=zip $sourceName
+        Invoke-Checked -FilePath $cmake -Arguments @('-E', 'tar', 'cf', $sourceDestination, '--format=zip', $sourceName)
     } finally {
         Pop-Location
     }
