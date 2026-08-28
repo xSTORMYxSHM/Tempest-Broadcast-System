@@ -53,6 +53,7 @@ class OBSBasicAdvAudio;
 class OBSBasicFilters;
 class OBSBasicInteraction;
 class OBSBasicProperties;
+class OBSBasicSourceSelect;
 class OBSBasicTransform;
 class OBSLogViewer;
 class OBSMissingFiles;
@@ -79,6 +80,7 @@ namespace OBS {
 class SceneCollection;
 struct Rect;
 enum class LogFileType;
+enum class ItemPasteType { Invalid, Reference, Duplicate, Both };
 } // namespace OBS
 
 #define SIMPLE_ENCODER_X264 "x264"
@@ -171,15 +173,17 @@ template<typename T> static void SetOBSRef(QListWidgetItem *item, T &&val)
 static inline void UpdateProcessPriority()
 {
 	const char *priority = config_get_string(App()->GetAppConfig(), "General", "ProcessPriority");
-	if (priority && strcmp(priority, "Normal") != 0)
+	if (priority && strcmp(priority, "Normal") != 0) {
 		SetProcessPriority(priority);
+	}
 }
 
 static inline void ClearProcessPriority()
 {
 	const char *priority = config_get_string(App()->GetAppConfig(), "General", "ProcessPriority");
-	if (priority && strcmp(priority, "Normal") != 0)
+	if (priority && strcmp(priority, "Normal") != 0) {
 		SetProcessPriority("Normal");
+	}
 }
 #else
 #define UpdateProcessPriority() \
@@ -295,7 +299,7 @@ private:
 
 public slots:
 	void close();
-	void UpdatePatronJson(const QString &text, const QString &error);
+	void UpdatePatronJson(const std::string &text, const std::string &error);
 	void UpdateEditMenu();
 	void applicationShutdown() noexcept;
 	void toggleMixerLayout();
@@ -417,6 +421,10 @@ public:
 	void CreateFilterPasteUndoRedoAction(const QString &text, obs_source_t *source, obs_data_array_t *undo_array,
 					     obs_data_array_t *redo_array);
 
+	void copySceneItem(OBSSceneItem item);
+	OBS::ItemPasteType getItemPasteType();
+	void pasteSceneItem(OBSScene scene, bool duplicate);
+
 	/* -------------------------------------
 	 * MARK: - OBSBasic_ContextToolbar
 	 * -------------------------------------
@@ -526,6 +534,9 @@ private:
 	void dragMoveEvent(QDragMoveEvent *event) override;
 	void dropEvent(QDropEvent *event) override;
 
+signals:
+	void sourceUuidDropped(QString uuid);
+
 	/* -------------------------------------
 	 * MARK: - OBSBasic_Hotkeys
 	 * -------------------------------------
@@ -609,6 +620,7 @@ public:
 	QIcon GetSourceIcon(const char *id) const;
 	QIcon GetGroupIcon() const;
 	QIcon GetSceneIcon() const;
+	QIcon GetCustomIcon(const char *id) const;
 
 	/* -------------------------------------
 	 * MARK: - OBSBasic_MainControls
@@ -621,6 +633,7 @@ private:
 	QPointer<OBSBasicAdvAudio> advAudioWindow;
 	QPointer<OBSBasicFilters> filters;
 	QPointer<OBSAbout> about;
+	QPointer<OBSBasicSourceSelect> addWindow;
 	QPointer<OBSLogViewer> logView;
 	QPointer<QWidget> stats;
 	QPointer<QWidget> remux;
@@ -694,7 +707,7 @@ private slots:
 
 	void on_resetUI_triggered();
 
-	void logUploadFinished(const QString &text, const QString &error, OBS::LogFileType uploadType);
+	void logUploadFinished(const std::string &text, const std::string &error, OBS::LogFileType uploadType);
 
 	void updateCheckFinished();
 
@@ -813,8 +826,9 @@ public:
 	inline void EnableOutputs(bool enable)
 	{
 		if (enable) {
-			if (--disableOutputsRef < 0)
+			if (--disableOutputsRef < 0) {
 				disableOutputsRef = 0;
+			}
 		} else {
 			disableOutputsRef++;
 		}
@@ -1224,11 +1238,8 @@ private:
 	static void SourceRemoved(void *data, calldata_t *params);
 	static void SourceRenamed(void *data, calldata_t *params);
 
-	void AddSource(const char *id);
-	QMenu *CreateAddSourcePopupMenu();
-	void AddSourcePopupMenu(const QPoint &pos);
-
 private slots:
+	void AddSourceDialog();
 	void RenameSources(OBSSource source, QString newName, QString prevName);
 
 	void ReorderSources(OBSScene scene);
@@ -1660,7 +1671,7 @@ private:
 	void CheckForUpdates(bool manualUpdate);
 
 	void MacBranchesFetched(const QString &branch, bool manualUpdate);
-	void ReceivedIntroJson(const QString &text);
+	void ReceivedIntroJson(const std::string &text);
 	void ShowWhatsNew(const QString &url);
 
 	/* -------------------------------------
@@ -1718,8 +1729,8 @@ private:
 
 	void YoutubeStreamCheck(const std::string &key);
 	void ShowYouTubeAutoStartWarning();
-	void YouTubeActionDialogOk(const QString &broadcast_id, const QString &stream_id, const QString &key,
-				   bool autostart, bool autostop, bool start_now);
+	void YouTubeActionDialogOk(const std::string &broadcastId, const std::string &streamId, const std::string &key,
+				   bool autostart, bool autostop, bool startNow);
 #endif
 
 	void BroadcastButtonClicked();

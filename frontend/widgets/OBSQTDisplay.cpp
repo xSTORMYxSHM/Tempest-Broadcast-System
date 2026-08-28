@@ -139,14 +139,17 @@ void OBSQTDisplay::UpdateDisplayBackgroundColor()
 
 void OBSQTDisplay::CreateDisplay()
 {
-	if (display)
+	if (display) {
 		return;
+	}
 
-	if (destroying)
+	if (destroying) {
 		return;
+	}
 
-	if (!windowHandle()->isExposed())
+	if (!windowHandle()->isExposed()) {
 		return;
+	}
 
 	QSize size = GetPixelSize(this);
 
@@ -156,8 +159,9 @@ void OBSQTDisplay::CreateDisplay()
 	info.format = GS_BGRA;
 	info.zsformat = GS_ZS_NONE;
 
-	if (!QTToGSWindow(windowHandle(), info.window))
+	if (!QTToGSWindow(windowHandle(), info.window)) {
 		return;
+	}
 
 	display = obs_display_create(&info, backgroundColor);
 
@@ -214,14 +218,17 @@ QPaintEngine *OBSQTDisplay::paintEngine() const
 
 void OBSQTDisplay::OnMove()
 {
-	if (display && colorSpaceRefreshTimer)
+	if (display && colorSpaceRefreshTimer) {
 		colorSpaceRefreshTimer->start();
+	}
 }
 
 void OBSQTDisplay::OnDisplayChange()
 {
-	if (colorSpaceRefreshTimer)
+	if (colorSpaceRefreshTimer) {
 		colorSpaceRefreshTimer->stop();
-	if (display)
+	}
+	if (display) {
 		obs_display_update_color_space(display);
+	}
 }

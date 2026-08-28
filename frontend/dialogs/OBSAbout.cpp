@@ -21,10 +21,11 @@ OBSAbout::OBSAbout(QWidget *parent) : QDialog(parent), ui(new Ui::OBSAbout)
 
 	QString bitness;
 
-	if (sizeof(void *) == 4)
+	if (sizeof(void *) == 4) {
 		bitness = " (32 bit)";
-	else if (sizeof(void *) == 8)
+	} else if (sizeof(void *) == 8) {
 		bitness = " (64 bit)";
+	}
 
 	QString ver = obs_get_version_string();
 
@@ -151,11 +152,13 @@ void OBSAbout::ShowOBSProject()
 			text += "\">";
 		}
 		text += QT_UTF8(name.c_str()).toHtmlEscaped();
-		if (!link.empty())
+		if (!link.empty()) {
 			text += "</a>";
+		}
 
-		if (first)
+		if (first) {
 			first = false;
+		}
 	}
 
 	ui->textBrowser->setHtml(text);

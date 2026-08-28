@@ -55,12 +55,13 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_) : tre
 	if (tree->iconsVisible) {
 		QIcon icon;
 
-		if (strcmp(id, "scene") == 0)
+		if (strcmp(id, "scene") == 0) {
 			icon = main->GetSceneIcon();
-		else if (strcmp(id, "group") == 0)
+		} else if (strcmp(id, "group") == 0) {
 			icon = main->GetGroupIcon();
-		else
+		} else {
 			icon = main->GetSourceIcon(id);
+		}
 
 		QPixmap pixmap = icon.pixmap(QSize(16, 16));
 
@@ -145,8 +146,9 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_) : tre
 			OBSSourceAutoRelease s = obs_get_source_by_uuid(uuid.c_str());
 			obs_scene_t *sc = obs_group_or_scene_from_source(s);
 			obs_sceneitem_t *si = obs_scene_find_sceneitem_by_id(sc, id);
-			if (si)
+			if (si) {
 				obs_sceneitem_set_visible(si, val);
+			}
 		};
 
 		QString str = QTStr(val ? "Undo.ShowSceneItem" : "Undo.HideSceneItem");
@@ -192,8 +194,9 @@ void SourceTreeItem::Clear()
 
 void SourceTreeItem::ReconnectSignals()
 {
-	if (!sceneitem)
+	if (!sceneitem) {
 		return;
+	}
 
 	DisconnectSignals();
 
@@ -209,8 +212,9 @@ void SourceTreeItem::ReconnectSignals()
 						  Q_ARG(OBSScene, curScene));
 			curItem = nullptr;
 		}
-		if (!curItem)
+		if (!curItem) {
 			QMetaObject::invokeMethod(this_, "Clear");
+		}
 	};
 
 	auto itemVisible = [](void *data, calldata_t *cd) {
@@ -218,8 +222,9 @@ void SourceTreeItem::ReconnectSignals()
 		obs_sceneitem_t *curItem = (obs_sceneitem_t *)calldata_ptr(cd, "item");
 		bool visible = calldata_bool(cd, "visible");
 
-		if (curItem == this_->sceneitem)
+		if (curItem == this_->sceneitem) {
 			QMetaObject::invokeMethod(this_, "VisibilityChanged", Q_ARG(bool, visible));
+		}
 	};
 
 	auto itemLocked = [](void *data, calldata_t *cd) {
@@ -227,24 +232,27 @@ void SourceTreeItem::ReconnectSignals()
 		obs_sceneitem_t *curItem = (obs_sceneitem_t *)calldata_ptr(cd, "item");
 		bool locked = calldata_bool(cd, "locked");
 
-		if (curItem == this_->sceneitem)
+		if (curItem == this_->sceneitem) {
 			QMetaObject::invokeMethod(this_, "LockedChanged", Q_ARG(bool, locked));
+		}
 	};
 
 	auto itemSelect = [](void *data, calldata_t *cd) {
 		SourceTreeItem *this_ = static_cast<SourceTreeItem *>(data);
 		obs_sceneitem_t *curItem = (obs_sceneitem_t *)calldata_ptr(cd, "item");
 
-		if (curItem == this_->sceneitem)
+		if (curItem == this_->sceneitem) {
 			QMetaObject::invokeMethod(this_, "Select");
+		}
 	};
 
 	auto itemDeselect = [](void *data, calldata_t *cd) {
 		SourceTreeItem *this_ = static_cast<SourceTreeItem *>(data);
 		obs_sceneitem_t *curItem = (obs_sceneitem_t *)calldata_ptr(cd, "item");
 
-		if (curItem == this_->sceneitem)
+		if (curItem == this_->sceneitem) {
 			QMetaObject::invokeMethod(this_, "Deselect");
+		}
 	};
 
 	auto reorderGroup = [](void *data, calldata_t *) {
@@ -379,7 +387,7 @@ void SourceTreeItem::ExitEditModeInternal(bool save)
 	OBSBasic *main = OBSBasic::Get();
 	OBSScene scene = main->GetCurrentScene();
 
-	newName = QT_TO_UTF8(editor->text());
+	newName = editor->text().toStdString();
 
 	setFocusProxy(nullptr);
 	int index = boxLayout->indexOf(editor);
@@ -393,8 +401,9 @@ void SourceTreeItem::ExitEditModeInternal(bool save)
 	/* ----------------------------------------- */
 	/* check for empty string                    */
 
-	if (!save)
+	if (!save) {
 		return;
+	}
 
 	if (newName.empty()) {
 		OBSMessageBox::information(main, QTStr("NoNameEntered.Title"), QTStr("NoNameEntered.Text"));
@@ -405,8 +414,9 @@ void SourceTreeItem::ExitEditModeInternal(bool save)
 	/* Check for same name                       */
 
 	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
-	if (newName == obs_source_get_name(source))
+	if (newName == obs_source_get_name(source)) {
 		return;
+	}
 
 	/* ----------------------------------------- */
 	/* check for existing source                 */
@@ -451,8 +461,9 @@ void SourceTreeItem::ExitEditModeInternal(bool save)
 
 bool SourceTreeItem::eventFilter(QObject *object, QEvent *event)
 {
-	if (editor != object)
+	if (editor != object) {
 		return false;
+	}
 
 	if (LineEditCanceled(event)) {
 		QMetaObject::invokeMethod(this, "ExitEditMode", Qt::QueuedConnection, Q_ARG(bool, false));
@@ -563,22 +574,19 @@ void SourceTreeItem::ExpandClicked(bool checked)
 
 	obs_data_set_bool(data, "collapsed", checked);
 
-	if (!checked)
+	if (!checked) {
 		tree->GetStm()->ExpandGroup(sceneitem);
-	else
+	} else {
 		tree->GetStm()->CollapseGroup(sceneitem);
+	}
 }
 
 void SourceTreeItem::Select()
 {
 	tree->SelectItem(sceneitem, true);
-	OBSBasic::Get()->UpdateContextBarDeferred();
-	OBSBasic::Get()->UpdateEditMenu();
 }
 
 void SourceTreeItem::Deselect()
 {
 	tree->SelectItem(sceneitem, false);
-	OBSBasic::Get()->UpdateContextBarDeferred();
-	OBSBasic::Get()->UpdateEditMenu();
 }
