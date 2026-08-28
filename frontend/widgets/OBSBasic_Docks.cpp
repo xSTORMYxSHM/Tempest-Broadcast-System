@@ -179,7 +179,7 @@ bool IsTempestScalableWindow(QWidget *window, const OBSBasic *main)
 	if (auto *dock = qobject_cast<OBSDock *>(window); dock && dock->HasContentScaling())
 		return false;
 	const Qt::WindowType type = window->windowType();
-	if (type == Qt::Popup || type == Qt::ToolTip || type == Qt::SplashScreen || type == Qt::Desktop)
+	if (type == Qt::Popup || type == Qt::ToolTip || type == Qt::SplashScreen)
 		return false;
 	return qobject_cast<QDialog *>(window) || qobject_cast<QMainWindow *>(window) ||
 	       qobject_cast<QDockWidget *>(window);
