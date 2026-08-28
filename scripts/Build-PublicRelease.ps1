@@ -275,7 +275,14 @@ try {
 
     Push-Location $temporaryRoot
     try {
-        Invoke-Checked $cmake -E tar cf $sourceDestination --format=zip $sourceName
+        Invoke-Checked -FilePath $cmake -Arguments @(
+            '-E',
+            'tar',
+            'cf',
+            $sourceDestination,
+            '--format=zip',
+            $sourceName
+        )
     } finally {
         Pop-Location
     }
@@ -292,7 +299,7 @@ Copy-Item -LiteralPath $releaseNotesPath -Destination $releaseDirectory
 $manifest = [ordered]@{
     product = 'Tempest Broadcast System'
     version = $version
-    obs_engine_version = (& $git -C $projectRoot describe --tags --always).Trim()
+    obs_engine_version = (& $git -C $projectRoot describe --tags --match '[0-9]*' --always).Trim()
     source_commit = $commit
     source_tag = $requiredTag
     platform = "windows-${Target}"
