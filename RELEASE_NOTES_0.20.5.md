@@ -1,6 +1,6 @@
-# Tempest Broadcast System 0.16.0
+# Tempest Broadcast System 0.20.5
 
-Tempest Broadcast System 0.16.0 is a Windows x64 public-preview release built on the OBS Studio engine. It expands the custom production workspace, makes the reactive overlay system more portable, and adds controls that reduce local interface overhead during demanding streams.
+Tempest Broadcast System 0.20.5 is a Windows x64 public-preview release built on the OBS Studio engine. It expands the custom production workspace, makes the reactive overlay system more portable, and adds controls that reduce local interface overhead during demanding streams.
 
 ## Highlights
 
@@ -34,12 +34,12 @@ For demanding games, use Canvas Off, render optional fractals at 30 FPS or a low
 
 Publish these files together:
 
-- `tempest-broadcast-system-0.16.0-windows-x64.zip`
-- `tempest-broadcast-system-0.16.0-source.zip`
+- `tempest-broadcast-system-0.20.5-windows-x64.zip`
+- `tempest-broadcast-system-0.20.5-source.zip`
 - `SHA256SUMS.txt`
 - `release-manifest.json`
 - `NOTICE.txt`
 - `PUBLIC_RELEASE.md`
 - this release note
 
-The binary and source archives must come from the same clean commit tagged `tempest-v0.16.0`.
+The binary and source archives must come from the same clean commit tagged `tempest-v0.20.5`.

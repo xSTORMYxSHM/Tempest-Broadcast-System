@@ -1,4 +1,4 @@
-Tempest Broadcast System 0.16.0
+Tempest Broadcast System 0.20.5
 Copyright (C) Lain Bailey
 
 Tempest Broadcast System is a modified distribution of OBS Studio.
