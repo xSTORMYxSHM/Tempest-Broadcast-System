@@ -33,6 +33,7 @@ For demanding games, use Canvas Off, render optional fractals at 30 FPS or a low
 - Twitch OAuth and the authenticated Stream Information dock require Tempest-owned Twitch application credentials at build time. Manual stream-key operation remains available without them.
 - Tempest Studio is optional, but Studio-routed Twitch interactions and Sound Alerts require a compatible Studio installation.
 - AJA and DeckLink modules can log harmless initialization failures on systems without their hardware or vendor runtimes.
+- The unsigned Windows public package excludes the optional Apple CoreAudio AAC plugin because Windows Application Control can block its unsigned module at startup. FFmpeg AAC remains available.
 - Third-party OBS plugins are not bundled unless explicitly named in the package and must be compatible with OBS Studio 32.2.1.
 - Preserve GPU and VRAM headroom when combining demanding games, live fractals, browser overlays, HDR capture, and multiple Twitch Enhanced Broadcasting renditions.
 

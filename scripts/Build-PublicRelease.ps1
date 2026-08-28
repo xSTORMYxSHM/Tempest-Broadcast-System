@@ -212,7 +212,7 @@ if (-not $SkipBuild) {
         throw 'Close Tempest Broadcast System before making a public build.'
     }
 
-    Invoke-Checked $cmake -S $projectRoot -B $buildDirectory "-DTEMPEST_PRODUCT_VERSION=${version}" -DENABLE_WHATSNEW=OFF -DENABLE_BROWSER=ON
+    Invoke-Checked $cmake -S $projectRoot -B $buildDirectory "-DTEMPEST_PRODUCT_VERSION=${version}" -DENABLE_WHATSNEW=OFF -DENABLE_BROWSER=ON -DENABLE_COREAUDIO_ENCODER=OFF
     # The x64 solution also builds and stages x86 capture helpers. Unbounded
     # MSBuild parallelism can make both helper paths copy the same file at once,
     # especially from a OneDrive-backed checkout, so favor release reliability.
