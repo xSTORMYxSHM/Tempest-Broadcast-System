@@ -212,7 +212,7 @@ if (-not $SkipBuild) {
         throw 'Close Tempest Broadcast System before making a public build.'
     }
 
-    Invoke-Checked $cmake -S $projectRoot -B $buildDirectory "-DTEMPEST_PRODUCT_VERSION=${version}" -DENABLE_WHATSNEW=OFF
+    Invoke-Checked $cmake -S $projectRoot -B $buildDirectory "-DTEMPEST_PRODUCT_VERSION=${version}" -DENABLE_WHATSNEW=OFF -DENABLE_BROWSER=ON
     # The x64 solution also builds and stages x86 capture helpers. Unbounded
     # MSBuild parallelism can make both helper paths copy the same file at once,
     # especially from a OneDrive-backed checkout, so favor release reliability.
@@ -232,6 +232,11 @@ if (-not (Test-Path -LiteralPath $builtBinary)) {
 }
 New-PublicBinaryArchive -Source $builtBinary -Destination $binaryDestination -RequiredEntries @(
     'bin/64bit/tempest-broadcast-system.exe',
+    'obs-plugins/64bit/obs-browser.dll',
+    'obs-plugins/64bit/obs-browser-page.exe',
+    'obs-plugins/64bit/libcef.dll',
+    'data/obs-plugins/obs-browser/locale/en-US.ini',
+    'licenses/build-dependencies/cef/LICENSE.txt',
     'COPYING',
     'AUTHORS',
     'NOTICE.txt',
