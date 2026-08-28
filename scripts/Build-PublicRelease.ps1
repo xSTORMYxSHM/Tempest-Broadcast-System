@@ -213,7 +213,10 @@ if (-not $SkipBuild) {
     }
 
     Invoke-Checked $cmake -S $projectRoot -B $buildDirectory "-DTEMPEST_PRODUCT_VERSION=${version}" -DENABLE_WHATSNEW=OFF
-    Invoke-Checked $cmake --build $buildDirectory --config $Configuration --parallel
+    # The x64 solution also builds and stages x86 capture helpers. Unbounded
+    # MSBuild parallelism can make both helper paths copy the same file at once,
+    # especially from a OneDrive-backed checkout, so favor release reliability.
+    Invoke-Checked $cmake --build $buildDirectory --config $Configuration --parallel 1
 
     Push-Location $buildDirectory
     try {
