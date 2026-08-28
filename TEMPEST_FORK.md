@@ -63,7 +63,7 @@ The development build is written to:
 build_x64\rundir\RelWithDebInfo\bin\64bit\tempest-broadcast-system.exe
 ```
 
-Upstream OBS updates should be reviewed and merged deliberately into `tempest-main`; do not enable the OBS binary updater for this fork.
+Upstream OBS updates are handled by the guarded stable-tag workflow in [OBS_UPSTREAM_UPDATES.md](OBS_UPSTREAM_UPDATES.md). It checks, prepares, builds, validates, and applies an update through an isolated worktree; it never replaces Tempest with an official OBS binary package. Do not enable the OBS binary updater for this fork.
 
 ## Stream Overlay
 
