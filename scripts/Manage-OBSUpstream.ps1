@@ -576,6 +576,21 @@ switch ($Action) {
             '--ff-only',
             $state.integration_branch
         )
+        $null = Invoke-External -FilePath $script:Git -Arguments @(
+            '-C',
+            $script:ProjectRoot,
+            'submodule',
+            'sync',
+            '--recursive'
+        )
+        $null = Invoke-External -FilePath $script:Git -Arguments @(
+            '-C',
+            $script:ProjectRoot,
+            'submodule',
+            'update',
+            '--init',
+            '--recursive'
+        )
         $state.status = 'applied'
         $state | Add-Member -NotePropertyName applied_utc -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
         $state | Add-Member -NotePropertyName applied_commit -NotePropertyValue $integrationCommit -Force
