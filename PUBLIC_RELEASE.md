@@ -2,7 +2,7 @@
 
 Tempest Broadcast System is an independent, Tempest-themed live production workstation built from OBS Studio. It keeps the OBS scene, source, plugin, encoder, recording, and streaming engine while adding Scene Control, Stream Overlay, reactive overlay tools, an Asset Library, an Audio Reactor, and optional Tempest Studio integration.
 
-The first supported public target is 64-bit Windows 10 or Windows 11. Version 0.20.5 should be presented as a public preview until it has been tested with a fresh Windows account, common capture hardware, a real Twitch stream, and an installed-versus-portable upgrade cycle.
+The first supported public target is 64-bit Windows 10 or Windows 11. Version 0.21.0 should be presented as a public preview until it has been tested with a fresh Windows account, common capture hardware, a real Twitch stream, and an installed-versus-portable upgrade cycle.
 
 ## Install and first run
 
