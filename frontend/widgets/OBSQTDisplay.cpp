@@ -8,6 +8,7 @@
 #endif
 
 #include <QWindow>
+#include <QTimer>
 #ifdef ENABLE_WAYLAND
 #include <QApplication>
 #if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
@@ -78,6 +79,14 @@ OBSQTDisplay::OBSQTDisplay(QWidget *parent, Qt::WindowFlags flags) : QWidget(par
 	setAttribute(Qt::WA_OpaquePaintEvent);
 	setAttribute(Qt::WA_DontCreateNativeAncestors);
 	setAttribute(Qt::WA_NativeWindow);
+
+	colorSpaceRefreshTimer = new QTimer(this);
+	colorSpaceRefreshTimer->setSingleShot(true);
+	colorSpaceRefreshTimer->setInterval(160);
+	connect(colorSpaceRefreshTimer, &QTimer::timeout, this, [this]() {
+		if (display)
+			obs_display_update_color_space(display);
+	});
 
 	auto windowVisible = [this](bool visible) {
 		if (!visible) {
@@ -205,12 +214,14 @@ QPaintEngine *OBSQTDisplay::paintEngine() const
 
 void OBSQTDisplay::OnMove()
 {
-	if (display)
-		obs_display_update_color_space(display);
+	if (display && colorSpaceRefreshTimer)
+		colorSpaceRefreshTimer->start();
 }
 
 void OBSQTDisplay::OnDisplayChange()
 {
+	if (colorSpaceRefreshTimer)
+		colorSpaceRefreshTimer->stop();
 	if (display)
 		obs_display_update_color_space(display);
 }

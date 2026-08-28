@@ -30,10 +30,9 @@ OBSAbout::OBSAbout(QWidget *parent) : QDialog(parent), ui(new Ui::OBSAbout)
 
 	ui->version->setText(ver + bitness);
 
-	ui->contribute->setText(QTStr("About.Contribute"));
-
 	if (steam) {
 		delete ui->donate;
+		ui->donate = nullptr;
 	} else {
 		ui->donate->setText("&nbsp;&nbsp;<a href='https://obsproject.com/contribute'>" + QTStr("About.Donate") +
 				    "</a>");
@@ -46,49 +45,90 @@ OBSAbout::OBSAbout(QWidget *parent) : QDialog(parent), ui(new Ui::OBSAbout)
 	ui->getInvolved->setTextInteractionFlags(Qt::TextBrowserInteraction);
 	ui->getInvolved->setOpenExternalLinks(true);
 
-	ui->about->setText("<a href='#'>" + QTStr("About") + "</a>");
+	ui->about->setText("<a href='#'>" + QTStr("About.Tempest") + "</a>");
+	ui->obsProject->setText("<a href='#'>" + QTStr("About.OBSProject") + "</a>");
 	ui->authors->setText("<a href='#'>" + QTStr("About.Authors") + "</a>");
 	ui->license->setText("<a href='#'>" + QTStr("About.License") + "</a>");
 
 	ui->name->setProperty("class", "text-heading");
 	ui->version->setProperty("class", "text-large");
 	ui->about->setProperty("class", "bg-base");
+	ui->obsProject->setProperty("class", "bg-base");
 	ui->authors->setProperty("class", "bg-base");
 	ui->license->setProperty("class", "bg-base");
 	ui->info->setProperty("class", "");
 
-	connect(ui->about, &ClickableLabel::clicked, this, &OBSAbout::ShowAbout);
+	connect(ui->about, &ClickableLabel::clicked, this, &OBSAbout::ShowTempest);
+	connect(ui->obsProject, &ClickableLabel::clicked, this, &OBSAbout::ShowOBSProject);
 	connect(ui->authors, &ClickableLabel::clicked, this, &OBSAbout::ShowAuthors);
 	connect(ui->license, &ClickableLabel::clicked, this, &OBSAbout::ShowLicense);
 
-	QPointer<OBSAbout> about(this);
+	ShowTempest();
+}
+
+void OBSAbout::SetOBSResourcesVisible(bool visible)
+{
+	ui->contribute->setVisible(visible);
+	if (ui->donate)
+		ui->donate->setVisible(visible);
+	ui->getInvolved->setVisible(visible);
+}
+
+void OBSAbout::ShowTempest()
+{
+	activePage = QStringLiteral("tempest");
+	ui->info->setVisible(true);
+	ui->info->setText(QTStr("About.Info"));
+	SetOBSResourcesVisible(false);
+	ui->textBrowser->setHtml(QStringLiteral(
+		"<h2>Tempest Broadcast System</h2>"
+		"<p>A focused live-production environment that combines the OBS broadcast engine with a scalable "
+		"command interface, modular reactive overlays, asset workflows, and direct automation bridges.</p>"
+		"<h3>Integrated systems</h3>"
+		"<ul><li>Scene routing and source operations</li>"
+		"<li>Audio-, event-, and color-reactive overlay elements</li>"
+		"<li>Content profiles, message libraries, and reusable assets</li>"
+		"<li>Studio, Warudo, WebSocket, and external-control workflows</li></ul>"
+		"<p>Tempest branding and workflow features are maintained separately from the upstream OBS Project. "
+		"Upstream attribution and resources are available on the <b>OBS Project</b> tab.</p>"));
+}
+
+void OBSAbout::ShowOBSProject()
+{
+	activePage = QStringLiteral("obs");
+	ui->info->setVisible(true);
+	ui->info->setText(QTStr("About.OBSInfo"));
+	ui->contribute->setText(QTStr("About.OBSResources"));
+	SetOBSResourcesVisible(true);
 
 	OBSBasic *main = OBSBasic::Get();
 	if (main->patronJson.empty() && !main->patronJsonThread) {
 		RemoteTextThread *thread =
 			new RemoteTextThread("https://obsproject.com/patreon/about-box.json", "application/json");
 		QObject::connect(thread, &RemoteTextThread::Result, main, &OBSBasic::UpdatePatronJson);
-		QObject::connect(thread, &RemoteTextThread::Result, this, &OBSAbout::ShowAbout);
+		QObject::connect(thread, &RemoteTextThread::Result, this, [this]() {
+			if (activePage == QStringLiteral("obs"))
+				ShowOBSProject();
+		});
 		main->patronJsonThread.reset(thread);
 		thread->start();
-	} else {
-		ShowAbout();
 	}
-}
 
-void OBSAbout::ShowAbout()
-{
-	OBSBasic *main = OBSBasic::Get();
-
-	if (main->patronJson.empty())
+	QString text = QStringLiteral(
+		"<h2>OBS Studio</h2>"
+		"<p>Tempest Broadcast System is a modified distribution of the open-source OBS Studio project. "
+		"Learn more at <a href=\"https://obsproject.com\">obsproject.com</a> or review the "
+		"<a href=\"https://github.com/obsproject/obs-studio\">upstream source repository</a>.</p>");
+	if (main->patronJson.empty()) {
+		text += QStringLiteral("<p>Upstream contributor information is loading.</p>");
+		ui->textBrowser->setHtml(text);
 		return;
-
+	}
 	std::string error;
 	Json json = Json::parse(main->patronJson, error);
 	const Json::array &patrons = json.array_items();
-	QString text;
 
-	text += "<h1>Top Patreon contributors:</h1>";
+	text += "<h2>Top Patreon contributors</h2>";
 	text += "<p style=\"font-size:16px;\">";
 	bool first = true;
 	bool top = true;
@@ -123,6 +163,9 @@ void OBSAbout::ShowAbout()
 
 void OBSAbout::ShowAuthors()
 {
+	activePage = QStringLiteral("authors");
+	ui->info->setVisible(false);
+	SetOBSResourcesVisible(false);
 	std::string path;
 	QString error = QTStr("About.Error").arg("https://github.com/obsproject/obs-studio/blob/master/AUTHORS");
 
@@ -149,6 +192,9 @@ void OBSAbout::ShowAuthors()
 
 void OBSAbout::ShowLicense()
 {
+	activePage = QStringLiteral("license");
+	ui->info->setVisible(false);
+	SetOBSResourcesVisible(false);
 	std::string path;
 	QString error = QTStr("About.Error").arg("https://github.com/obsproject/obs-studio/blob/master/COPYING");
 

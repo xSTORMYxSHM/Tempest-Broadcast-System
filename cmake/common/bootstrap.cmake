@@ -44,8 +44,16 @@ endif()
 set(OBS_COMPANY_NAME "Tempest Mainframe")
 set(OBS_PRODUCT_NAME "Tempest Broadcast System")
 set(OBS_WEBSITE "https://www.obsproject.com")
-set(OBS_COMMENTS "Private Tempest Mainframe broadcast workstation, built on OBS Studio")
+set(OBS_COMMENTS "Open-source Tempest Mainframe broadcast workstation, built on OBS Studio")
 set(OBS_LEGAL_COPYRIGHT "(C) Lain Bailey")
+set(TEMPEST_PRODUCT_VERSION "0.16.0" CACHE STRING "Tempest Broadcast product version")
+
+if(NOT TEMPEST_PRODUCT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+  message(FATAL_ERROR "TEMPEST_PRODUCT_VERSION must begin with a numeric major.minor.patch version")
+endif()
+set(TEMPEST_VERSION_MAJOR "${CMAKE_MATCH_1}")
+set(TEMPEST_VERSION_MINOR "${CMAKE_MATCH_2}")
+set(TEMPEST_VERSION_PATCH "${CMAKE_MATCH_3}")
 set(OBS_CMAKE_VERSION 3.0.0)
 
 # Configure default version strings

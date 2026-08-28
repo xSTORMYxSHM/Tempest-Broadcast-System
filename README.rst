@@ -1,79 +1,64 @@
-OBS Studio <https://obsproject.com>
-===================================
+Tempest Broadcast System
+========================
 
-.. image:: https://github.com/obsproject/obs-studio/actions/workflows/push.yaml/badge.svg?branch=master
-   :alt: OBS Studio Build Status - GitHub Actions
-   :target: https://github.com/obsproject/obs-studio/actions/workflows/push.yaml?query=branch%3Amaster
+Tempest Broadcast System is an independent, open-source Windows broadcast
+workstation built from OBS Studio. It retains OBS's scene, source, plugin,
+encoder, recording, and streaming engine while adding the Tempest Broadcast
+production interface, reactive overlay design, asset management, audio-driven
+effects, automation, and an optional connection to Tempest Studio.
 
-.. image:: https://badges.crowdin.net/obs-studio/localized.svg
-   :alt: OBS Studio Translation Project Progress
-   :target: https://crowdin.com/project/obs-studio
+The current Tempest product version is **0.16.0**. The upstream OBS engine
+version remains visible separately in the application title and logs so plugin
+and encoder compatibility can be diagnosed accurately.
 
-.. image:: https://img.shields.io/discord/348973006581923840.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2
-   :alt: OBS Studio Discord Server
-   :target: https://obsproject.com/discord
+Public preview
+--------------
 
-What is OBS Studio?
--------------------
+The first supported public target is 64-bit Windows 10 or Windows 11. Public
+packages must include both the Windows binary archive and the complete source
+archive from the exact same tagged commit. Installation, network behavior,
+known limitations, privacy boundaries, checksums, and the publisher checklist
+are documented in ``PUBLIC_RELEASE.md``.
 
-OBS Studio is software designed for capturing, compositing, encoding,
-recording, and streaming video content, efficiently.
+Major Tempest surfaces
+----------------------
 
-It's distributed under the GNU General Public License v2 (or any later
-version) - see the accompanying COPYING file for more details.
+- Tempest Broadcast control bar and responsive Command/Engineering workspaces
+- Scene Control and Source Operations
+- application-wide UI scaling from 60% through 160% and persistent color palettes
+- Stream Overlay, file-backed content profiles, and modular reactive browser elements
+- Asset Library, Overlay Designer, Audio Reactor, Sequence Director, and Media Controls
+- optional authenticated localhost integration with Tempest Studio
+- independent configuration storage alongside a normal OBS Studio installation
 
-Quick Links
------------
+Source layout and development
+-----------------------------
 
-- Website: https://obsproject.com
+Fork-specific architecture, build commands, integrations, and feature details
+are maintained in ``TEMPEST_FORK.md``. Warudo and Studio event routing is
+documented in ``TEMPEST_WARUDO_BRIDGE.md``.
 
-- Help/Documentation/Guides: https://github.com/obsproject/obs-studio/wiki
+Create a clean tagged Windows release with::
 
-- Forums: https://obsproject.com/forum/
+  powershell -ExecutionPolicy Bypass -File scripts/Build-PublicRelease.ps1
 
-- Build Instructions: https://github.com/obsproject/obs-studio/wiki/Install-Instructions
+The release script refuses dirty or untagged source, packages all pinned Git
+submodules, generates SHA-256 checksums, and places artifacts on drive G when
+available or in the local ``release`` directory otherwise.
 
-- Developer/API Documentation: https://obsproject.com/docs
+OBS Studio foundation
+---------------------
 
-- Donating/backing/sponsoring: https://obsproject.com/contribute
+This project is based on `OBS Studio <https://github.com/obsproject/obs-studio>`_,
+which is designed for capturing, compositing, encoding, recording, and streaming
+video content. Tempest Broadcast System is not affiliated with or endorsed by
+the OBS Project. Upstream documentation is available at
+`obsproject.com <https://obsproject.com>`_.
 
-- Bug Tracker: https://github.com/obsproject/obs-studio/issues
+License
+-------
 
-Contributing
-------------
-
-- If you would like to help fund or sponsor the project, you can do so
-  via `Patreon <https://www.patreon.com/obsproject>`_, `OpenCollective
-  <https://opencollective.com/obsproject>`_, or `PayPal
-  <https://www.paypal.me/obsproject>`_.  See our `contribute page
-  <https://obsproject.com/contribute>`_ for more information.
-
-- If you wish to contribute code to the project, please make sure to
-  read the coding and commit guidelines:
-  https://github.com/obsproject/obs-studio/blob/master/CONTRIBUTING.md
-  
-- Code for the project follows the code style guidelines, located
-  here: https://github.com/obsproject/obs-studio/blob/master/CODESTYLE.md
-
-- Developer/API documentation can be found here:
-  https://obsproject.com/docs
-
-- If you wish to contribute translations, do not submit pull requests.
-  Instead, please use Crowdin.  For more information read this page:
-  https://obsproject.com/wiki/How-To-Contribute-Translations-For-OBS
-
-- Contributors to OBS Studio and related repositories are expected to
-  follow our Code of Conduct, which can be read here:
-  https://github.com/obsproject/obs-studio/blob/master/COC.rst
-
-- Other ways to contribute are by helping people out with support on
-  our forums or in our community chat.  Please limit support to topics
-  you fully understand -- bad advice is worse than no advice.  When it
-  comes to something that you don't fully know or understand, please
-  defer to the official help or official channels.
-
-
-SAST Tools
-----------
-
-`PVS-Studio <https://pvs-studio.com/pvs-studio/?utm_source=website&utm_medium=github&utm_campaign=open_source>`_ - static analyzer for C, C++, C#, and Java code.
+Tempest Broadcast System and OBS Studio are distributed under the GNU General
+Public License version 2 or, at your option, any later version. See ``COPYING``,
+``NOTICE.txt``, ``AUTHORS``, and the dependency-specific license files in the
+source tree. The software is provided without warranty.

@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QHideEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -28,8 +29,10 @@
 #include <QSaveFile>
 #include <QSignalBlocker>
 #include <QSize>
+#include <QShowEvent>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -44,10 +47,9 @@ public:
 	explicit TempestReactionPreview(QWidget *parent = nullptr) : QWidget(parent)
 	{
 		setMinimumHeight(150);
-		setAccessibleName(QStringLiteral("Tempest reaction live preview"));
+		setAccessibleName(QStringLiteral("Overlay reaction live preview"));
 		timer.setInterval(33);
 		connect(&timer, &QTimer::timeout, this, [this]() { Tick(); });
-		timer.start();
 	}
 
 	void SetTelemetryPath(const QString &path) { telemetryPath = path; }
@@ -56,7 +58,7 @@ public:
 		      const QString &newSignal, double newStrength, double newThreshold, double newAttack,
 		      double newDecay, double newIdle)
 	{
-		title = newTitle.isEmpty() ? QStringLiteral("TEMPEST SIGNAL ELEMENT") : newTitle;
+		title = newTitle.isEmpty() ? QStringLiteral("TEMPEST OVERLAY ELEMENT") : newTitle;
 		accent = QColor(newAccent);
 		if (!accent.isValid())
 			accent = QColor(QStringLiteral("#45d9ff"));
@@ -77,6 +79,19 @@ public:
 	}
 
 protected:
+	void showEvent(QShowEvent *event) override
+	{
+		QWidget::showEvent(event);
+		if (!timer.isActive())
+			timer.start();
+	}
+
+	void hideEvent(QHideEvent *event) override
+	{
+		timer.stop();
+		QWidget::hideEvent(event);
+	}
+
 	void paintEvent(QPaintEvent *) override
 	{
 		QPainter painter(this);
@@ -126,7 +141,7 @@ protected:
 		painter.setFont(QFont(QStringLiteral("Segoe UI"), 7, QFont::DemiBold));
 		painter.drawText(QRectF(panel.left() + 90, panel.top() + 25, panel.width() - 125, 18),
 				 Qt::AlignLeft | Qt::AlignVCenter,
-				 QStringLiteral("REACTION LAB // %1 BUS").arg(signal.toUpper()));
+				 QStringLiteral("REACTIVE PREVIEW // %1 INPUT").arg(signal.toUpper()));
 		painter.setPen(QColor(QStringLiteral("#d8fbff")));
 		painter.setFont(QFont(QStringLiteral("Segoe UI"), 13, QFont::Bold));
 		painter.drawText(QRectF(panel.left() + 90, panel.top() + 48, panel.width() - 125, 30),
@@ -154,8 +169,11 @@ protected:
 private:
 	void Tick()
 	{
-		double raw = 0.0;
-		if (!telemetryPath.isEmpty()) {
+		if (!isVisible())
+			return;
+
+		if (--telemetryPollCountdown <= 0 && !telemetryPath.isEmpty()) {
+			telemetryPollCountdown = 3;
 			QFile file(telemetryPath);
 			if (file.open(QIODevice::ReadOnly)) {
 				const QJsonObject data = QJsonDocument::fromJson(file.readAll()).object();
@@ -164,10 +182,13 @@ private:
 							    ? QStringLiteral("microphone")
 						    : signal == QStringLiteral("beat") ? QStringLiteral("beat")
 										       : QStringLiteral("master");
-				raw = data.value(key).toDouble(data.value(QStringLiteral("level")).toDouble());
-				raw = std::max(raw, data.value(QStringLiteral("pulse")).toDouble());
+				telemetryLevel =
+					data.value(key).toDouble(data.value(QStringLiteral("level")).toDouble());
+				telemetryLevel =
+					std::max(telemetryLevel, data.value(QStringLiteral("pulse")).toDouble());
 			}
 		}
+		double raw = telemetryLevel;
 		raw = std::max(raw, testLevel);
 		testLevel *= 0.82;
 		const double normalized = std::clamp((raw - threshold) / std::max(0.001, 1.0 - threshold), 0.0, 1.5);
@@ -181,7 +202,7 @@ private:
 
 	QTimer timer{this};
 	QString telemetryPath;
-	QString title = QStringLiteral("TEMPEST SIGNAL ELEMENT");
+	QString title = QStringLiteral("TEMPEST OVERLAY ELEMENT");
 	QString reaction = QStringLiteral("signal");
 	QString signal = QStringLiteral("master");
 	QColor accent = QColor(QStringLiteral("#45d9ff"));
@@ -193,16 +214,40 @@ private:
 	double envelope = 0.0;
 	double testLevel = 0.0;
 	double phase = 0.0;
+	double telemetryLevel = 0.0;
+	int telemetryPollCountdown = 0;
 };
 
 namespace {
 constexpr char ConfigSection[] = "TempestHUDComposer";
-constexpr int HudSchemaVersion = 5;
+constexpr int HudSchemaVersion = 6;
+
+QString NormalizeRadioBrowserUrl(const QString &browserUrl)
+{
+	QUrl url(browserUrl.trimmed(), QUrl::StrictMode);
+	if (!url.isValid() || url.host().isEmpty())
+		return browserUrl.trimmed();
+
+	const QRegularExpression streamPath(QStringLiteral("^/listen/([^/]+)/radio(?:\\.[A-Za-z0-9]+)?/?$"),
+					    QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = streamPath.match(url.path());
+	if (!match.hasMatch())
+		return browserUrl.trimmed();
+
+	url.setPath(QStringLiteral("/public/%1/embed").arg(match.captured(1)));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("autoplay"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("hide_volume"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("hide_streams"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("volume"), QStringLiteral("50"));
+	url.setQuery(query);
+	return url.toString(QUrl::FullyEncoded);
+}
 
 QSize ElementSize(const QString &type)
 {
 	if (type == QStringLiteral("chat"))
-		return {520, 680};
+		return {512, 700};
 	if (type == QStringLiteral("radio"))
 		return {680, 180};
 	if (type == QStringLiteral("media"))
@@ -226,6 +271,7 @@ QString RemoteChatCss(const QString &browserUrl, const QString &primary, const Q
 {
 	const QUrl url(browserUrl);
 	const bool twitch = url.host().endsWith(QStringLiteral("twitch.tv"), Qt::CaseInsensitive);
+	const bool botrix = url.host().endsWith(QStringLiteral("botrix.live"), Qt::CaseInsensitive);
 	QString css =
 		QStringLiteral(R"TEMPESTCSS(
 html,body{background:transparent!important;margin:0!important;overflow:hidden!important}
@@ -240,6 +286,13 @@ body:after{content:"RELAY ONLINE // TEMPEST CHANNEL";box-sizing:border-box;posit
 .stream-chat-header,.chat-input{display:none!important}
 .chat-shell,.chat-room,.chat-room__content,.chat-scrollable-area__message-container{background:transparent!important}
 .chat-shell{height:100%!important}
+)TEMPESTCSS");
+	}
+	if (botrix) {
+		css += QStringLiteral(R"TEMPESTCSS(
+body{padding:0!important}
+body>div:first-of-type{position:fixed!important;z-index:1!important;top:76px!important;right:12px!important;bottom:34px!important;left:12px!important;width:auto!important;height:auto!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;overflow:hidden!important;transform:none!important}
+body>div:first-of-type>*{max-height:100%!important}
 )TEMPESTCSS");
 	}
 	return css;
@@ -263,7 +316,7 @@ body{display:flex!important;align-items:center!important;justify-content:center!
 @keyframes shrLive{0%,100%{opacity:1}50%{opacity:.35}}
 @keyframes shrPanelGlow{0%,100%{box-shadow:0 0 10px rgba(0,210,255,.2),0 0 30px rgba(0,170,255,.09),inset 0 1px 0 rgba(255,255,255,.08),inset 0 0 28px rgba(0,0,0,.7)!important}50%{box-shadow:0 0 16px rgba(0,220,255,.32),0 0 42px rgba(120,65,255,.14),inset 0 1px 0 rgba(255,255,255,.1),inset 0 0 28px rgba(0,0,0,.7)!important}}
 )TEMPESTCSS")
-		.arg(CssContent(primary.isEmpty() ? QStringLiteral("STORM HORIZON RADIO") : primary),
+		.arg(CssContent(primary.isEmpty() ? QStringLiteral("RADIO PLAYER") : primary),
 		     CssContent(secondary.isEmpty() ? QStringLiteral("●  LIVE") : secondary));
 }
 } // namespace
@@ -271,7 +324,7 @@ body{display:flex!important;align-items:center!important;justify-content:center!
 TempestHUDComposer::TempestHUDComposer(OBSBasic *main, QWidget *parent) : OBSDock(parent), main(main)
 {
 	setObjectName(QStringLiteral("tempestHUDComposer"));
-	setWindowTitle(QStringLiteral("Mainframe HUD Composer"));
+	setWindowTitle(QStringLiteral("Overlay Designer"));
 	setMinimumWidth(390);
 	BuildInterface();
 	EnableContentScaling(objectName());
@@ -280,8 +333,12 @@ TempestHUDComposer::TempestHUDComposer(OBSBasic *main, QWidget *parent) : OBSDoc
 		reactionPreview->SetTelemetryPath(QDir(outputDirectory).filePath(QStringLiteral("telemetry.json")));
 	LoadElements();
 	RebuildElementList();
-	for (const Element &element : elements)
+	for (const Element &element : elements) {
 		RenderElement(element);
+		OBSSourceAutoRelease source = obs_get_source_by_name(element.sourceName.toUtf8().constData());
+		if (source && strcmp(obs_source_get_unversioned_id(source), "browser_source") == 0)
+			ApplySourceSettings(source, element);
+	}
 }
 
 void TempestHUDComposer::BuildInterface()
@@ -307,16 +364,16 @@ void TempestHUDComposer::BuildInterface()
 	layout->setContentsMargins(10, 10, 10, 10);
 	layout->setSpacing(7);
 
-	auto *title = new QLabel(QStringLiteral("HUD COMPOSER"), root);
+	auto *title = new QLabel(QStringLiteral("OVERLAY DESIGNER"), root);
 	title->setObjectName(QStringLiteral("hudTitle"));
-	auto *subtitle = new QLabel(QStringLiteral("Movable reactive frame and signal plates"), root);
+	auto *subtitle = new QLabel(QStringLiteral("Movable, reactive frames and stream elements"), root);
 	subtitle->setObjectName(QStringLiteral("hudSubtitle"));
 	layout->addWidget(title);
 	layout->addWidget(subtitle);
 
 	elementList = new QListWidget(root);
 	elementList->setObjectName(QStringLiteral("tempestHUDElementList"));
-	elementList->setAccessibleName(QStringLiteral("Tempest HUD elements"));
+	elementList->setAccessibleName(QStringLiteral("Tempest overlay elements"));
 	connect(elementList, &QListWidget::currentRowChanged, this, &TempestHUDComposer::SelectElement);
 	layout->addWidget(elementList, 1);
 
@@ -324,7 +381,7 @@ void TempestHUDComposer::BuildInterface()
 	connect(newButton, &QPushButton::clicked, this, &TempestHUDComposer::NewElement);
 	layout->addWidget(newButton);
 
-	auto *reactionLabel = new QLabel(QStringLiteral("REACTION LAB // LIVE SIGNAL PREVIEW"), root);
+	auto *reactionLabel = new QLabel(QStringLiteral("REACTIVE PREVIEW // LIVE AUDIO"), root);
 	reactionLabel->setObjectName(QStringLiteral("hudSubtitle"));
 	layout->addWidget(reactionLabel);
 	reactionPreview = new TempestReactionPreview(root);
@@ -338,21 +395,21 @@ void TempestHUDComposer::BuildInterface()
 	nameField = new QLineEdit(root);
 	nameField->setPlaceholderText(QStringLiteral("Element and OBS source name"));
 	typeSelector = new QComboBox(root);
-	typeSelector->addItem(QStringLiteral("CANVAS FRAME"), QStringLiteral("frame"));
-	typeSelector->addItem(QStringLiteral("CHAT TERMINAL"), QStringLiteral("chat"));
-	typeSelector->addItem(QStringLiteral("STORM HORIZON RADIO"), QStringLiteral("radio"));
-	typeSelector->addItem(QStringLiteral("SIGNAL PLATE"), QStringLiteral("plate"));
-	typeSelector->addItem(QStringLiteral("NOW PLAYING PLATE"), QStringLiteral("media"));
-	typeSelector->addItem(QStringLiteral("LORE PANEL"), QStringLiteral("lore"));
+	typeSelector->addItem(QStringLiteral("STREAM FRAME"), QStringLiteral("frame"));
+	typeSelector->addItem(QStringLiteral("CHAT PANEL"), QStringLiteral("chat"));
+	typeSelector->addItem(QStringLiteral("RADIO PLAYER"), QStringLiteral("radio"));
+	typeSelector->addItem(QStringLiteral("INFO PLATE"), QStringLiteral("plate"));
+	typeSelector->addItem(QStringLiteral("NOW PLAYING"), QStringLiteral("media"));
+	typeSelector->addItem(QStringLiteral("TEXT PANEL"), QStringLiteral("lore"));
 	primaryField = new QLineEdit(root);
 	secondaryField = new QLineEdit(root);
 	browserUrlField = new QLineEdit(root);
 	browserUrlField->setToolTip(QStringLiteral(
-		"Chat Terminal: paste a Twitch chat URL. Storm Horizon Radio: paste the AzuraCast embed URL. Leave empty for a local standby renderer."));
+		"Chat Panel: paste a BotRix overlay URL or Twitch chat URL. Radio Player: paste an AzuraCast public-player, embed, or stream URL. Broadcast uses it to find the station API and renders the player in Tempest style."));
 	accentField = new QLineEdit(root);
 	accentField->setPlaceholderText(QStringLiteral("#45d9ff"));
 	reactionSelector = new QComboBox(root);
-	reactionSelector->addItem(QStringLiteral("SIGNAL PULSE"), QStringLiteral("signal"));
+	reactionSelector->addItem(QStringLiteral("AUDIO PULSE"), QStringLiteral("signal"));
 	reactionSelector->addItem(QStringLiteral("GLOW ONLY"), QStringLiteral("glow"));
 	reactionSelector->addItem(QStringLiteral("BREATHING CORE"), QStringLiteral("pulse"));
 	reactionSelector->addItem(QStringLiteral("PEAK GLITCH"), QStringLiteral("glitch"));
@@ -392,7 +449,7 @@ void TempestHUDComposer::BuildInterface()
 	form->addRow(QStringLiteral("Browser URL"), browserUrlField);
 	form->addRow(QStringLiteral("Accent color"), accentField);
 	form->addRow(QStringLiteral("Reaction"), reactionSelector);
-	form->addRow(QStringLiteral("Signal input"), signalSelector);
+	form->addRow(QStringLiteral("Audio input"), signalSelector);
 	form->addRow(QStringLiteral("Intensity"), strengthField);
 	form->addRow(QStringLiteral("Threshold"), thresholdField);
 	form->addRow(QStringLiteral("Attack"), attackField);
@@ -410,7 +467,7 @@ void TempestHUDComposer::BuildInterface()
 	connect(accentField, &QLineEdit::textChanged, this, &TempestHUDComposer::UpdateReactionPreview);
 	connect(primaryField, &QLineEdit::textChanged, this, &TempestHUDComposer::UpdateReactionPreview);
 
-	auto *protocolLabel = new QLabel(QStringLiteral("VISIBLE IN PROTOCOL"), root);
+	auto *protocolLabel = new QLabel(QStringLiteral("VISIBLE IN STREAM STATE"), root);
 	protocolLabel->setObjectName(QStringLiteral("hudSubtitle"));
 	layout->addWidget(protocolLabel);
 	auto *protocols = new QGridLayout();
@@ -426,7 +483,7 @@ void TempestHUDComposer::BuildInterface()
 
 	saveButton = new QPushButton(QStringLiteral("SAVE / RENDER ELEMENT"), root);
 	addButton = new QPushButton(QStringLiteral("ADD SELECTED TO CURRENT SCENE"), root);
-	auto *deployButton = new QPushButton(QStringLiteral("DEPLOY ALL HUD ELEMENTS"), root);
+	auto *deployButton = new QPushButton(QStringLiteral("DEPLOY ALL OVERLAYS"), root);
 	connect(saveButton, &QPushButton::clicked, this, &TempestHUDComposer::SaveElement);
 	connect(addButton, &QPushButton::clicked, this, &TempestHUDComposer::AddSelectedToScene);
 	connect(deployButton, &QPushButton::clicked, this, &TempestHUDComposer::DeployStarterHud);
@@ -436,12 +493,12 @@ void TempestHUDComposer::BuildInterface()
 
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Reaction Lab previews the live Signal Reactor bus. Threshold removes background noise; Attack controls the rise, Decay controls the tail, and Idle Energy keeps breathing effects alive."),
+			"Reactive Preview shows the live Audio Reactor input. Threshold removes background noise; Attack controls the rise, Decay controls the tail, and Idle Energy keeps breathing effects alive."),
 		root);
 	hint->setObjectName(QStringLiteral("hudHint"));
 	hint->setWordWrap(true);
 	layout->addWidget(hint);
-	statusLabel = new QLabel(QStringLiteral("HUD LIBRARY INITIALIZING"), root);
+	statusLabel = new QLabel(QStringLiteral("OVERLAY LIBRARY INITIALIZING"), root);
 	statusLabel->setObjectName(QStringLiteral("hudStatus"));
 	statusLabel->setWordWrap(true);
 	layout->addWidget(statusLabel);
@@ -452,32 +509,32 @@ void TempestHUDComposer::SeedStarterElements()
 {
 	Element frame;
 	frame.id = QStringLiteral("signal-frame");
-	frame.name = QStringLiteral("Signal Frame");
+	frame.name = QStringLiteral("Stream Frame");
 	frame.sourceName = SuggestedSourceName(frame.name);
 	frame.type = QStringLiteral("frame");
-	frame.primary = QStringLiteral("TEMPEST MAINFRAME");
-	frame.secondary = QStringLiteral("BROADCAST SIGNAL // ONLINE");
+	frame.primary = QStringLiteral("TEMPEST BROADCAST");
+	frame.secondary = QStringLiteral("STREAM OVERLAY // ONLINE");
 	frame.reaction = QStringLiteral("signal");
 	frame.signal = QStringLiteral("master");
 	frame.strength = 1.1;
 
 	Element chat;
 	chat.id = QStringLiteral("chat-terminal");
-	chat.name = QStringLiteral("Chat Terminal");
+	chat.name = QStringLiteral("Chat Panel");
 	chat.sourceName = SuggestedSourceName(chat.name);
 	chat.type = QStringLiteral("chat");
-	chat.primary = QStringLiteral("CHANNEL RELAY");
-	chat.secondary = QStringLiteral("TWITCH LINK // FOUNDATION");
+	chat.primary = QStringLiteral("STREAM CHAT");
+	chat.secondary = QStringLiteral("CHAT OVERLAY // ONLINE");
 	chat.reaction = QStringLiteral("glow");
 	chat.signal = QStringLiteral("microphone");
 	chat.strength = 0.8;
 
 	Element transmission;
 	transmission.id = QStringLiteral("transmission-plate");
-	transmission.name = QStringLiteral("Transmission Plate");
+	transmission.name = QStringLiteral("Info Plate");
 	transmission.sourceName = SuggestedSourceName(transmission.name);
-	transmission.primary = QStringLiteral("TEMPEST MAINFRAME");
-	transmission.secondary = QStringLiteral("BROADCAST UPLINK // STANDBY");
+	transmission.primary = QStringLiteral("TEMPEST BROADCAST");
+	transmission.secondary = QStringLiteral("STREAM STATUS // STANDBY");
 	transmission.reaction = QStringLiteral("pulse");
 	transmission.signal = QStringLiteral("microphone");
 
@@ -486,19 +543,20 @@ void TempestHUDComposer::SeedStarterElements()
 	media.name = QStringLiteral("Now Playing");
 	media.sourceName = SuggestedSourceName(media.name);
 	media.type = QStringLiteral("media");
-	media.primary = QStringLiteral("SIGNAL MEDIA");
-	media.secondary = QStringLiteral("ASSET BUS // STANDBY");
+	media.primary = QStringLiteral("NOW PLAYING");
+	media.secondary = QStringLiteral("MEDIA SOURCE // STANDBY");
 	media.reaction = QStringLiteral("signal");
 	media.signal = QStringLiteral("desktop");
 	media.ending = false;
 
 	Element radio;
 	radio.id = QStringLiteral("storm-horizon-radio");
-	radio.name = QStringLiteral("Storm Horizon Radio");
+	radio.name = QStringLiteral("Radio Player");
 	radio.sourceName = SuggestedSourceName(radio.name);
 	radio.type = QStringLiteral("radio");
-	radio.primary = QStringLiteral("STORM HORIZON RADIO");
+	radio.primary = QStringLiteral("RADIO PLAYER");
 	radio.secondary = QStringLiteral("●  LIVE");
+	radio.browserUrl.clear();
 	radio.reaction = QStringLiteral("glow");
 	radio.signal = QStringLiteral("desktop");
 	radio.strength = 0.8;
@@ -515,6 +573,7 @@ void TempestHUDComposer::LoadElements()
 	const int schemaVersion = (int)config_get_int(config, ConfigSection, "SchemaVersion");
 	const char *raw = config_get_string(config, ConfigSection, "Elements");
 	const QJsonDocument document = QJsonDocument::fromJson(raw ? QByteArray(raw) : QByteArray());
+	bool browserUrlsMigrated = false;
 	if (document.isArray()) {
 		for (const QJsonValue &value : document.array()) {
 			const QJsonObject object = value.toObject();
@@ -529,6 +588,12 @@ void TempestHUDComposer::LoadElements()
 			element.primary = object.value(QStringLiteral("primary")).toString();
 			element.secondary = object.value(QStringLiteral("secondary")).toString();
 			element.browserUrl = object.value(QStringLiteral("browserUrl")).toString();
+			if (element.type == QStringLiteral("radio")) {
+				const QString normalizedUrl = NormalizeRadioBrowserUrl(element.browserUrl);
+				if (normalizedUrl != element.browserUrl)
+					browserUrlsMigrated = true;
+				element.browserUrl = normalizedUrl;
+			}
 			element.accent = object.value(QStringLiteral("accent")).toString(QStringLiteral("#45d9ff"));
 			element.reaction = object.value(QStringLiteral("reaction")).toString(QStringLiteral("signal"));
 			if (object.contains(QStringLiteral("signal"))) {
@@ -564,11 +629,12 @@ void TempestHUDComposer::LoadElements()
 		if (!hasRadio) {
 			Element radio;
 			radio.id = QStringLiteral("storm-horizon-radio");
-			radio.name = QStringLiteral("Storm Horizon Radio");
+			radio.name = QStringLiteral("Radio Player");
 			radio.sourceName = SuggestedSourceName(radio.name);
 			radio.type = QStringLiteral("radio");
-			radio.primary = QStringLiteral("STORM HORIZON RADIO");
+			radio.primary = QStringLiteral("RADIO PLAYER");
 			radio.secondary = QStringLiteral("●  LIVE");
+			radio.browserUrl.clear();
 			radio.reaction = QStringLiteral("glow");
 			radio.signal = QStringLiteral("desktop");
 			radio.strength = 0.8;
@@ -579,8 +645,10 @@ void TempestHUDComposer::LoadElements()
 		}
 		config_set_int(config, ConfigSection, "SchemaVersion", HudSchemaVersion);
 		SaveElements();
+	} else if (browserUrlsMigrated) {
+		SaveElements();
 	}
-	SetStatus(QStringLiteral("HUD LIBRARY READY // %1 ELEMENT%2")
+	SetStatus(QStringLiteral("OVERLAY LIBRARY READY // %1 ELEMENT%2")
 			  .arg(elements.size())
 			  .arg(elements.size() == 1 ? QString() : QStringLiteral("S")));
 }
@@ -716,13 +784,13 @@ void TempestHUDComposer::UpdateBrowserUrlAvailability()
 	const bool chat = type == QStringLiteral("chat");
 	const bool radio = type == QStringLiteral("radio");
 	browserUrlField->setEnabled(chat || radio);
-	browserUrlField->setPlaceholderText(chat ? QStringLiteral("https://www.twitch.tv/popout/CHANNEL/chat?popout=")
+	browserUrlField->setPlaceholderText(chat    ? QStringLiteral("https://botrix.live/widgets/chat/?...")
 					    : radio ? QStringLiteral("https://radio.example.com/public/station/embed")
 						    : QString());
 	browserUrlField->setAccessibleDescription(
-		chat    ? QStringLiteral("Optional Twitch popout chat or browser-overlay URL")
-		: radio ? QStringLiteral("Optional AzuraCast public player or embed URL")
-			: QStringLiteral("Available for Chat Terminal and Storm Horizon Radio elements"));
+		chat    ? QStringLiteral("Optional BotRix chat overlay or Twitch popout URL")
+		: radio ? QStringLiteral("AzuraCast station URL used for custom now-playing data and audio")
+			: QStringLiteral("Available for Chat Panel and Radio Player elements"));
 }
 
 bool TempestHUDComposer::StoreEditor(Element &element)
@@ -737,7 +805,8 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 		SetStatus(QStringLiteral("ACCENT MUST USE #RRGGBB FORMAT"), true);
 		return false;
 	}
-	const QString browserUrl = browserUrlField->text().trimmed();
+	const QString type = typeSelector->currentData().toString();
+	QString browserUrl = browserUrlField->text().trimmed();
 	if (!browserUrl.isEmpty()) {
 		const QUrl parsedUrl(browserUrl, QUrl::StrictMode);
 		if (!parsedUrl.isValid() || parsedUrl.host().isEmpty() ||
@@ -746,6 +815,8 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 			return false;
 		}
 	}
+	if (type == QStringLiteral("radio"))
+		browserUrl = NormalizeRadioBrowserUrl(browserUrl);
 	const QString newSourceName = SuggestedSourceName(name);
 	if (newSourceName != element.sourceName) {
 		for (const Element &candidate : elements) {
@@ -766,7 +837,7 @@ bool TempestHUDComposer::StoreEditor(Element &element)
 		element.sourceName = newSourceName;
 	}
 	element.name = name;
-	element.type = typeSelector->currentData().toString();
+	element.type = type;
 	element.primary = primaryField->text().trimmed();
 	element.secondary = secondaryField->text().trimmed();
 	element.browserUrl = browserUrl;
@@ -791,15 +862,15 @@ void TempestHUDComposer::NewElement()
 	element.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
 	int suffix = 1;
 	do {
-		element.name = QStringLiteral("New Signal Plate%1")
+		element.name = QStringLiteral("New Info Plate%1")
 				       .arg(suffix == 1 ? QString() : QStringLiteral(" %1").arg(suffix));
 		element.sourceName = SuggestedSourceName(element.name);
 		++suffix;
 	} while (std::any_of(elements.cbegin(), elements.cend(), [&element](const Element &candidate) {
 		return candidate.sourceName.compare(element.sourceName, Qt::CaseInsensitive) == 0;
 	}));
-	element.primary = QStringLiteral("TEMPEST MAINFRAME");
-	element.secondary = QStringLiteral("NEW SIGNAL ELEMENT");
+	element.primary = QStringLiteral("TEMPEST BROADCAST");
+	element.secondary = QStringLiteral("NEW OVERLAY ELEMENT");
 	elements.push_back(element);
 	SaveElements();
 	RebuildElementList(element.id);
@@ -817,11 +888,11 @@ void TempestHUDComposer::SaveElement()
 		return;
 	RefreshSelectedSource();
 	RebuildElementList(selectedId);
-	const bool remoteBrowser =
-		(element->type == QStringLiteral("chat") || element->type == QStringLiteral("radio")) &&
-		!element->browserUrl.isEmpty();
-	SetStatus(remoteBrowser ? QStringLiteral("BROWSER ELEMENT LINKED // %1").arg(element->name.toUpper())
-				: QStringLiteral("ELEMENT RENDERED // %1").arg(element->name.toUpper()));
+	const bool remoteBrowser = element->type == QStringLiteral("chat") && !element->browserUrl.isEmpty();
+	const bool embeddedRadio = element->type == QStringLiteral("radio") && !element->browserUrl.isEmpty();
+	SetStatus(remoteBrowser   ? QStringLiteral("BROWSER ELEMENT LINKED // %1").arg(element->name.toUpper())
+		  : embeddedRadio ? QStringLiteral("RADIO DATA LINKED // %1").arg(element->name.toUpper())
+				  : QStringLiteral("ELEMENT RENDERED // %1").arg(element->name.toUpper()));
 }
 
 bool TempestHUDComposer::EnsureOutputDirectory()
@@ -870,6 +941,9 @@ QString TempestHUDComposer::BuildElementHtml(const Element &element) const
 	state.insert(QStringLiteral("type"), element.type);
 	state.insert(QStringLiteral("primary"), element.primary);
 	state.insert(QStringLiteral("secondary"), element.secondary);
+	state.insert(QStringLiteral("browserUrl"), element.type == QStringLiteral("radio")
+							   ? NormalizeRadioBrowserUrl(element.browserUrl)
+							   : element.browserUrl);
 	state.insert(QStringLiteral("accent"), element.accent);
 	state.insert(QStringLiteral("reaction"), element.reaction);
 	state.insert(QStringLiteral("signal"), element.signal);
@@ -886,30 +960,48 @@ QString TempestHUDComposer::BuildElementHtml(const Element &element) const
 <style>
 :root{--accent:#45d9ff;--ice:#d8fbff;--muted:#7895a8;--panel:rgba(4,14,23,.88);--react:0;--glow:10px;--shift:0px}
 *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;color:var(--ice);font-family:"Segoe UI",Arial,sans-serif}body{padding:8px}
-.scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(69,217,255,.025) 0,rgba(69,217,255,.025) 1px,transparent 1px,transparent 5px);opacity:calc(.22 + var(--react)*.45)}
+.scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,color-mix(in srgb,var(--accent) 2.5%,transparent) 0,color-mix(in srgb,var(--accent) 2.5%,transparent) 1px,transparent 1px,transparent 5px);opacity:calc(.22 + var(--react)*.45)}
 .frame{display:none;position:absolute;inset:20px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--accent) 42%,transparent),0 0 var(--glow) color-mix(in srgb,var(--accent) 24%,transparent)}
 .frame:before,.frame:after{content:"";position:absolute;left:8%;right:8%;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);transform:translateX(var(--shift))}.frame:before{top:-1px}.frame:after{bottom:-1px;transform:translateX(calc(var(--shift)*-1))}
 .corner{position:absolute;width:82px;height:82px;border-color:var(--accent);filter:drop-shadow(0 0 var(--glow) var(--accent))}.c1{left:-4px;top:-4px;border-left:4px solid;border-top:4px solid}.c2{right:-4px;top:-4px;border-right:4px solid;border-top:4px solid}.c3{left:-4px;bottom:-4px;border-left:4px solid;border-bottom:4px solid}.c4{right:-4px;bottom:-4px;border-right:4px solid;border-bottom:4px solid}
 .frame-meta{position:absolute;left:110px;top:22px;color:var(--accent);font-size:18px;letter-spacing:.28em;font-weight:700}.frame-state{position:absolute;right:110px;bottom:24px;color:var(--muted);font-size:14px;letter-spacing:.2em}
 .plate{position:absolute;inset:8px;display:flex;align-items:center;gap:18px;padding:22px 28px;background:linear-gradient(110deg,var(--panel),rgba(5,28,44,.72));border:1px solid color-mix(in srgb,var(--accent) 58%,transparent);clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--accent) 34%,transparent);transform:translateX(var(--shift))}
 .core{flex:0 0 54px;width:54px;height:54px;border:2px solid var(--accent);transform:rotate(45deg) scale(calc(.82 + var(--react)*.25));box-shadow:0 0 var(--glow) var(--accent);position:relative}.core:after{content:"";position:absolute;inset:12px;background:var(--accent);opacity:calc(.25 + var(--react)*.65)}
-.copy{min-width:0;flex:1}.kicker{color:var(--accent);font-size:12px;letter-spacing:.34em;margin-bottom:8px}.primary{font-size:28px;font-weight:800;letter-spacing:.12em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 var(--glow) color-mix(in srgb,var(--accent) 60%,transparent)}.secondary{margin-top:8px;color:var(--muted);font-size:13px;letter-spacing:.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.meter{height:76px;width:8px;display:flex;align-items:flex-end;background:rgba(69,217,255,.08)}.meter i{display:block;width:100%;height:calc(12% + var(--react)*88%);background:var(--accent);box-shadow:0 0 var(--glow) var(--accent)}
+.copy{min-width:0;flex:1}.kicker{color:var(--accent);font-size:12px;letter-spacing:.34em;margin-bottom:8px}.primary{color:var(--accent);font-size:28px;font-weight:800;letter-spacing:.12em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 var(--glow) color-mix(in srgb,var(--accent) 60%,transparent)}.secondary{margin-top:8px;color:var(--muted);font-size:13px;letter-spacing:.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meter{height:76px;width:8px;display:flex;align-items:flex-end;background:color-mix(in srgb,var(--accent) 8%,transparent)}.meter i{display:block;width:100%;height:calc(12% + var(--react)*88%);background:var(--accent);box-shadow:0 0 var(--glow) var(--accent)}
 .chat-shell{display:none;position:absolute;inset:8px;background:linear-gradient(145deg,rgba(4,14,23,.93),rgba(4,27,43,.84));border:1px solid color-mix(in srgb,var(--accent) 58%,transparent);clip-path:polygon(0 0,calc(100% - 32px) 0,100% 32px,100% 100%,0 100%);box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--accent) 35%,transparent)}
 .chat-head{height:92px;padding:20px 24px;border-bottom:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}.chat-head b{display:block;color:var(--accent);font-size:20px;letter-spacing:.23em}.chat-head span{display:block;margin-top:9px;color:var(--muted);font-size:12px;letter-spacing:.16em}
-.chat-body{position:absolute;left:18px;right:18px;top:112px;bottom:62px;display:flex;flex-direction:column;justify-content:flex-end;gap:14px}.msg{padding:13px 15px;border-left:2px solid var(--accent);background:rgba(69,217,255,.045);color:#9bb5c7;font-size:15px;line-height:1.35}.msg b{display:block;color:var(--accent);font-size:10px;letter-spacing:.18em;margin-bottom:5px}.chat-foot{position:absolute;left:22px;right:22px;bottom:20px;color:var(--accent);font-size:10px;letter-spacing:.2em;display:flex;justify-content:space-between}
-body.frame-type .frame{display:block}body.frame-type .plate{display:none}body.chat-type .plate{display:none}body.chat-type .chat-shell{display:block}body.media-type .core{border-radius:50%;transform:rotate(0) scale(calc(.82 + var(--react)*.25))}body.media-type .core:after{border-radius:50%}body.lore-type .plate{align-items:flex-start;padding-top:30px}body.lore-type .primary{white-space:normal;font-size:24px}body.lore-type .secondary{white-space:normal;line-height:1.55}
-@keyframes breathe{50%{opacity:.58}}body.pulse .core{animation:breathe 1.6s ease-in-out infinite}
+.chat-body{position:absolute;left:18px;right:18px;top:112px;bottom:62px;display:flex;flex-direction:column;justify-content:flex-end;gap:14px}.msg{padding:13px 15px;border-left:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 4.5%,transparent);color:#9bb5c7;font-size:15px;line-height:1.35}.msg b{display:block;color:var(--accent);font-size:10px;letter-spacing:.18em;margin-bottom:5px}.chat-foot{position:absolute;left:22px;right:22px;bottom:20px;color:var(--accent);font-size:10px;letter-spacing:.2em;display:flex;justify-content:space-between}
+.radio-shell{display:none;position:absolute;inset:8px;grid-template-columns:78px minmax(0,1fr) 52px;gap:14px;padding:13px 16px;background:linear-gradient(110deg,var(--panel),rgba(5,28,44,.78));border:1px solid color-mix(in srgb,var(--accent) 58%,transparent);clip-path:polygon(0 0,calc(100% - 24px) 0,100% 24px,100% 100%,24px 100%,0 calc(100% - 24px));box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--accent) 34%,transparent),0 0 var(--glow) color-mix(in srgb,var(--accent) 18%,transparent)}
+.radio-mark{align-self:center;justify-self:center;width:58px;height:58px;border:2px solid var(--accent);transform:rotate(45deg) scale(calc(.82 + var(--react)*.18));box-shadow:0 0 var(--glow) var(--accent);position:relative;overflow:hidden;background:color-mix(in srgb,var(--accent) 12%,#04101a)}.radio-mark img{position:absolute;inset:-16px;width:88px;height:88px;object-fit:cover;transform:rotate(-45deg);opacity:.78}.radio-mark i{position:absolute;inset:12px;border:1px solid var(--accent);background:color-mix(in srgb,var(--accent) 18%,transparent);box-shadow:0 0 var(--glow) var(--accent);opacity:calc(.3 + var(--react)*.55)}
+.radio-main{min-width:0;align-self:center;display:grid;grid-template-rows:20px 32px 18px 16px 5px;gap:2px}.radio-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}.radio-kicker{min-width:0;color:var(--accent);font-size:8px;font-weight:700;letter-spacing:.18em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.radio-state{flex:0 0 auto;color:var(--accent);font-size:8px;font-weight:700;letter-spacing:.14em}.radio-track{color:var(--ice);font-size:17px;font-weight:800;letter-spacing:.055em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 var(--glow) color-mix(in srgb,var(--accent) 35%,transparent)}.radio-artist{color:var(--accent);font-size:10px;font-weight:700;letter-spacing:.14em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.radio-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:8px;letter-spacing:.12em;white-space:nowrap}.radio-progress{height:3px;align-self:end;background:color-mix(in srgb,var(--accent) 12%,transparent);overflow:hidden}.radio-progress i{display:block;width:0;height:100%;background:var(--accent);box-shadow:0 0 var(--glow) var(--accent);transition:width .8s linear}
+.radio-side{align-self:center;display:grid;justify-items:center;gap:10px}.radio-toggle{width:38px;height:38px;padding:0;border:1px solid var(--accent);border-radius:50%;background:color-mix(in srgb,var(--accent) 8%,#04101a);color:var(--ice);font:800 15px/1 "Segoe UI",Arial,sans-serif;box-shadow:0 0 var(--glow) color-mix(in srgb,var(--accent) 38%,transparent)}.radio-toggle:hover{background:color-mix(in srgb,var(--accent) 22%,#04101a)}.radio-listeners{color:var(--muted);font-size:7px;letter-spacing:.1em;white-space:nowrap}.radio-shell audio{display:none}
+body.frame-type .frame{display:block}body.frame-type .plate{display:none}body.chat-type .plate{display:none}body.chat-type .chat-shell{display:block}body.radio-type .plate{display:none}body.radio-type .radio-shell{display:grid}body.media-type .core{border-radius:50%;transform:rotate(0) scale(calc(.82 + var(--react)*.25))}body.media-type .core:after{border-radius:50%}body.lore-type .plate{align-items:flex-start;padding-top:30px}body.lore-type .primary{white-space:normal;font-size:24px}body.lore-type .secondary{white-space:normal;line-height:1.55}
+@keyframes breathe{50%{opacity:.58}}@keyframes spectrumScan{50%{opacity:.95;filter:saturate(1.45) brightness(1.2)}}@keyframes eventSurge{50%{transform:rotate(45deg) scale(calc(.94 + var(--react)*.32))}}body.pulse .core{animation:breathe 1.6s ease-in-out infinite}body.spectrum .scan{animation:spectrumScan .7s linear infinite}body.surge .core{animation:eventSurge .42s ease-in-out infinite}
 </style></head>
 <body><div class="scan"></div>
 <div class="frame"><i class="corner c1"></i><i class="corner c2"></i><i class="corner c3"></i><i class="corner c4"></i><div class="frame-meta" id="framePrimary"></div><div class="frame-state" id="frameSecondary"></div></div>
-<section class="plate"><div class="core"></div><div class="copy"><div class="kicker">TEMPEST MAINFRAME // SIGNAL ELEMENT</div><div class="primary" id="primary"></div><div class="secondary" id="secondary"></div></div><div class="meter"><i></i></div></section>
-<section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>MAINFRAME</b>CHAT RELAY FOUNDATION ONLINE</div><div class="msg"><b>CHANNEL LINK</b>ADD A TWITCH POPOUT CHAT OR OVERLAY URL IN HUD COMPOSER</div><div class="msg"><b>OPERATOR NOTE</b>THE CHAT TERMINAL WILL SWITCH TO THE REMOTE BROWSER FEED</div></main><footer class="chat-foot"><span>RELAY STANDBY</span><span>SIGNAL REACTIVE</span></footer></section>
+<section class="plate"><div class="core"></div><div class="copy"><div class="kicker">TEMPEST BROADCAST // OVERLAY ELEMENT</div><div class="primary" id="primary"></div><div class="secondary" id="secondary"></div></div><div class="meter"><i></i></div></section>
+<section class="chat-shell"><header class="chat-head"><b id="chatPrimary"></b><span id="chatSecondary"></span></header><main class="chat-body"><div class="msg"><b>STREAM CHAT</b>CHAT OVERLAY READY</div><div class="msg"><b>BROWSER URL</b>ADD A TWITCH POPOUT CHAT OR OVERLAY URL IN OVERLAY DESIGNER</div><div class="msg"><b>SETUP NOTE</b>THE CHAT PANEL WILL SWITCH TO THE REMOTE BROWSER FEED</div></main><footer class="chat-foot"><span>CHAT STANDBY</span><span>AUDIO REACTIVE</span></footer></section>
+<section class="radio-shell"><div class="radio-mark"><img id="radioArt" alt=""><i></i></div><div class="radio-main"><header class="radio-head"><div class="radio-kicker" id="radioPrimary"></div><span class="radio-state" id="radioSecondary"></span></header><div class="radio-track" id="radioTrack">WAITING FOR NOW PLAYING DATA</div><div class="radio-artist" id="radioArtist">ADD AN AZURACAST STATION URL</div><div class="radio-meta"><span id="radioStation">RADIO PLAYER</span><span id="radioClock">--:-- / --:--</span></div><div class="radio-progress"><i id="radioProgress"></i></div></div><aside class="radio-side"><button class="radio-toggle" id="radioToggle" type="button" aria-label="Play radio">▶</button><span class="radio-listeners" id="radioListeners">-- LIVE</span></aside><audio id="radioAudio" preload="none" autoplay></audio></section>
 <script id="hud-state" type="application/json">{{STATE_JSON}}</script><script>
-const s=JSON.parse(document.getElementById('hud-state').textContent),root=document.documentElement,body=document.body;root.style.setProperty('--accent',s.accent||'#45d9ff');body.classList.add((s.type||'plate')+'-type');body.classList.add(s.reaction||'signal');for(const id of ['primary','framePrimary','chatPrimary'])document.getElementById(id).textContent=s.primary||'TEMPEST MAINFRAME';for(const id of ['secondary','frameSecondary','chatSecondary'])document.getElementById(id).textContent=s.secondary||'SIGNAL ELEMENT ONLINE';let level=0,phase=0;
-async function telemetry(){let raw=0;try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:channel==='beat'?d.beat:(d.master??d.level);raw=Math.max(Number(routed)||0,Number(d.pulse)||0)}}catch(_){}const threshold=Math.min(.95,Math.max(0,Number(s.threshold)||0)),target=Math.min(1.5,Math.max(0,(raw-threshold)/Math.max(.001,1-threshold))),attack=Math.min(1,Math.max(.05,Number(s.attack)||.55)),decay=Math.min(.98,Math.max(.5,Number(s.decay)||.82));if(target>level)level+=(target-level)*attack;else level*=decay;phase+=.12;let react=level*Math.max(0,Number(s.strength)||0),idle=Math.min(.5,Math.max(0,Number(s.idle)||0));if(s.reaction==='pulse')react=Math.max(react,idle+idle*.45*Math.sin(phase));if(s.reaction==='glow')react*=.68;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=s.reaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,60);
+const s=JSON.parse(document.getElementById('hud-state').textContent),root=document.documentElement,body=document.body,baseAccent=s.accent||'#45d9ff',baseReaction=s.reaction||'signal',eventClasses=['pulse','glow','glitch','spectrum','surge'],elementCircuit=s.type==='frame'?'frame':s.type==='chat'?'chat':s.type==='media'?'alerts':s.type==='plate'||s.type==='lore'||s.type==='radio'?'plates':'core';
+root.style.setProperty('--accent',baseAccent);body.classList.add((s.type||'plate')+'-type');body.classList.add(baseReaction);for(const id of ['primary','framePrimary','chatPrimary','radioPrimary'])document.getElementById(id).textContent=s.primary||'TEMPEST BROADCAST';for(const id of ['secondary','frameSecondary','chatSecondary','radioSecondary'])document.getElementById(id).textContent=s.secondary||'OVERLAY ELEMENT ONLINE';
+const radioAudio=document.getElementById('radioAudio'),radioToggle=document.getElementById('radioToggle'),radioTrack=document.getElementById('radioTrack'),radioArtist=document.getElementById('radioArtist'),radioStation=document.getElementById('radioStation'),radioState=document.getElementById('radioSecondary'),radioListeners=document.getElementById('radioListeners'),radioClock=document.getElementById('radioClock'),radioProgress=document.getElementById('radioProgress'),radioArt=document.getElementById('radioArt');let radioElapsed=0,radioDuration=0,radioSynced=Date.now();
+function radioEndpoint(raw){try{const u=new URL(raw),m=u.pathname.match(/\/(?:public|listen)\/([^/]+)/i);return m?{api:u.origin+'/api/nowplaying/'+encodeURIComponent(decodeURIComponent(m[1]))}:null}catch(_){return null}}
+function radioTime(value){const seconds=Math.max(0,Math.floor(Number(value)||0)),minutes=Math.floor(seconds/60);return String(minutes).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0')}
+function updateRadioClock(){if(s.type!=='radio')return;const elapsed=Math.max(0,radioElapsed+(Date.now()-radioSynced)/1000),shown=radioDuration>0?Math.min(elapsed,radioDuration):elapsed;radioClock.textContent=radioTime(shown)+' / '+(radioDuration>0?radioTime(radioDuration):'LIVE');radioProgress.style.width=(radioDuration>0?Math.min(100,shown/radioDuration*100):0).toFixed(1)+'%'}
+function updateRadioButton(){radioToggle.textContent=radioAudio.paused?'▶':'Ⅱ';radioToggle.setAttribute('aria-label',radioAudio.paused?'Play radio':'Pause radio')}
+async function refreshRadio(){if(s.type!=='radio')return;const endpoint=radioEndpoint(s.browserUrl);if(!endpoint){radioState.textContent='STATION URL REQUIRED';return}try{const response=await fetch(endpoint.api+'?t='+Date.now(),{cache:'no-store'});if(!response.ok)throw new Error('radio api '+response.status);const data=await response.json(),song=data.now_playing?.song||{},station=data.station||{};radioTrack.textContent=song.title||song.text||'TRACK DATA UNAVAILABLE';radioArtist.textContent=song.artist||'AUTOMATED ROTATION';radioStation.textContent=station.name||s.primary||'RADIO PLAYER';radioState.textContent=data.live?.is_live?'● LIVE DJ':'● LIVE // AUTO DJ';radioListeners.textContent=String(data.listeners?.current??0).padStart(2,'0')+' LIVE';radioElapsed=Number(data.now_playing?.elapsed)||0;radioDuration=Number(data.now_playing?.duration)||0;radioSynced=Date.now();radioArt.src=song.art||station.art||'';const stream=station.listen_url||'';if(stream&&radioAudio.src!==stream){radioAudio.src=stream;radioAudio.load();radioAudio.play().catch(()=>{});}updateRadioClock();updateRadioButton()}catch(_){radioState.textContent='● DATA RETRY'}}
+radioToggle.addEventListener('click',()=>{if(radioAudio.paused)radioAudio.play().catch(()=>{});else radioAudio.pause()});radioAudio.addEventListener('play',updateRadioButton);radioAudio.addEventListener('pause',updateRadioButton);refreshRadio();setInterval(refreshRadio,15000);setInterval(updateRadioClock,1000);let level=0,phase=0;
+async function telemetry(){let raw=0,eventActive=false,eventEffect='';try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:channel==='beat'?d.beat:(d.master??d.level),eventCircuit=String(d.externalEventCircuit||'all');eventActive=!!d.externalEventActive&&(eventCircuit==='all'||eventCircuit===elementCircuit);eventEffect=eventActive?String(d.externalEventEffect||'surge'):'';raw=Math.max(Number(routed)||0,Number(d.pulse)||0,eventActive?Number(d.externalEventStrength)||0:0);const eventAccent=eventActive&&/^#[0-9A-Fa-f]{6}$/.test(String(d.externalEventAccent||''))?String(d.externalEventAccent):'';root.style.setProperty('--accent',eventAccent||baseAccent)}}catch(_){}for(const cls of eventClasses)body.classList.remove(cls);body.classList.add(eventActive&&eventEffect?eventEffect:baseReaction);const threshold=Math.min(.95,Math.max(0,Number(s.threshold)||0)),target=Math.min(1.5,Math.max(0,(raw-threshold)/Math.max(.001,1-threshold))),baseAttack=Math.min(1,Math.max(.05,Number(s.attack)||.55)),baseDecay=Math.min(.98,Math.max(.5,Number(s.decay)||.82)),attack=1-Math.pow(1-baseAttack,100/60),decay=Math.pow(baseDecay,100/60);if(target>level)level+=(target-level)*attack;else level*=decay;phase+=.2;let react=level*Math.max(0,Number(s.strength)||0),idle=Math.min(.5,Math.max(0,Number(s.idle)||0)),activeReaction=eventActive?eventEffect:baseReaction;if(activeReaction==='pulse')react=Math.max(react,idle+idle*.45*Math.sin(phase));if(activeReaction==='glow')react*=.68;if(activeReaction==='surge')react*=1.28;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=activeReaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,100);
 </script></body></html>)TEMPEST");
 	html.replace(QStringLiteral("{{STATE_JSON}}"), json);
+	html.replace(
+		QStringLiteral(
+			"async function telemetry(){let raw=0,eventActive=false,eventEffect='';try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),"),
+		QStringLiteral(
+			"let tempestTelemetry={};window.addEventListener('tempestTelemetry',event=>{tempestTelemetry=event.detail||{}});function telemetry(){let raw=0,eventActive=false,eventEffect='';try{if(true){const d=tempestTelemetry,"));
 	return html;
 }
 
@@ -923,24 +1015,24 @@ bool TempestHUDComposer::ApplySourceSettings(obs_source_t *source, const Element
 		size = QSize((int)ovi.base_width, (int)ovi.base_height);
 	OBSDataAutoRelease settings = obs_data_create();
 	const QByteArray path = QDir::toNativeSeparators(ElementPath(element)).toUtf8();
-	const bool browserType = element.type == QStringLiteral("chat") || element.type == QStringLiteral("radio");
-	const bool remoteBrowser = browserType && !element.browserUrl.trimmed().isEmpty();
+	const bool remoteBrowser = element.type == QStringLiteral("chat") && !element.browserUrl.trimmed().isEmpty();
 	QString browserCss = QStringLiteral("body{background:rgba(0,0,0,0);margin:0;overflow:hidden;}");
-	if (remoteBrowser) {
-		browserCss =
-			element.type == QStringLiteral("radio")
-				? RemoteRadioCss(element.primary, element.secondary)
-				: RemoteChatCss(element.browserUrl, element.primary, element.secondary, element.accent);
-	}
+	if (remoteBrowser)
+		browserCss = RemoteChatCss(element.browserUrl, element.primary, element.secondary, element.accent);
 	const QByteArray css = browserCss.append(QStringLiteral("/* hud-revision:%1 */").arg(renderRevision)).toUtf8();
 	obs_data_set_bool(settings, "is_local_file", !remoteBrowser);
-	if (remoteBrowser)
+	if (remoteBrowser) {
 		obs_data_set_string(settings, "url", element.browserUrl.toUtf8().constData());
-	else
+		obs_data_set_string(settings, "local_file", "");
+	} else {
 		obs_data_set_string(settings, "local_file", path.constData());
+		obs_data_set_string(settings, "url", "");
+	}
 	obs_data_set_int(settings, "width", size.width());
 	obs_data_set_int(settings, "height", size.height());
-	obs_data_set_bool(settings, "shutdown", false);
+	obs_data_set_bool(settings, "fps_custom", true);
+	obs_data_set_int(settings, "fps", 30);
+	obs_data_set_bool(settings, "shutdown", true);
 	obs_data_set_bool(settings, "restart_when_active", false);
 	obs_data_set_bool(settings, "reroute_audio", false);
 	obs_data_set_string(settings, "css", css.constData());
@@ -1085,7 +1177,7 @@ QString TempestHUDComposer::TypeLabel(const QString &type)
 	if (type == QStringLiteral("media"))
 		return QStringLiteral("MEDIA");
 	if (type == QStringLiteral("lore"))
-		return QStringLiteral("LORE");
+		return QStringLiteral("TEXT PANEL");
 	return QStringLiteral("PLATE");
 }
 

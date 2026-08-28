@@ -23,7 +23,7 @@ constexpr int SeekMaximum = 10000;
 TempestMediaBay::TempestMediaBay(QWidget *parent) : OBSDock(parent)
 {
 	setObjectName(QStringLiteral("tempestMediaBay"));
-	setWindowTitle(QStringLiteral("Signal Media Bay"));
+	setWindowTitle(QStringLiteral("Media Controls"));
 	setMinimumWidth(360);
 	setMinimumHeight(180);
 	selectedSourceUuid =
@@ -65,14 +65,14 @@ void TempestMediaBay::BuildInterface()
 
 	auto *headingRow = new QHBoxLayout();
 	auto *heading = new QVBoxLayout();
-	auto *title = new QLabel(QStringLiteral("SIGNAL MEDIA BAY"), root);
+	auto *title = new QLabel(QStringLiteral("MEDIA CONTROLS"), root);
 	title->setObjectName(QStringLiteral("mediaTitle"));
-	auto *subtitle = new QLabel(QStringLiteral("Native visualizer and avatar transport"), root);
+	auto *subtitle = new QLabel(QStringLiteral("Playback controls for media and visual sources"), root);
 	subtitle->setObjectName(QStringLiteral("mediaSubtitle"));
 	heading->addWidget(title);
 	heading->addWidget(subtitle);
 	headingRow->addLayout(heading, 1);
-	stateLabel = new QLabel(QStringLiteral("NO SIGNAL"), root);
+	stateLabel = new QLabel(QStringLiteral("NO MEDIA SELECTED"), root);
 	stateLabel->setObjectName(QStringLiteral("mediaState"));
 	headingRow->addWidget(stateLabel);
 	layout->addLayout(headingRow);
@@ -80,7 +80,7 @@ void TempestMediaBay::BuildInterface()
 	auto *sourceRow = new QHBoxLayout();
 	sourceSelector = new QComboBox(root);
 	sourceSelector->setObjectName(QStringLiteral("tempestMediaSourceSelector"));
-	sourceSelector->setAccessibleName(QStringLiteral("Signal Media Bay source"));
+	sourceSelector->setAccessibleName(QStringLiteral("Controllable media source"));
 	connect(sourceSelector, &QComboBox::currentIndexChanged, this, &TempestMediaBay::SelectSource);
 	auto *refresh = new QPushButton(QStringLiteral("REFRESH"), root);
 	refresh->setObjectName(QStringLiteral("tempestMediaRefresh"));
@@ -127,7 +127,7 @@ void TempestMediaBay::BuildInterface()
 	seekSlider = new QSlider(Qt::Horizontal, root);
 	seekSlider->setObjectName(QStringLiteral("tempestMediaSeek"));
 	seekSlider->setRange(0, SeekMaximum);
-	seekSlider->setAccessibleName(QStringLiteral("Signal Media Bay timeline"));
+	seekSlider->setAccessibleName(QStringLiteral("Selected media timeline"));
 	connect(seekSlider, &QSlider::sliderPressed, this, &TempestMediaBay::BeginSeek);
 	connect(seekSlider, &QSlider::sliderReleased, this, &TempestMediaBay::FinishSeek);
 	timelineRow->addWidget(elapsedLabel);
@@ -329,7 +329,7 @@ void TempestMediaBay::RefreshPlaybackState()
 	emptyLabel->setVisible(!available);
 	if (!available) {
 		stateLabel->setText(sourceFingerprint.isEmpty() ? QStringLiteral("NO MEDIA SOURCES")
-								: QStringLiteral("SELECT A SIGNAL"));
+								: QStringLiteral("SELECT MEDIA"));
 		elapsedLabel->setText(QStringLiteral("00:00"));
 		durationLabel->setText(QStringLiteral("00:00"));
 		if (!seeking)

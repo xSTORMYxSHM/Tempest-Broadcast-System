@@ -86,6 +86,15 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_) : tre
 	lock->setAccessibleDescription(QTStr("Basic.Main.Sources.LockDescription").arg(name));
 	lock->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
 
+	if (tree->property("stableSourceIndicators").toBool()) {
+		auto stabilizeIndicator = [](QCheckBox *indicator) {
+			indicator->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+			indicator->setFixedSize(26, 22);
+		};
+		stabilizeIndicator(vis);
+		stabilizeIndicator(lock);
+	}
+
 	label = new OBSSourceLabel(source);
 	label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 	label->setAttribute(Qt::WA_TranslucentBackground);

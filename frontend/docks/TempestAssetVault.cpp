@@ -13,8 +13,10 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QDirIterator>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -23,6 +25,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -37,8 +40,8 @@ constexpr char ConfigSection[] = "TempestAssetVault";
 constexpr char AssetBusName[] = "Tempest // Asset Bus";
 
 const QStringList BankNames = {
-	QStringLiteral("UNASSIGNED"), QStringLiteral("FRACTAL"),      QStringLiteral("AVATAR"),
-	QStringLiteral("LORE"),       QStringLiteral("INTERRUPTION"),
+	QStringLiteral("UNASSIGNED"), QStringLiteral("FRACTAL"), QStringLiteral("AVATAR"),
+	QStringLiteral("TEXT"),       QStringLiteral("ALERT"),   QStringLiteral("OVERLAY"),
 };
 } // namespace
 
@@ -50,7 +53,7 @@ TempestAssetVault::TempestAssetVault(OBSBasic *main, TempestSequenceDirector *di
 	  mediaBay(mediaBay)
 {
 	setObjectName(QStringLiteral("tempestAssetVault"));
-	setWindowTitle(QStringLiteral("Mainframe Asset Vault"));
+	setWindowTitle(QStringLiteral("Asset Library"));
 	setMinimumWidth(380);
 	BuildInterface();
 	EnableContentScaling(objectName());
@@ -59,6 +62,12 @@ TempestAssetVault::TempestAssetVault(OBSBasic *main, TempestSequenceDirector *di
 
 	scanTimer.setInterval(0);
 	connect(&scanTimer, &QTimer::timeout, this, &TempestAssetVault::ScanBatch);
+	directoryWatcher = new QFileSystemWatcher(this);
+	watcherDebounce.setSingleShot(true);
+	watcherDebounce.setInterval(650);
+	connect(directoryWatcher, &QFileSystemWatcher::directoryChanged, this, &TempestAssetVault::ScheduleRescan);
+	connect(directoryWatcher, &QFileSystemWatcher::fileChanged, this, &TempestAssetVault::ScheduleRescan);
+	connect(&watcherDebounce, &QTimer::timeout, this, &TempestAssetVault::StartScan);
 	if (roots.isEmpty())
 		SetStatus(QStringLiteral("ADD A VIDEO FOLDER TO BEGIN INDEXING"));
 	else
@@ -89,9 +98,9 @@ void TempestAssetVault::BuildInterface()
 	auto *layout = new QVBoxLayout(root);
 	layout->setContentsMargins(10, 10, 10, 10);
 	layout->setSpacing(7);
-	auto *title = new QLabel(QStringLiteral("ASSET VAULT"), root);
+	auto *title = new QLabel(QStringLiteral("ASSET LIBRARY"), root);
 	title->setObjectName(QStringLiteral("vaultTitle"));
-	auto *subtitle = new QLabel(QStringLiteral("Indexed visual archives and reusable signal bus"), root);
+	auto *subtitle = new QLabel(QStringLiteral("Indexed media, overlays, and reusable stream assets"), root);
 	subtitle->setObjectName(QStringLiteral("vaultSubtitle"));
 	layout->addWidget(title);
 	layout->addWidget(subtitle);
@@ -113,7 +122,7 @@ void TempestAssetVault::BuildInterface()
 	searchField->setObjectName(QStringLiteral("tempestVaultSearch"));
 	searchField->setPlaceholderText(QStringLiteral("Search filename or folder..."));
 	bankFilter = new QComboBox(root);
-	bankFilter->addItem(QStringLiteral("ALL BANKS"), QString());
+	bankFilter->addItem(QStringLiteral("ALL COLLECTIONS"), QString());
 	for (const QString &bank : BankNames)
 		bankFilter->addItem(bank, bank);
 	connect(searchField, &QLineEdit::textChanged, this, &TempestAssetVault::RebuildAssetList);
@@ -124,7 +133,7 @@ void TempestAssetVault::BuildInterface()
 
 	assetList = new QListWidget(root);
 	assetList->setObjectName(QStringLiteral("tempestVaultAssetList"));
-	assetList->setAccessibleName(QStringLiteral("Tempest indexed video assets"));
+	assetList->setAccessibleName(QStringLiteral("Indexed media and overlay assets"));
 	connect(assetList, &QListWidget::currentRowChanged, this, &TempestAssetVault::SelectAsset);
 	connect(assetList, &QListWidget::itemDoubleClicked, this, &TempestAssetVault::LoadSelectedAsset);
 	layout->addWidget(assetList, 1);
@@ -138,7 +147,7 @@ void TempestAssetVault::BuildInterface()
 	assignBankSelector = new QComboBox(root);
 	for (const QString &bank : BankNames)
 		assignBankSelector->addItem(bank, bank);
-	auto *assign = new QPushButton(QStringLiteral("ASSIGN BANK"), root);
+	auto *assign = new QPushButton(QStringLiteral("ASSIGN COLLECTION"), root);
 	connect(assign, &QPushButton::clicked, this, &TempestAssetVault::AssignBank);
 	bankRow->addWidget(assignBankSelector, 1);
 	bankRow->addWidget(assign);
@@ -146,7 +155,7 @@ void TempestAssetVault::BuildInterface()
 
 	loopOnBus = new QCheckBox(QStringLiteral("Loop when loaded on Asset Bus"), root);
 	layout->addWidget(loopOnBus);
-	loadButton = new QPushButton(QStringLiteral("LOAD / PREVIEW ON ASSET BUS"), root);
+	loadButton = new QPushButton(QStringLiteral("PREVIEW SELECTED ASSET"), root);
 	queueButton = new QPushButton(QStringLiteral("ADD TO CURRENT SEQUENCE"), root);
 	auto *openFolder = new QPushButton(QStringLiteral("OPEN FILE LOCATION"), root);
 	connect(loadButton, &QPushButton::clicked, this, &TempestAssetVault::LoadSelectedAsset);
@@ -156,10 +165,10 @@ void TempestAssetVault::BuildInterface()
 	layout->addWidget(queueButton);
 	layout->addWidget(openFolder);
 
-	auto *refresh = new QPushButton(QStringLiteral("RESCAN VAULT"), root);
+	auto *refresh = new QPushButton(QStringLiteral("RESCAN LIBRARY"), root);
 	connect(refresh, &QPushButton::clicked, this, &TempestAssetVault::StartScan);
 	layout->addWidget(refresh);
-	statusLabel = new QLabel(QStringLiteral("VAULT INITIALIZING"), root);
+	statusLabel = new QLabel(QStringLiteral("LIBRARY INITIALIZING"), root);
 	statusLabel->setObjectName(QStringLiteral("vaultStatus"));
 	statusLabel->setWordWrap(true);
 	layout->addWidget(statusLabel);
@@ -186,6 +195,16 @@ void TempestAssetVault::LoadState()
 		const QJsonObject object = bankDocument.object();
 		for (auto it = object.begin(); it != object.end(); ++it)
 			banks.insert(NormalizePath(it.key()), it.value().toString(QStringLiteral("UNASSIGNED")));
+	}
+	for (const char *builtInFolder : {"tempest-broadcast-system/control-deck/profiles",
+					  "tempest-broadcast-system/control-deck/vault-elements"}) {
+		char builtInPath[1024];
+		if (GetAppConfigPath(builtInPath, sizeof(builtInPath), builtInFolder) <= 0)
+			continue;
+		const QString path = NormalizePath(QString::fromUtf8(builtInPath));
+		QDir().mkpath(path);
+		if (!roots.contains(path, Qt::CaseInsensitive))
+			roots.prepend(path);
 	}
 }
 
@@ -230,7 +249,7 @@ void TempestAssetVault::AddRootFolder()
 {
 	const QString initial = QDir(QStringLiteral("G:/")).exists() ? QStringLiteral("G:/") : QDir::homePath();
 	const QString selected =
-		QFileDialog::getExistingDirectory(this, QStringLiteral("Add Asset Vault Folder"), initial);
+		QFileDialog::getExistingDirectory(this, QStringLiteral("Add Asset Library Folder"), initial);
 	const QString normalized = NormalizePath(selected);
 	if (normalized.isEmpty())
 		return;
@@ -260,6 +279,7 @@ void TempestAssetVault::RemoveRootFolder()
 
 void TempestAssetVault::StartScan()
 {
+	watcherDebounce.stop();
 	scanTimer.stop();
 	iterator.reset();
 	assets.clear();
@@ -267,10 +287,11 @@ void TempestAssetVault::StartScan()
 	scanning = !roots.isEmpty();
 	RebuildAssetList();
 	if (!scanning) {
+		RefreshWatchPaths();
 		SetStatus(QStringLiteral("ADD A VIDEO FOLDER TO BEGIN INDEXING"));
 		return;
 	}
-	SetStatus(QStringLiteral("INDEXING VISUAL ARCHIVE // 0 FILES"));
+	SetStatus(QStringLiteral("INDEXING ASSET LIBRARY // 0 FILES"));
 	scanTimer.start();
 }
 
@@ -278,9 +299,10 @@ void TempestAssetVault::ScanBatch()
 {
 	constexpr int BatchSize = 250;
 	int processed = 0;
-	const QStringList filters = {QStringLiteral("*.mp4"),  QStringLiteral("*.mov"), QStringLiteral("*.mkv"),
-				     QStringLiteral("*.webm"), QStringLiteral("*.avi"), QStringLiteral("*.m4v"),
-				     QStringLiteral("*.gif")};
+	const QStringList filters = {QStringLiteral("*.mp4"),  QStringLiteral("*.mov"),  QStringLiteral("*.mkv"),
+				     QStringLiteral("*.webm"), QStringLiteral("*.avi"),  QStringLiteral("*.m4v"),
+				     QStringLiteral("*.gif"),  QStringLiteral("*.html"), QStringLiteral("*.txt"),
+				     QStringLiteral("*.json")};
 	while (processed < BatchSize && scanRootIndex < roots.size()) {
 		if (!iterator)
 			iterator = std::make_unique<QDirIterator>(roots[scanRootIndex], filters, QDir::Files,
@@ -288,15 +310,21 @@ void TempestAssetVault::ScanBatch()
 		if (iterator->hasNext()) {
 			const QString path = NormalizePath(iterator->next());
 			const QFileInfo info(path);
-			assets.push_back(
-				{path, info.fileName(), banks.value(path, QStringLiteral("UNASSIGNED")), info.size()});
+			const bool browserAsset = info.suffix().compare(QStringLiteral("html"), Qt::CaseInsensitive) ==
+						  0;
+			const bool textAsset = info.suffix().compare(QStringLiteral("txt"), Qt::CaseInsensitive) == 0 ||
+					       info.suffix().compare(QStringLiteral("json"), Qt::CaseInsensitive) == 0;
+			const QString defaultBank = browserAsset ? QStringLiteral("OVERLAY")
+						    : textAsset  ? QStringLiteral("TEXT")
+								 : QStringLiteral("UNASSIGNED");
+			assets.push_back({path, info.fileName(), banks.value(path, defaultBank), info.size()});
 			++processed;
 		} else {
 			iterator.reset();
 			++scanRootIndex;
 		}
 	}
-	SetStatus(QStringLiteral("INDEXING VISUAL ARCHIVE // %1 FILES").arg(assets.size()));
+	SetStatus(QStringLiteral("INDEXING ASSET LIBRARY // %1 FILES").arg(assets.size()));
 	if (scanRootIndex < roots.size())
 		return;
 
@@ -306,9 +334,46 @@ void TempestAssetVault::ScanBatch()
 	std::sort(assets.begin(), assets.end(),
 		  [](const Asset &a, const Asset &b) { return a.name.compare(b.name, Qt::CaseInsensitive) < 0; });
 	RebuildAssetList();
-	SetStatus(QStringLiteral("VAULT READY // %1 ASSET%2")
+	RefreshWatchPaths();
+	SetStatus(QStringLiteral("LIBRARY READY // %1 ASSET%2")
 			  .arg(assets.size())
 			  .arg(assets.size() == 1 ? QString() : QStringLiteral("S")));
+}
+
+void TempestAssetVault::ScheduleRescan(const QString &changedPath)
+{
+	(void)changedPath;
+	if (!watcherDebounce.isActive())
+		SetStatus(QStringLiteral("LIBRARY CHANGE DETECTED // REFRESH PENDING"));
+	watcherDebounce.start();
+}
+
+void TempestAssetVault::RefreshWatchPaths()
+{
+	if (!directoryWatcher)
+		return;
+	const QStringList watchedDirectories = directoryWatcher->directories();
+	const QStringList watchedFiles = directoryWatcher->files();
+	if (!watchedDirectories.isEmpty())
+		directoryWatcher->removePaths(watchedDirectories);
+	if (!watchedFiles.isEmpty())
+		directoryWatcher->removePaths(watchedFiles);
+
+	constexpr int MaximumWatchDirectories = 2048;
+	QStringList paths;
+	for (const QString &root : roots) {
+		if (!QDir(root).exists())
+			continue;
+		paths.push_back(root);
+		QDirIterator directories(root, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+		while (directories.hasNext() && paths.size() < MaximumWatchDirectories)
+			paths.push_back(NormalizePath(directories.next()));
+		if (paths.size() >= MaximumWatchDirectories)
+			break;
+	}
+	paths.removeDuplicates();
+	if (!paths.isEmpty())
+		directoryWatcher->addPaths(paths);
 }
 
 void TempestAssetVault::RebuildAssetList()
@@ -351,7 +416,16 @@ void TempestAssetVault::SelectAsset()
 {
 	const Asset *asset = SelectedAsset();
 	loadButton->setEnabled(asset != nullptr);
-	queueButton->setEnabled(asset != nullptr);
+	const bool browserAsset =
+		asset && QFileInfo(asset->path).suffix().compare(QStringLiteral("html"), Qt::CaseInsensitive) == 0;
+	const bool textAsset =
+		asset && (QFileInfo(asset->path).suffix().compare(QStringLiteral("txt"), Qt::CaseInsensitive) == 0 ||
+			  QFileInfo(asset->path).suffix().compare(QStringLiteral("json"), Qt::CaseInsensitive) == 0);
+	queueButton->setEnabled(asset && !browserAsset && !textAsset);
+	loopOnBus->setEnabled(asset && !browserAsset && !textAsset);
+	loadButton->setText(browserAsset ? QStringLiteral("ADD / UPDATE BROWSER ELEMENT")
+			    : textAsset  ? QStringLiteral("EDIT TEXT ASSET")
+					 : QStringLiteral("LOAD / PREVIEW ON ASSET BUS"));
 	if (!asset) {
 		detailLabel->setText(scanning ? QStringLiteral("INDEXING...") : QStringLiteral("NO ASSET SELECTED"));
 		return;
@@ -382,7 +456,7 @@ void TempestAssetVault::AssignBank()
 	}
 	SaveBanks();
 	RebuildAssetList();
-	SetStatus(QStringLiteral("BANK ASSIGNED // %1").arg(bank));
+	SetStatus(QStringLiteral("COLLECTION ASSIGNED // %1").arg(bank));
 }
 
 QString TempestAssetVault::EnsureAssetBus(const QString &filePath, bool playNow)
@@ -436,11 +510,94 @@ QString TempestAssetVault::EnsureAssetBus(const QString &filePath, bool playNow)
 	return uuid;
 }
 
+QString TempestAssetVault::EnsureBrowserAsset(const QString &filePath)
+{
+	if (!main)
+		return {};
+	OBSScene scene = main->GetCurrentScene();
+	if (!scene) {
+		SetStatus(QStringLiteral("BROWSER ELEMENT FAILED // NO ACTIVE SCENE"), true);
+		return {};
+	}
+	QFile file(filePath);
+	int width = 1920;
+	int height = 1080;
+	if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		const QString html = QString::fromUtf8(file.read(16384));
+		const QRegularExpressionMatch size =
+			QRegularExpression(
+				QStringLiteral(
+					"<meta\\s+name=[\\\"']tempest-size[\\\"']\\s+content=[\\\"'](\\d+)x(\\d+)[\\\"']"),
+				QRegularExpression::CaseInsensitiveOption)
+				.match(html);
+		if (size.hasMatch()) {
+			width = std::clamp(size.captured(1).toInt(), 64, 4096);
+			height = std::clamp(size.captured(2).toInt(), 64, 4096);
+		}
+	}
+	const QString sourceName = QStringLiteral("Tempest Vault // %1").arg(QFileInfo(filePath).completeBaseName());
+	OBSSourceAutoRelease source = obs_get_source_by_name(sourceName.toUtf8().constData());
+	bool created = false;
+	OBSDataAutoRelease settings = obs_data_create();
+	obs_data_set_bool(settings, "is_local_file", true);
+	obs_data_set_string(settings, "local_file", QDir::toNativeSeparators(filePath).toUtf8().constData());
+	obs_data_set_int(settings, "width", width);
+	obs_data_set_int(settings, "height", height);
+	obs_data_set_bool(settings, "fps_custom", true);
+	obs_data_set_int(settings, "fps", 30);
+	obs_data_set_bool(settings, "shutdown", true);
+	obs_data_set_bool(settings, "restart_when_active", false);
+	obs_data_set_string(settings, "css", "body { background-color: rgba(0, 0, 0, 0); overflow: hidden; }");
+	if (source) {
+		if (strcmp(obs_source_get_unversioned_id(source), "browser_source") != 0) {
+			SetStatus(QStringLiteral("BROWSER ELEMENT NAME IS USED BY ANOTHER SOURCE TYPE"), true);
+			return {};
+		}
+		obs_source_update(source, settings);
+	} else {
+		const char *sourceType = obs_get_latest_input_type_id("browser_source");
+		if (!sourceType)
+			return {};
+		source = obs_source_create(sourceType, sourceName.toUtf8().constData(), settings, nullptr);
+		created = source != nullptr;
+	}
+	if (!source)
+		return {};
+	obs_sceneitem_t *item = obs_scene_find_source_recursive(scene, sourceName.toUtf8().constData());
+	if (!item) {
+		item = obs_scene_add(scene, source);
+		obs_video_info video{};
+		if (item && obs_get_video_info(&video)) {
+			vec2 position{(float(video.base_width) - float(width)) / 2.0f,
+				      (float(video.base_height) - float(height)) / 2.0f};
+			obs_sceneitem_set_pos(item, &position);
+		}
+	}
+	main->SaveProject();
+	return created ? QStringLiteral("created") : QStringLiteral("updated");
+}
+
 void TempestAssetVault::LoadSelectedAsset()
 {
 	const Asset *asset = SelectedAsset();
 	if (!asset)
 		return;
+	const QString suffix = QFileInfo(asset->path).suffix();
+	if (suffix.compare(QStringLiteral("txt"), Qt::CaseInsensitive) == 0 ||
+	    suffix.compare(QStringLiteral("json"), Qt::CaseInsensitive) == 0) {
+		if (QDesktopServices::openUrl(QUrl::fromLocalFile(asset->path)))
+			SetStatus(QStringLiteral("TEXT ASSET OPENED // %1").arg(asset->name.toUpper()));
+		else
+			SetStatus(QStringLiteral("TEXT ASSET COULD NOT BE OPENED"), true);
+		return;
+	}
+	if (QFileInfo(asset->path).suffix().compare(QStringLiteral("html"), Qt::CaseInsensitive) == 0) {
+		const QString result = EnsureBrowserAsset(asset->path);
+		if (!result.isEmpty())
+			SetStatus(
+				QStringLiteral("BROWSER ELEMENT %1 // %2").arg(result.toUpper(), asset->name.toUpper()));
+		return;
+	}
 	const QString uuid = EnsureAssetBus(asset->path, true);
 	if (!uuid.isEmpty())
 		SetStatus(QStringLiteral("ASSET BUS PLAYING // %1").arg(asset->name.toUpper()));

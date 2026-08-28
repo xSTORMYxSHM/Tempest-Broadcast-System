@@ -47,6 +47,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStyle>
 #include <QStringList>
 #include <QTabWidget>
 #include <QTimer>
@@ -122,7 +123,7 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 	  controlDeck(controlDeck)
 {
 	setObjectName(QStringLiteral("tempestCommandMatrix"));
-	setWindowTitle(QStringLiteral("Transmission Command Matrix"));
+	setWindowTitle(QStringLiteral("Scene Control"));
 	setMinimumWidth(270);
 	BuildInterface();
 	EnableContentScaling(objectName());
@@ -147,7 +148,7 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 	connect(startCountdown, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
 
 	refreshTimer = new QTimer(this);
-	refreshTimer->setInterval(500);
+	refreshTimer->setInterval(1000);
 	connect(refreshTimer, &QTimer::timeout, this, &TempestCommandMatrix::RefreshScenes);
 	refreshTimer->start();
 	RefreshScenes();
@@ -177,6 +178,16 @@ TempestCommandMatrix::~TempestCommandMatrix()
 							"ClearReactionEvent");
 	}
 #endif
+}
+
+QWidget *TempestCommandMatrix::TakeSourceInspectorPanel()
+{
+	if (!sourceInspectorPanel)
+		return nullptr;
+
+	QWidget *panel = sourceInspectorPanel;
+	panel->setParent(nullptr);
+	return panel;
 }
 
 void TempestCommandMatrix::SetSequenceDirector(TempestSequenceDirector *director)
@@ -326,7 +337,7 @@ void TempestCommandMatrix::RegisterHotkeys()
 	UnregisterHotkeys();
 	for (const ProtocolWidgets &protocol : protocols) {
 		const QString name = QStringLiteral("TempestMainframe.Run.%1").arg(protocol.id);
-		const QString description = QStringLiteral("Tempest Mainframe: Run %1 Protocol").arg(protocol.label);
+		const QString description = QStringLiteral("Tempest Broadcast: Run %1 Automation").arg(protocol.label);
 		const QByteArray nameUtf8 = name.toUtf8();
 		const QByteArray descriptionUtf8 = description.toUtf8();
 		const obs_hotkey_id id = obs_hotkey_register_frontend(nameUtf8.constData(), descriptionUtf8.constData(),
@@ -673,10 +684,12 @@ void TempestCommandMatrix::BuildInterface()
 		QPushButton:checked { border: 2px solid #45d9ff; background: #073c5f; color: white; }
 		QPushButton[protocol="true"] { min-height: 48px; font-size: 11px; letter-spacing: 1px; }
 		QPushButton[sceneRoute="true"] { min-height: 44px; }
+		QPushButton[sceneRoute="true"][activeScene="true"] { border: 2px solid #45d9ff; background: #073c5f; color: white; }
 		QComboBox { min-height: 28px; background: #06101a; border: 1px solid #1f506d; color: #bdf6ff; }
 		QCheckBox { color: #748fa4; spacing: 7px; }
 		QScrollArea { border: none; background: transparent; }
 		QListView#matrixSourceTree { border: 1px solid #153b52; background: #07131e; color: #bdf6ff; }
+		QListView#matrixSourceTree QCheckBox { spacing: 0; margin: 0; }
 		QWidget#matrixSourceToolbar { border: none; background: #07131e; }
 		QWidget#matrixSourceToolbar QToolButton { min-width: 0; min-height: 30px; border: 1px solid #153b52; border-radius: 3px; background: #0d2230; color: #bdf6ff; }
 		QWidget#matrixSourceToolbar QToolButton:hover { border-color: #45d9ff; background: #0c456b; }
@@ -700,9 +713,9 @@ void TempestCommandMatrix::BuildInterface()
 	layout->setContentsMargins(10, 10, 10, 10);
 	layout->setSpacing(8);
 
-	auto *title = new QLabel(QStringLiteral("TRANSMISSION MATRIX"), root);
+	auto *title = new QLabel(QStringLiteral("SCENE CONTROL"), root);
 	title->setObjectName(QStringLiteral("matrixTitle"));
-	auto *subtitle = new QLabel(QStringLiteral("Scene protocols and direct routing"), root);
+	auto *subtitle = new QLabel(QStringLiteral("Scenes, sources, and stream automation"), root);
 	subtitle->setObjectName(QStringLiteral("matrixSubtitle"));
 	layout->addWidget(title);
 	layout->addWidget(subtitle);
@@ -720,11 +733,11 @@ void TempestCommandMatrix::BuildInterface()
 	auto *viewRow = new QHBoxLayout();
 	viewRow->setSpacing(6);
 	basicViewButton = new QPushButton(QStringLiteral("BASIC"), root);
-	protocolViewButton = new QPushButton(QStringLiteral("PROTOCOL"), root);
+	protocolViewButton = new QPushButton(QStringLiteral("AUTOMATION"), root);
 	basicViewButton->setCheckable(true);
 	protocolViewButton->setCheckable(true);
 	basicViewButton->setAccessibleName(QStringLiteral("Basic scene routing view"));
-	protocolViewButton->setAccessibleName(QStringLiteral("Protocol automation view"));
+	protocolViewButton->setAccessibleName(QStringLiteral("Stream automation view"));
 	auto *viewGroup = new QButtonGroup(root);
 	viewGroup->setExclusive(true);
 	viewGroup->addButton(basicViewButton);
@@ -780,8 +793,9 @@ void TempestCommandMatrix::BuildInterface()
 	sourcePaneLayout->addWidget(sourceSceneLabel);
 
 	sourceTree = new SourceTree(sourcePane);
+	sourceTree->setProperty("stableSourceIndicators", true);
 	sourceTree->setObjectName(QStringLiteral("matrixSourceTree"));
-	sourceTree->setAccessibleName(QStringLiteral("Transmission Matrix native sources"));
+	sourceTree->setAccessibleName(QStringLiteral("Scene Control native sources"));
 	sourceTree->setContextMenuPolicy(Qt::CustomContextMenu);
 	sourceTree->setFrameShape(QFrame::NoFrame);
 	sourceTree->setDragEnabled(true);
@@ -803,7 +817,7 @@ void TempestCommandMatrix::BuildInterface()
 
 	auto *sourceToolbar = new QWidget(sourcePane);
 	sourceToolbar->setObjectName(QStringLiteral("matrixSourceToolbar"));
-	sourceToolbar->setAccessibleName(QStringLiteral("Transmission Matrix source controls"));
+	sourceToolbar->setAccessibleName(QStringLiteral("Scene Control source controls"));
 	auto *sourceToolbarLayout = new QHBoxLayout(sourceToolbar);
 	sourceToolbarLayout->setContentsMargins(0, 0, 0, 0);
 	sourceToolbarLayout->setSpacing(4);
@@ -828,9 +842,10 @@ void TempestCommandMatrix::BuildInterface()
 	addSourceAction("actionSourceDown", QStringLiteral("Move selected source down"));
 	sourcePaneLayout->addWidget(sourceToolbar);
 
-	sourceInspectorPanel = new QWidget(sourcePane);
+	sourceInspectorPanel = new QWidget();
 	sourceInspectorPanel->setObjectName(QStringLiteral("matrixSourceInspector"));
 	sourceInspectorPanel->setAccessibleName(QStringLiteral("Selected source inspector"));
+	sourceInspectorPanel->setStyleSheet(root->styleSheet());
 	auto *inspectorLayout = new QVBoxLayout(sourceInspectorPanel);
 	inspectorLayout->setContentsMargins(7, 6, 7, 7);
 	inspectorLayout->setSpacing(4);
@@ -1068,11 +1083,11 @@ void TempestCommandMatrix::BuildInterface()
 	reactionEnabled->setAccessibleName(QStringLiteral("Enable selected source reaction"));
 	reactionPreset = new QComboBox(reactionConsolePanel);
 	reactionPreset->addItem(QStringLiteral("CUSTOM RIG"), QStringLiteral("custom"));
-	reactionPreset->addItem(QStringLiteral("MAINFRAME SURGE"), QStringLiteral("mainframe-surge"));
+	reactionPreset->addItem(QStringLiteral("ENERGY SURGE"), QStringLiteral("mainframe-surge"));
 	reactionPreset->addItem(QStringLiteral("BEAT LOCK"), QStringLiteral("beat-lock"));
 	reactionPreset->addItem(QStringLiteral("VOICE RELAY"), QStringLiteral("voice-relay"));
 	reactionPreset->addItem(QStringLiteral("FRACTAL DRIFT"), QStringLiteral("fractal-drift"));
-	reactionPreset->addItem(QStringLiteral("GHOST SIGNAL"), QStringLiteral("ghost-signal"));
+	reactionPreset->addItem(QStringLiteral("SOFT PULSE"), QStringLiteral("ghost-signal"));
 	reactionPreset->setAccessibleName(QStringLiteral("Reactive source motion rig preset"));
 	reactionCircuit = new QComboBox(reactionConsolePanel);
 	reactionCircuit->addItem(QStringLiteral("CORE"), QStringLiteral("core"));
@@ -1096,7 +1111,7 @@ void TempestCommandMatrix::BuildInterface()
 	reactionForm->addRow(reactionEnabled);
 	reactionForm->addRow(QStringLiteral("PRESET"), reactionPreset);
 	reactionForm->addRow(QStringLiteral("CIRCUIT"), reactionCircuit);
-	reactionForm->addRow(QStringLiteral("SIGNAL"), reactionSignal);
+	reactionForm->addRow(QStringLiteral("AUDIO INPUT"), reactionSignal);
 	reactionForm->addRow(QStringLiteral("GATE"), reactionThreshold);
 	reactionConsole->addLayout(reactionForm);
 
@@ -1133,7 +1148,7 @@ void TempestCommandMatrix::BuildInterface()
 		      QStringLiteral(" px"), 0.1, 1000.0, 18.0, 2.0, 1, 0);
 	addRigControl(reactionRotateEnabled, reactionRotateAmount, QStringLiteral("ROTATE"), QStringLiteral("rotation"),
 		      QStringLiteral(" deg"), 0.1, 180.0, 2.0, 0.5, 1, 1);
-	reactionVisibilityEnabled = new QCheckBox(QStringLiteral("SIGNAL-GATED VISIBILITY"), reactionConsolePanel);
+	reactionVisibilityEnabled = new QCheckBox(QStringLiteral("AUDIO-GATED VISIBILITY"), reactionConsolePanel);
 	reactionVisibilityEnabled->setAccessibleName(QStringLiteral("Enable reactive source visibility gate"));
 	rigGrid->addWidget(reactionVisibilityEnabled, 2, 0, 1, 4);
 	rigGrid->setColumnStretch(1, 1);
@@ -1242,7 +1257,6 @@ void TempestCommandMatrix::BuildInterface()
 	connect(inspectorPauseButton, &QPushButton::clicked, this, [this]() { ApplySelectedMediaAction("pause"); });
 	connect(inspectorRestartButton, &QPushButton::clicked, this, [this]() { ApplySelectedMediaAction("restart"); });
 	connect(inspectorMuteButton, &QPushButton::clicked, this, &TempestCommandMatrix::ToggleSelectedMute);
-	sourcePaneLayout->addWidget(sourceInspectorPanel);
 	UpdateSourceInspector();
 	routingSplitter->addWidget(sourcePane);
 	routingSplitter->setStretchFactor(0, 1);
@@ -1255,7 +1269,7 @@ void TempestCommandMatrix::BuildInterface()
 	auto *protocolLayout = new QVBoxLayout(protocolViewPage);
 	protocolLayout->setContentsMargins(0, 0, 0, 0);
 	protocolLayout->setSpacing(7);
-	auto *protocolLabel = new QLabel(QStringLiteral("TRANSMISSION PROTOCOLS"), protocolViewPage);
+	auto *protocolLabel = new QLabel(QStringLiteral("STREAM AUTOMATIONS"), protocolViewPage);
 	protocolLabel->setObjectName(QStringLiteral("matrixSection"));
 	protocolLayout->addWidget(protocolLabel);
 
@@ -1291,7 +1305,7 @@ void TempestCommandMatrix::BuildInterface()
 	}
 	protocolLayout->addLayout(protocolGrid);
 
-	auto *assignmentLabel = new QLabel(QStringLiteral("PROTOCOL SCENE ASSIGNMENTS"), protocolViewPage);
+	auto *assignmentLabel = new QLabel(QStringLiteral("AUTOMATION SCENE ASSIGNMENTS"), protocolViewPage);
 	assignmentLabel->setObjectName(QStringLiteral("matrixSection"));
 	protocolLayout->addWidget(assignmentLabel);
 
@@ -1312,13 +1326,13 @@ void TempestCommandMatrix::BuildInterface()
 	}
 	protocolLayout->addLayout(assignmentGrid);
 
-	isolateOverlay = new QCheckBox(QStringLiteral("Isolate matching Tempest overlay"), protocolViewPage);
+	isolateOverlay = new QCheckBox(QStringLiteral("Isolate matching overlay sources"), protocolViewPage);
 	startCountdown = new QCheckBox(QStringLiteral("Start countdown with STARTING"), protocolViewPage);
 	protocolLayout->addWidget(isolateOverlay);
 	protocolLayout->addWidget(startCountdown);
 
-	auto *configureActions = new QPushButton(QStringLiteral("CONFIGURE PROTOCOL ACTIONS"), protocolViewPage);
-	configureActions->setAccessibleName(QStringLiteral("Configure protocol actions"));
+	auto *configureActions = new QPushButton(QStringLiteral("CONFIGURE AUTOMATION ACTIONS"), protocolViewPage);
+	configureActions->setAccessibleName(QStringLiteral("Configure stream automation actions"));
 	connect(configureActions, &QPushButton::clicked, this, &TempestCommandMatrix::OpenActionEditor);
 	protocolLayout->addWidget(configureActions);
 	protocolLayout->addStretch(1);
@@ -1358,7 +1372,7 @@ void TempestCommandMatrix::SetViewMode(const QString &mode, bool save)
 		config_t *config = App()->GetUserConfig();
 		config_set_string(config, ConfigSection, "ViewMode", protocolMode ? "protocol" : "basic");
 		config_save_safe(config, "tmp", nullptr);
-		SetStatus(protocolMode ? QStringLiteral("PROTOCOL AUTOMATION VIEW")
+		SetStatus(protocolMode ? QStringLiteral("STREAM AUTOMATION VIEW")
 				       : QStringLiteral("BASIC SCENE ROUTING VIEW"));
 	}
 }
@@ -1399,8 +1413,6 @@ bool TempestCommandMatrix::EnumSceneSource(obs_scene_t *, obs_sceneitem_t *item,
 	info.uuid = uuid ? QString::fromUtf8(uuid) : QString();
 	info.name = name ? QString::fromUtf8(name) : QStringLiteral("Unnamed source");
 	info.typeName = displayName ? QString::fromUtf8(displayName) : QStringLiteral("Source");
-	info.visible = obs_sceneitem_visible(item);
-	info.locked = obs_sceneitem_locked(item);
 	sources->push_back(info);
 	if (obs_sceneitem_is_group(item)) {
 		if (obs_scene_t *groupScene = obs_sceneitem_group_get_scene(item))
@@ -1466,6 +1478,7 @@ void TempestCommandMatrix::RebuildAssignments(const QVector<SceneInfo> &scenes)
 
 void TempestCommandMatrix::RebuildSceneGrid(const QVector<SceneInfo> &scenes)
 {
+	SetActiveSceneButton(nullptr);
 	emptySceneLabel = nullptr;
 	while (QLayoutItem *item = sceneGrid->takeAt(0)) {
 		if (QWidget *widget = item->widget())
@@ -1479,8 +1492,9 @@ void TempestCommandMatrix::RebuildSceneGrid(const QVector<SceneInfo> &scenes)
 		const SceneInfo &scene = scenes[index];
 		auto *button = new QPushButton(QString(scene.name).replace(QStringLiteral("&"), QStringLiteral("&&")),
 					       sceneGrid->parentWidget());
-		button->setCheckable(true);
+		button->setCheckable(false);
 		button->setProperty("sceneRoute", true);
+		button->setProperty("activeScene", false);
 		button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 		button->setAccessibleName(QStringLiteral("Route scene %1").arg(scene.name));
 		connect(button, &QPushButton::clicked, this,
@@ -1513,9 +1527,7 @@ void TempestCommandMatrix::RefreshSourcePanel(const QString &sceneUuid, const QS
 	QString fingerprint = sceneUuid + QLatin1Char('\n');
 	for (const SceneSourceInfo &source : sources) {
 		fingerprint += QString::number(source.itemId) + QLatin1Char('|') + source.uuid + QLatin1Char('|') +
-			       source.name + QLatin1Char('|') + source.typeName + QLatin1Char('|') +
-			       (source.visible ? QLatin1Char('1') : QLatin1Char('0')) +
-			       (source.locked ? QLatin1Char('1') : QLatin1Char('0')) + QLatin1Char('\n');
+			       source.name + QLatin1Char('|') + source.typeName + QLatin1Char('\n');
 	}
 	if (fingerprint == sourceFingerprint)
 		return;
@@ -2098,7 +2110,7 @@ void TempestCommandMatrix::RefreshReactionConsole()
 		reactionRotateAmount->setValue(2.0);
 		reactionVisibilityEnabled->setChecked(false);
 		reactionStatusLabel->setText(signalReactor ? QStringLiteral("NO BINDING // SELECT SETTINGS AND APPLY")
-							   : QStringLiteral("SIGNAL REACTOR LINK PENDING"));
+							   : QStringLiteral("AUDIO REACTOR LINK PENDING"));
 	} else {
 		const SourceReaction &reaction = found.value();
 		reactionEnabled->setChecked(reaction.enabled);
@@ -2695,7 +2707,7 @@ void TempestCommandMatrix::CompleteProtocolRoute(const QString &protocolId, cons
 	SetReactionActiveScene(sceneUuid);
 	const ProtocolActionConfig config = actionConfigs.value(protocolId);
 	ApplyReactionNetworkAction(config);
-	SetStatus(QStringLiteral("%1 PROTOCOL // %2%3")
+	SetStatus(QStringLiteral("%1 AUTOMATION // %2%3")
 			  .arg(protocol->label, obs_source_get_name(sceneSource),
 			       launchFailed ? QStringLiteral(" // PROGRAM FAILED") : QString()),
 		  launchFailed);
@@ -2992,7 +3004,7 @@ void TempestCommandMatrix::OpenActionEditor()
 	const QVector<SourceInfo> transitions = EnumerateTransitions();
 	QDialog dialog(this);
 	dialog.setObjectName(QStringLiteral("tempestProtocolActionEditor"));
-	dialog.setWindowTitle(QStringLiteral("Tempest Protocol Actions"));
+	dialog.setWindowTitle(QStringLiteral("Tempest Stream Automation"));
 	dialog.resize(720, 840);
 	dialog.setStyleSheet(QStringLiteral(R"(
 		QDialog { background: #07131e; color: #bdf6ff; }
@@ -3089,7 +3101,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		audioGrid->addWidget(fields.audioActionB, 2, 1);
 		pageLayout->addWidget(audioGroup);
 
-		auto *mediaGroup = new QGroupBox(QStringLiteral("SIGNAL MEDIA ACTION"), pageContents);
+		auto *mediaGroup = new QGroupBox(QStringLiteral("MEDIA ACTION"), pageContents);
 		auto *mediaGrid = new QGridLayout(mediaGroup);
 		mediaGrid->addWidget(new QLabel(QStringLiteral("Source"), mediaGroup), 0, 0);
 		mediaGrid->addWidget(new QLabel(QStringLiteral("Action"), mediaGroup), 0, 1);
@@ -3230,7 +3242,7 @@ void TempestCommandMatrix::OpenActionEditor()
 		actionConfigs.insert(fields.protocolId, actions);
 	}
 	SaveActionConfigs();
-	SetStatus(QStringLiteral("PROTOCOL ACTIONS SAVED // MATRIX READY"));
+	SetStatus(QStringLiteral("AUTOMATION ACTIONS SAVED // SCENE CONTROL READY"));
 }
 
 bool TempestCommandMatrix::SetOverlayVisibility(obs_scene_t *, obs_sceneitem_t *item, void *data)
@@ -3264,7 +3276,9 @@ void TempestCommandMatrix::UpdateActiveScene()
 	const QString currentUuid = current ? QString::fromUtf8(obs_source_get_uuid(current)) : QString();
 	const QString currentName = current ? QString::fromUtf8(obs_source_get_name(current)) : QStringLiteral("NONE");
 	SetReactionActiveScene(currentUuid);
-	currentSceneLabel->setText(QStringLiteral("ACTIVE // %1").arg(currentName.toUpper()));
+	const QString activeSceneText = QStringLiteral("ACTIVE // %1").arg(currentName.toUpper());
+	if (currentSceneLabel->text() != activeSceneText)
+		currentSceneLabel->setText(activeSceneText);
 	RefreshSourcePanel(currentUuid, currentName);
 	const bool editingLayout =
 		(layoutPosX && layoutPosX->hasFocus()) || (layoutPosY && layoutPosY->hasFocus()) ||
@@ -3274,10 +3288,29 @@ void TempestCommandMatrix::UpdateActiveScene()
 		(layoutCropBottom && layoutCropBottom->hasFocus());
 	if (layoutConsolePanel && layoutConsolePanel->isVisible() && !editingLayout)
 		RefreshLayoutConsole();
-	for (auto it = sceneButtons.begin(); it != sceneButtons.end(); ++it) {
-		if (it.value())
-			it.value()->setChecked(it.key() == currentUuid);
+	SetActiveSceneButton(sceneButtons.value(currentUuid));
+}
+
+void TempestCommandMatrix::SetActiveSceneButton(QPushButton *button)
+{
+	if (activeSceneButton == button)
+		return;
+
+	if (activeSceneButton) {
+		activeSceneButton->setProperty("activeScene", false);
+		activeSceneButton->style()->unpolish(activeSceneButton);
+		activeSceneButton->style()->polish(activeSceneButton);
+		activeSceneButton->update();
 	}
+
+	activeSceneButton = button;
+	if (!activeSceneButton)
+		return;
+
+	activeSceneButton->setProperty("activeScene", true);
+	activeSceneButton->style()->unpolish(activeSceneButton);
+	activeSceneButton->style()->polish(activeSceneButton);
+	activeSceneButton->update();
 }
 
 void TempestCommandMatrix::SetStatus(const QString &message, bool error)

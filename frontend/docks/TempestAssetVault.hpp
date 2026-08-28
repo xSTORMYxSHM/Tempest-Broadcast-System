@@ -14,6 +14,7 @@
 class QCheckBox;
 class QComboBox;
 class QDirIterator;
+class QFileSystemWatcher;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -41,6 +42,7 @@ private slots:
 	void LoadSelectedAsset();
 	void AddSelectedToSequence();
 	void OpenSelectedFolder();
+	void ScheduleRescan(const QString &changedPath);
 
 private:
 	struct Asset {
@@ -55,8 +57,10 @@ private:
 	void SaveRoots();
 	void SaveBanks();
 	void RebuildRootSelector();
+	void RefreshWatchPaths();
 	const Asset *SelectedAsset() const;
 	QString EnsureAssetBus(const QString &filePath, bool playNow);
+	QString EnsureBrowserAsset(const QString &filePath);
 	void SetStatus(const QString &message, bool error = false);
 	static QString NormalizePath(const QString &path);
 	static QString FormatBytes(qint64 bytes);
@@ -74,7 +78,9 @@ private:
 	QPointer<QCheckBox> loopOnBus;
 	QPointer<QPushButton> loadButton;
 	QPointer<QPushButton> queueButton;
+	QPointer<QFileSystemWatcher> directoryWatcher;
 	QTimer scanTimer;
+	QTimer watcherDebounce;
 	QStringList roots;
 	QHash<QString, QString> banks;
 	QVector<Asset> assets;

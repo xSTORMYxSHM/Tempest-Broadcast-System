@@ -37,7 +37,7 @@
 #include "moc_TempestStudioBridge.cpp"
 
 #ifndef TEMPEST_PRODUCT_VERSION
-#define TEMPEST_PRODUCT_VERSION "0.15.0"
+#define TEMPEST_PRODUCT_VERSION "0.16.0"
 #endif
 
 namespace {
@@ -54,6 +54,67 @@ QString FirstString(const QJsonObject &object, std::initializer_list<const char 
 			return value;
 	}
 	return {};
+}
+
+struct StudioSourceInventory {
+	QStringList audio;
+	QStringList visual;
+};
+
+bool CollectAudioSource(void *data, obs_source_t *source)
+{
+	if (!source || obs_source_removed(source) || !(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO))
+		return true;
+	const char *name = obs_source_get_name(source);
+	if (name && *name)
+		static_cast<StudioSourceInventory *>(data)->audio.append(QString::fromUtf8(name));
+	return true;
+}
+
+bool CollectVisualSceneItem(obs_scene_t *, obs_sceneitem_t *item, void *data)
+{
+	obs_source_t *source = obs_sceneitem_get_source(item);
+	if (source && !obs_source_removed(source) && (obs_source_get_output_flags(source) & OBS_SOURCE_VIDEO)) {
+		const char *name = obs_source_get_name(source);
+		if (name && *name)
+			static_cast<StudioSourceInventory *>(data)->visual.append(QString::fromUtf8(name));
+	}
+	if (obs_sceneitem_is_group(item)) {
+		if (obs_scene_t *groupScene = obs_sceneitem_group_get_scene(item))
+			obs_scene_enum_items(groupScene, CollectVisualSceneItem, data);
+	}
+	return true;
+}
+
+QJsonObject BuildSourceInventory(OBSBasic *main)
+{
+	StudioSourceInventory inventory;
+	obs_enum_sources(CollectAudioSource, &inventory);
+	OBSScene scene = main ? main->GetCurrentScene() : OBSScene();
+	if (scene)
+		obs_scene_enum_items(scene, CollectVisualSceneItem, &inventory);
+	inventory.audio.removeDuplicates();
+	inventory.visual.removeDuplicates();
+	inventory.audio.sort(Qt::CaseInsensitive);
+	inventory.visual.sort(Qt::CaseInsensitive);
+	const obs_source_t *sceneSource = scene ? obs_scene_get_source(scene) : nullptr;
+	return {{QStringLiteral("audio"), QJsonArray::fromStringList(inventory.audio)},
+		{QStringLiteral("visual"), QJsonArray::fromStringList(inventory.visual)},
+		{QStringLiteral("currentScene"),
+		 sceneSource ? QString::fromUtf8(obs_source_get_name(sceneSource)) : QString()}};
+}
+
+QJsonObject BuildCanvasProfile()
+{
+	obs_video_info videoInfo{};
+	if (!obs_get_video_info(&videoInfo))
+		return {};
+	return {{QStringLiteral("baseWidth"), static_cast<int>(videoInfo.base_width)},
+		{QStringLiteral("baseHeight"), static_cast<int>(videoInfo.base_height)},
+		{QStringLiteral("outputWidth"), static_cast<int>(videoInfo.output_width)},
+		{QStringLiteral("outputHeight"), static_cast<int>(videoInfo.output_height)},
+		{QStringLiteral("fpsNumerator"), static_cast<int>(videoInfo.fps_num)},
+		{QStringLiteral("fpsDenominator"), static_cast<int>(videoInfo.fps_den)}};
 }
 } // namespace
 
@@ -73,7 +134,7 @@ TempestStudioBridge::TempestStudioBridge(OBSBasic *main, TempestSignalReactor *r
 	  reactor(reactor)
 {
 	setObjectName(QStringLiteral("tempestStudioBridge"));
-	setWindowTitle(QStringLiteral("Tempest Studio Bridge"));
+	setWindowTitle(QStringLiteral("Studio Integration"));
 	setMinimumWidth(340);
 	BuildInterface();
 	EnableContentScaling(objectName());
@@ -116,6 +177,7 @@ void TempestStudioBridge::BuildInterface()
 		QLabel#studioBridgeDetail { color: #9eb7c8; font-size: 10px; }
 		QFrame#studioBridgePanel { background: #081a27; border: 1px solid #183a50; }
 		QLineEdit { min-height: 29px; padding: 0 7px; color: #bdf6ff; background: #06101a; border: 1px solid #1f506d; }
+		QComboBox { min-height: 29px; padding: 0 7px; color: #bdf6ff; background: #06101a; border: 1px solid #1f506d; }
 		QPushButton { min-height: 31px; padding: 0 9px; color: #bdf6ff; background: #0d2230; border: 1px solid #1f506d; font-weight: 700; }
 		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
 		QCheckBox { color: #9eb7c8; }
@@ -124,7 +186,7 @@ void TempestStudioBridge::BuildInterface()
 	layout->setContentsMargins(10, 10, 10, 10);
 	layout->setSpacing(8);
 
-	auto *title = new QLabel(QStringLiteral("STUDIO BRIDGE"), root);
+	auto *title = new QLabel(QStringLiteral("STUDIO INTEGRATION"), root);
 	title->setObjectName(QStringLiteral("studioBridgeTitle"));
 	auto *subtitle = new QLabel(QStringLiteral("TEMPEST CROSS-SUITE WORKFLOW ADAPTER // v%1")
 					    .arg(QStringLiteral(TEMPEST_PRODUCT_VERSION)),
@@ -159,7 +221,7 @@ void TempestStudioBridge::BuildInterface()
 	form->addRow(QStringLiteral("Token file"), tokenPathEdit);
 	connectionLayout->addLayout(form);
 	autoConnectCheck = new QCheckBox(QStringLiteral("CONNECT AUTOMATICALLY WITH STUDIO"), connectionPanel);
-	autoConnectCheck->setAccessibleName(QStringLiteral("Automatically connect to Tempest Mainframe Studio"));
+	autoConnectCheck->setAccessibleName(QStringLiteral("Automatically connect to Tempest Studio"));
 	connectionLayout->addWidget(autoConnectCheck);
 	auto *buttons = new QHBoxLayout();
 	connectButton = new QPushButton(QStringLiteral("CONNECT"), connectionPanel);
@@ -178,9 +240,10 @@ void TempestStudioBridge::BuildInterface()
 	capabilityLayout->setSpacing(5);
 	auto *capabilityTitle = new QLabel(QStringLiteral("ADAPTER CAPABILITIES"), capabilityPanel);
 	capabilityTitle->setObjectName(QStringLiteral("studioBridgeMeta"));
-	capabilityLabel =
-		new QLabel(QStringLiteral("REACTION TRIGGER + CLEAR // AUDIO CUE // OBS STATUS // LOCAL LEASE RESTORE"),
-			   capabilityPanel);
+	capabilityLabel = new QLabel(
+		QStringLiteral(
+			"EFFECT TRIGGER + CLEAR // ALERT AUDIO PLAYBACK // POPUP SHOW + HIDE // OBS STATUS // LOCAL LEASE RESTORE"),
+		capabilityPanel);
 	capabilityLabel->setObjectName(QStringLiteral("studioBridgeDetail"));
 	capabilityLabel->setWordWrap(true);
 	commandLabel = new QLabel(QStringLiteral("COMMANDS // 0 // ACTIVE LEASES // 0"), capabilityPanel);
@@ -189,6 +252,7 @@ void TempestStudioBridge::BuildInterface()
 	capabilityLayout->addWidget(capabilityLabel);
 	capabilityLayout->addWidget(commandLabel);
 	layout->addWidget(capabilityPanel);
+
 	layout->addStretch(1);
 	setWidget(root);
 
@@ -250,7 +314,7 @@ QString TempestStudioBridge::ResolveToken(QString *error) const
 	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
 		if (error)
 			*error = QStringLiteral(
-				"Studio token was not found. Start Tempest Mainframe Studio once, then reconnect.");
+				"Studio token was not found. Start Tempest Studio once, then reconnect.");
 		return {};
 	}
 	const QString token = QString::fromUtf8(file.readAll()).trimmed();
@@ -391,7 +455,7 @@ void TempestStudioBridge::ScheduleReconnect()
 void TempestStudioBridge::HandleConnected()
 {
 	SetConnectionState(QStringLiteral("ONLINE // STUDIO AUTHENTICATED"),
-			   QStringLiteral("Workflow commands are routed through Tempest Mainframe Studio."));
+			   QStringLiteral("Workflow commands are routed through Tempest Studio."));
 	connectButton->setText(QStringLiteral("DISCONNECT"));
 	SendHello();
 	PublishHealth(QStringLiteral("connected"));
@@ -455,9 +519,10 @@ void TempestStudioBridge::SendDocument(const QJsonObject &document)
 
 void TempestStudioBridge::SendHello()
 {
-	const QJsonArray capabilities{QStringLiteral("broadcast.reaction.trigger"),
-				      QStringLiteral("broadcast.reaction.clear"),
-				      QStringLiteral("broadcast.audio.play"), QStringLiteral("broadcast.status")};
+	const QJsonArray capabilities{
+		QStringLiteral("broadcast.reaction.trigger"), QStringLiteral("broadcast.reaction.clear"),
+		QStringLiteral("broadcast.audio.play"),       QStringLiteral("broadcast.visual.show"),
+		QStringLiteral("broadcast.visual.hide"),      QStringLiteral("broadcast.status")};
 	SendDocument(CreateMessage(QStringLiteral("hello"), {},
 				   {{QStringLiteral("applicationId"), QString::fromUtf8(ApplicationId)},
 				    {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)},
@@ -486,6 +551,8 @@ void TempestStudioBridge::PublishHealth(const QString &reason)
 			    {QStringLiteral("recording"), obs_frontend_recording_active()},
 			    {QStringLiteral("reactionArmed"), reactor && reactor->ExternalEventBridgeArmed()},
 			    {QStringLiteral("activeLeases"), activeLeases.size()},
+			    {QStringLiteral("canvasProfile"), BuildCanvasProfile()},
+			    {QStringLiteral("sourceInventory"), BuildSourceInventory(main)},
 			    {QStringLiteral("commandsHandled"), commandsHandled}};
 	if (!reason.isEmpty())
 		payload.insert(QStringLiteral("reason"), reason);
@@ -569,6 +636,10 @@ void TempestStudioBridge::HandleCommand(const QJsonObject &message)
 		HandleReactionClear(message, payload);
 	else if (topic == QStringLiteral("broadcast.audio.play"))
 		HandleAudioPlay(message, payload);
+	else if (topic == QStringLiteral("broadcast.visual.show"))
+		HandleVisualShow(message, payload);
+	else if (topic == QStringLiteral("broadcast.visual.hide"))
+		HandleVisualHide(message, payload);
 	else if (topic == QStringLiteral("broadcast.status"))
 		HandleStatusRequest(message);
 	else
@@ -582,7 +653,7 @@ void TempestStudioBridge::HandleReactionTrigger(const QJsonObject &message, cons
 {
 	if (!reactor) {
 		SendResponse(message, false, QStringLiteral("unavailable"),
-			     QStringLiteral("Signal Reactor is unavailable."));
+			     QStringLiteral("Audio Reactor is unavailable."));
 		return;
 	}
 	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
@@ -615,7 +686,7 @@ void TempestStudioBridge::HandleReactionTrigger(const QJsonObject &message, cons
 					      QStringLiteral("tempest-studio"), dedupeId, 0);
 	if (!applied) {
 		SendResponse(message, false, QStringLiteral("degraded"),
-			     QStringLiteral("Reaction was rejected. Arm external reactions in Signal Reactor."));
+			     QStringLiteral("Reaction was rejected. Arm external reactions in Audio Reactor."));
 		PublishEvent(QStringLiteral("broadcast.failure"),
 			     {{QStringLiteral("runId"), runId},
 			      {QStringLiteral("actionId"), payload.value(QStringLiteral("actionId"))},
@@ -663,6 +734,9 @@ void TempestStudioBridge::ExpireLease(const QString &leaseKey)
 		reactor->ClearExternalEvent();
 		currentLeaseKey.clear();
 	}
+	const QString visualSource = activeVisualSources.take(leaseKey);
+	if (!visualSource.isEmpty())
+		SetCurrentSceneSourceVisible(visualSource, false);
 	PublishEvent(QStringLiteral("broadcast.reaction.expired"),
 		     {{QStringLiteral("leaseKey"), leaseKey},
 		      {QStringLiteral("reason"), QStringLiteral("local-fallback-expiry")}});
@@ -676,13 +750,17 @@ void TempestStudioBridge::ExpireLease(const QString &leaseKey)
 void TempestStudioBridge::HandleAudioPlay(const QJsonObject &message, const QJsonObject &payload)
 {
 	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
-	const QString sourceName = FirstString(arguments, {"sourceName", "source", "cue"});
+	const QString cue = FirstString(arguments, {"cue"}).toLower();
+	const QString sourceName = FirstString(arguments, {"broadcastAudioSource", "sourceName", "source"});
 	obs_source_t *source = sourceName.isEmpty() ? nullptr : obs_get_source_by_name(sourceName.toUtf8().constData());
 	if (!source) {
 		SendResponse(message, false, QStringLiteral("degraded"),
-			     QStringLiteral("OBS audio cue source was not found: %1").arg(sourceName));
+			     sourceName.isEmpty()
+				     ? QStringLiteral("Studio did not supply an OBS audio source.")
+				     : QStringLiteral("OBS audio source was not found: %1").arg(sourceName));
 		PublishEvent(QStringLiteral("broadcast.failure"),
 			     {{QStringLiteral("capability"), QStringLiteral("broadcast.audio.play")},
+			      {QStringLiteral("cue"), cue},
 			      {QStringLiteral("sourceName"), sourceName},
 			      {QStringLiteral("reason"), QStringLiteral("source-not-found")}});
 		return;
@@ -690,7 +768,79 @@ void TempestStudioBridge::HandleAudioPlay(const QJsonObject &message, const QJso
 	obs_source_media_restart(source);
 	obs_source_release(source);
 	SendResponse(message, true, QStringLiteral("played"),
-		     QStringLiteral("OBS audio cue restarted: %1").arg(sourceName));
+		     QStringLiteral("OBS audio cue restarted: %1").arg(sourceName),
+		     {{QStringLiteral("cue"), cue}, {QStringLiteral("sourceName"), sourceName}});
+}
+
+bool TempestStudioBridge::SetCurrentSceneSourceVisible(const QString &sourceName, bool visible, bool restartMedia)
+{
+	if (!main || sourceName.isEmpty())
+		return false;
+	OBSScene scene = main->GetCurrentScene();
+	if (!scene)
+		return false;
+	const QByteArray name = sourceName.toUtf8();
+	obs_sceneitem_t *item = obs_scene_find_source_recursive(scene, name.constData());
+	if (!item)
+		return false;
+	obs_sceneitem_set_visible(item, visible);
+	if (visible && restartMedia) {
+		obs_source_t *source = obs_sceneitem_get_source(item);
+		if (source && (obs_source_get_output_flags(source) & OBS_SOURCE_CONTROLLABLE_MEDIA) != 0)
+			obs_source_media_restart(source);
+	}
+	return true;
+}
+
+void TempestStudioBridge::HandleVisualShow(const QJsonObject &message, const QJsonObject &payload)
+{
+	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
+	const QJsonObject lease = payload.value(QStringLiteral("lease")).toObject();
+	const QString sourceName =
+		FirstString(arguments, {"broadcastVisualSource", "visualSource", "sourceName", "cue"});
+	if (!SetCurrentSceneSourceVisible(sourceName, true, true)) {
+		SendResponse(
+			message, false, QStringLiteral("degraded"),
+			QStringLiteral("OBS visual source was not found in the current scene: %1").arg(sourceName));
+		PublishEvent(QStringLiteral("broadcast.failure"),
+			     {{QStringLiteral("capability"), QStringLiteral("broadcast.visual.show")},
+			      {QStringLiteral("sourceName"), sourceName},
+			      {QStringLiteral("reason"), QStringLiteral("scene-source-not-found")}});
+		return;
+	}
+	const QString leaseKey = LeaseKey(payload);
+	const int requestedDuration = arguments.value(QStringLiteral("durationMs"))
+					      .toInt(lease.value(QStringLiteral("durationMs")).toInt(2200));
+	const int durationMs = std::clamp(requestedDuration, 250, 300000);
+	auto *timer = new QTimer(this);
+	timer->setSingleShot(true);
+	timer->setInterval(durationMs);
+	connect(timer, &QTimer::timeout, this, [this, leaseKey]() { ExpireLease(leaseKey); });
+	if (auto oldTimer = activeLeases.take(leaseKey))
+		oldTimer->deleteLater();
+	activeVisualSources.insert(leaseKey, sourceName);
+	activeLeases.insert(leaseKey, timer);
+	timer->start();
+	SendResponse(message, true, QStringLiteral("visible"),
+		     QStringLiteral("OBS visual source shown: %1").arg(sourceName),
+		     {{QStringLiteral("leaseKey"), leaseKey}, {QStringLiteral("durationMs"), durationMs}});
+}
+
+void TempestStudioBridge::HandleVisualHide(const QJsonObject &message, const QJsonObject &payload)
+{
+	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
+	const QString leaseKey = LeaseKey(payload);
+	if (auto timer = activeLeases.take(leaseKey)) {
+		timer->stop();
+		timer->deleteLater();
+	}
+	QString sourceName = activeVisualSources.take(leaseKey);
+	if (sourceName.isEmpty())
+		sourceName = FirstString(arguments, {"broadcastVisualSource", "visualSource", "sourceName", "cue"});
+	const bool hidden = SetCurrentSceneSourceVisible(sourceName, false);
+	SendResponse(message, true, hidden ? QStringLiteral("hidden") : QStringLiteral("already-hidden"),
+		     hidden ? QStringLiteral("OBS visual source hidden: %1").arg(sourceName)
+			    : QStringLiteral("No visible OBS source remained for this Sound Alert."));
 }
 
 void TempestStudioBridge::HandleStatusRequest(const QJsonObject &message)
@@ -699,6 +849,8 @@ void TempestStudioBridge::HandleStatusRequest(const QJsonObject &message)
 				 {QStringLiteral("streaming"), obs_frontend_streaming_active()},
 				 {QStringLiteral("recording"), obs_frontend_recording_active()},
 				 {QStringLiteral("activeLeases"), activeLeases.size()},
+				 {QStringLiteral("canvasProfile"), BuildCanvasProfile()},
+				 {QStringLiteral("sourceInventory"), BuildSourceInventory(main)},
 				 {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)}};
 	SendResponse(message, true, QStringLiteral("ready"), QStringLiteral("Broadcast status snapshot."), status);
 	PublishHealth(QStringLiteral("requested"));

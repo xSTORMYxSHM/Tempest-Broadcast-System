@@ -70,7 +70,7 @@ TempestSequenceDirector::TempestSequenceDirector(OBSBasic *main, TempestCommandM
 	  controlDeck(controlDeck)
 {
 	setObjectName(QStringLiteral("tempestSequenceDirector"));
-	setWindowTitle(QStringLiteral("Mainframe Sequence Director"));
+	setWindowTitle(QStringLiteral("Sequence Director"));
 	setMinimumWidth(360);
 	BuildInterface();
 	EnableContentScaling(objectName());
@@ -115,7 +115,7 @@ void TempestSequenceDirector::BuildInterface()
 	layout->setSpacing(7);
 	auto *title = new QLabel(QStringLiteral("SEQUENCE DIRECTOR"), root);
 	title->setObjectName(QStringLiteral("sequenceTitle"));
-	auto *subtitle = new QLabel(QStringLiteral("Timed archive cues and transmission handoffs"), root);
+	auto *subtitle = new QLabel(QStringLiteral("Timed cues, media actions, and scene automation"), root);
 	subtitle->setObjectName(QStringLiteral("sequenceSubtitle"));
 	layout->addWidget(title);
 	layout->addWidget(subtitle);
@@ -145,7 +145,7 @@ void TempestSequenceDirector::BuildInterface()
 
 	cueList = new QListWidget(root);
 	cueList->setObjectName(QStringLiteral("tempestCueList"));
-	cueList->setAccessibleName(QStringLiteral("Tempest sequence cues"));
+	cueList->setAccessibleName(QStringLiteral("Sequence cues"));
 	connect(cueList, &QListWidget::itemDoubleClicked, this, &TempestSequenceDirector::EditSelectedCue);
 	layout->addWidget(cueList, 1);
 
@@ -262,28 +262,27 @@ QVector<TempestSequenceDirector::Cue> TempestSequenceDirector::DefaultStartingSe
 {
 	Cue recovery;
 	recovery.atMs = 0;
-	recovery.label = QStringLiteral("Recovery lineage online");
+	recovery.label = QStringLiteral("Welcome overlay ready");
 	recovery.updateOverlay = true;
-	recovery.transmission = QStringLiteral("STORM HORIZON RADIO // 2526");
-	recovery.status = QStringLiteral("RECOVERY LINEAGE ONLINE");
-	recovery.messages =
-		QStringLiteral("FIRST STORM ARCHIVE // 2491\nRECOVERY CASCADE // EIGHTEEN YEARS\nLIVING ARCHIVE AWAKE");
+	recovery.transmission = QStringLiteral("TEMPEST BROADCAST // STARTING SOON");
+	recovery.status = QStringLiteral("STREAM SETUP IN PROGRESS");
+	recovery.messages = QStringLiteral("WELCOME TO THE STREAM\nSTARTING SOON\nTHANKS FOR WAITING");
 
 	Cue archive;
 	archive.atMs = 15000;
-	archive.label = QStringLiteral("Archive carrier acquired");
+	archive.label = QStringLiteral("Final broadcast checks");
 	archive.updateOverlay = true;
-	archive.transmission = QStringLiteral("TEMPEST MAINFRAME // ARCHIVE CARRIER");
-	archive.status = QStringLiteral("RECOVERING LOST SIGNALS");
-	archive.messages = QStringLiteral("FORGOTTEN IDEAS\nBROKEN MEMORIES\nWARNINGS AND CORRUPTED HISTORIES");
+	archive.transmission = QStringLiteral("TEMPEST BROADCAST // FINAL CHECKS");
+	archive.status = QStringLiteral("AUDIO AND VIDEO CHECK");
+	archive.messages = QStringLiteral("CHECKING AUDIO\nCHECKING VIDEO\nPREPARING CHAT");
 
 	Cue preservation;
 	preservation.atMs = 30000;
-	preservation.label = QStringLiteral("Preservation question");
+	preservation.label = QStringLiteral("Ready to go live");
 	preservation.updateOverlay = true;
-	preservation.transmission = QStringLiteral("TEMPEST MAINFRAME // LIVING ARCHIVE");
-	preservation.status = QStringLiteral("PRESERVATION PRIORITY ACTIVE");
-	preservation.messages = QStringLiteral("WHAT IS WORTH PRESERVING\nWHEN EVERY SYSTEM EVENTUALLY FAILS?");
+	preservation.transmission = QStringLiteral("TEMPEST BROADCAST // READY");
+	preservation.status = QStringLiteral("STREAM STARTING SHORTLY");
+	preservation.messages = QStringLiteral("FINAL CHECKS COMPLETE\nGOING LIVE SOON");
 	return {recovery, archive, preservation};
 }
 
@@ -349,7 +348,7 @@ void TempestSequenceDirector::AddCue()
 	Cue cue;
 	const QVector<Cue> current = sequences.value(CurrentSequenceId());
 	cue.atMs = current.isEmpty() ? 0 : current.last().atMs + 5000;
-	cue.label = QStringLiteral("New archive cue");
+	cue.label = QStringLiteral("New sequence cue");
 	if (!OpenCueEditor(cue, QStringLiteral("Add Sequence Cue")))
 		return;
 	auto &cues = sequences[CurrentSequenceId()];
@@ -427,7 +426,7 @@ bool TempestSequenceDirector::OpenCueEditor(Cue &cue, const QString &title)
 	timingForm->addRow(QStringLiteral("Cue label"), label);
 	layout->addWidget(timingGroup);
 
-	auto *mediaGroup = new QGroupBox(QStringLiteral("SIGNAL MEDIA"), &dialog);
+	auto *mediaGroup = new QGroupBox(QStringLiteral("MEDIA ACTION"), &dialog);
 	auto *mediaForm = new QFormLayout(mediaGroup);
 	auto *mediaSource = new QComboBox(mediaGroup);
 	mediaSource->addItem(QStringLiteral("No media source selected"), QString());
@@ -481,7 +480,7 @@ bool TempestSequenceDirector::OpenCueEditor(Cue &cue, const QString &title)
 	visibilityForm->addRow(QStringLiteral("Action"), visibilityAction);
 	layout->addWidget(visibilityGroup);
 
-	auto *overlayGroup = new QGroupBox(QStringLiteral("LORE AND OVERLAY STATE"), &dialog);
+	auto *overlayGroup = new QGroupBox(QStringLiteral("OVERLAY TEXT AND STATE"), &dialog);
 	auto *overlayForm = new QFormLayout(overlayGroup);
 	auto *updateOverlay = new QCheckBox(QStringLiteral("Apply text to the matching overlay mode"), overlayGroup);
 	updateOverlay->setChecked(cue.updateOverlay);
@@ -490,19 +489,19 @@ bool TempestSequenceDirector::OpenCueEditor(Cue &cue, const QString &title)
 	auto *messages = new QPlainTextEdit(cue.messages, overlayGroup);
 	messages->setMaximumHeight(90);
 	overlayForm->addRow(QString(), updateOverlay);
-	overlayForm->addRow(QStringLiteral("Transmission"), transmission);
+	overlayForm->addRow(QStringLiteral("Heading"), transmission);
 	overlayForm->addRow(QStringLiteral("Status"), status);
-	overlayForm->addRow(QStringLiteral("Lore lines"), messages);
+	overlayForm->addRow(QStringLiteral("Message lines"), messages);
 	layout->addWidget(overlayGroup);
 
-	auto *handoffGroup = new QGroupBox(QStringLiteral("PROTOCOL HANDOFF"), &dialog);
+	auto *handoffGroup = new QGroupBox(QStringLiteral("AUTOMATION HANDOFF"), &dialog);
 	auto *handoffForm = new QFormLayout(handoffGroup);
 	auto *protocol = new QComboBox(handoffGroup);
 	protocol->addItem(QStringLiteral("No handoff"), QString());
-	protocol->addItem(QStringLiteral("Run STARTING protocol"), QStringLiteral("starting"));
-	protocol->addItem(QStringLiteral("Run LIVE protocol"), QStringLiteral("live"));
-	protocol->addItem(QStringLiteral("Run BRB protocol"), QStringLiteral("brb"));
-	protocol->addItem(QStringLiteral("Run ENDING protocol"), QStringLiteral("ending"));
+	protocol->addItem(QStringLiteral("Run STARTING automation"), QStringLiteral("starting"));
+	protocol->addItem(QStringLiteral("Run LIVE automation"), QStringLiteral("live"));
+	protocol->addItem(QStringLiteral("Run BRB automation"), QStringLiteral("brb"));
+	protocol->addItem(QStringLiteral("Run ENDING automation"), QStringLiteral("ending"));
 	SetComboData(protocol, cue.protocolAction);
 	handoffForm->addRow(QStringLiteral("After cue actions"), protocol);
 	layout->addWidget(handoffGroup);
@@ -805,14 +804,14 @@ void TempestSequenceDirector::RegisterHotkeys()
 		const char *action;
 	};
 	constexpr Definition definitions[] = {
-		{"TempestMainframe.Sequence.RunStarting", "Tempest Mainframe: Run STARTING Sequence", "run:starting"},
-		{"TempestMainframe.Sequence.RunLive", "Tempest Mainframe: Run LIVE Sequence", "run:live"},
-		{"TempestMainframe.Sequence.RunBRB", "Tempest Mainframe: Run BRB Sequence", "run:brb"},
-		{"TempestMainframe.Sequence.RunEnding", "Tempest Mainframe: Run ENDING Sequence", "run:ending"},
-		{"TempestMainframe.Sequence.Hold", "Tempest Mainframe: Hold / Resume Sequence", "togglehold"},
-		{"TempestMainframe.Sequence.Next", "Tempest Mainframe: Execute Next Cue", "next"},
-		{"TempestMainframe.Sequence.Restart", "Tempest Mainframe: Restart Active Sequence", "restart"},
-		{"TempestMainframe.Sequence.Stop", "Tempest Mainframe: Stop Active Sequence", "stop"},
+		{"TempestMainframe.Sequence.RunStarting", "Tempest Broadcast: Run STARTING Sequence", "run:starting"},
+		{"TempestMainframe.Sequence.RunLive", "Tempest Broadcast: Run LIVE Sequence", "run:live"},
+		{"TempestMainframe.Sequence.RunBRB", "Tempest Broadcast: Run BRB Sequence", "run:brb"},
+		{"TempestMainframe.Sequence.RunEnding", "Tempest Broadcast: Run ENDING Sequence", "run:ending"},
+		{"TempestMainframe.Sequence.Hold", "Tempest Broadcast: Hold / Resume Sequence", "togglehold"},
+		{"TempestMainframe.Sequence.Next", "Tempest Broadcast: Execute Next Cue", "next"},
+		{"TempestMainframe.Sequence.Restart", "Tempest Broadcast: Restart Active Sequence", "restart"},
+		{"TempestMainframe.Sequence.Stop", "Tempest Broadcast: Stop Active Sequence", "stop"},
 	};
 	for (const Definition &definition : definitions) {
 		const obs_hotkey_id id =

@@ -18,11 +18,14 @@ public:
 	void SetCommandWorkspace(bool commandMode);
 	void SetUiScalePercent(int percent);
 	void SetResponsiveProfile(const QString &profileLabel, bool automatic);
+	void SetCanvasVisible(bool visible);
+	void SetCanvasControlEnabled(bool enabled);
 
 signals:
 	void WorkspaceRequested(bool commandMode);
 	void DockManagerRequested();
 	void UiScaleRequested(int percent);
+	void CanvasVisibilityRequested(bool visible);
 
 protected:
 	void resizeEvent(QResizeEvent *event) override;
@@ -53,6 +56,7 @@ private:
 	QPointer<QPushButton> engineeringWorkspaceButton;
 	QPointer<QPushButton> dockManagerButton;
 	QPointer<QPushButton> uiScaleResetButton;
+	QPointer<QPushButton> canvasButton;
 	QPointer<QPushButton> armButton;
 	QPointer<QPushButton> streamButton;
 	QPointer<QPushButton> recordButton;

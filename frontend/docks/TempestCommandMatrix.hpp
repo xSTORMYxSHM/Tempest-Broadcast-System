@@ -39,6 +39,7 @@ public:
 	void SetHUDComposer(TempestHUDComposer *composer);
 	void SetSignalReactor(TempestSignalReactor *reactor);
 	void RunProtocol(const QString &protocolId);
+	QWidget *TakeSourceInspectorPanel();
 
 protected:
 	void resizeEvent(QResizeEvent *event) override;
@@ -64,8 +65,6 @@ private:
 		QString uuid;
 		QString name;
 		QString typeName;
-		bool visible = false;
-		bool locked = false;
 	};
 
 	struct ProtocolActionConfig {
@@ -166,6 +165,7 @@ private:
 	void ApplyProtocolOverlay(obs_source_t *sceneSource, const QString &sourceName);
 	void SetViewMode(const QString &mode, bool save = true);
 	void UpdateActiveScene();
+	void SetActiveSceneButton(QPushButton *button);
 	obs_sceneitem_t *SelectedInspectorItem() const;
 	obs_source_t *SelectedInspectorSource() const;
 	void UpdateSourceInspector();
@@ -281,6 +281,7 @@ private:
 	QHash<QString, SourceReaction> sourceReactions;
 	QHash<obs_hotkey_id, QString> protocolHotkeys;
 	QHash<QString, QPointer<QPushButton>> sceneButtons;
+	QPointer<QPushButton> activeSceneButton;
 	QVector<SceneInfo> currentScenes;
 	QString sceneFingerprint;
 	QString sourceFingerprint;

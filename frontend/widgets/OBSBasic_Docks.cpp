@@ -19,6 +19,9 @@
 
 #include "OBSBasic.hpp"
 
+#include "../TempestAppearance.hpp"
+#include "OBSQTDisplay.hpp"
+
 #include <docks/TempestControlDeck.hpp>
 #include <docks/TempestSignalReactor.hpp>
 #include <docks/TempestCommandMatrix.hpp>
@@ -34,28 +37,41 @@
 #include <qt-wrappers.hpp>
 
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDockWidget>
 #include <QFont>
+#include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLayout>
+#include <QMainWindow>
+#include <QPointer>
+#include <QPixmap>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QTimer>
+#include <QVariant>
 #include <QVBoxLayout>
 #include <QWindow>
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace {
 constexpr char TempestUiConfigSection[] = "TempestUI";
 constexpr char TempestUiScaleKey[] = "ScalePercent";
 constexpr char TempestAutoSizeKey[] = "AutoSizeOnStartup";
+constexpr char TempestAccentPresetKey[] = "AccentPreset";
+constexpr char TempestCustomAccentKey[] = "CustomAccent";
 constexpr char TempestResponsiveConfigSection[] = "TempestResponsiveLayouts";
 constexpr char TempestAutoProfileKey[] = "AutoSwitchProfiles";
 constexpr char TempestAutoReflowKey[] = "AutoReflowDocks";
@@ -86,6 +102,22 @@ QString ResponsiveProfileLabel(const QString &profile)
 	return QStringLiteral("STANDARD 16:9");
 }
 
+QString NormalizedAccentPreset(const QString &preset)
+{
+	if (preset == QStringLiteral("ultraviolet") || preset == QStringLiteral("magenta") ||
+	    preset == QStringLiteral("ember") || preset == QStringLiteral("emerald") ||
+	    preset == QStringLiteral("ice") || preset == QStringLiteral("custom"))
+		return preset;
+	return QStringLiteral("tempest");
+}
+
+QIcon AccentIcon(const QColor &color)
+{
+	QPixmap swatch(18, 18);
+	swatch.fill(color);
+	return QIcon(swatch);
+}
+
 QByteArray ResponsiveStateKey(bool commandMode, const QString &profile)
 {
 	return QStringLiteral("%1_%2")
@@ -100,6 +132,57 @@ QFont ScaledApplicationFont(QFont font, qreal scale)
 	else if (font.pointSizeF() > 0)
 		font.setPointSizeF(std::max(1.0, font.pointSizeF() * scale));
 	return font;
+}
+
+int ScaledWindowMetric(int value, qreal scale)
+{
+	if (value <= 0)
+		return value;
+	return std::max(1, qRound(value * scale));
+}
+
+QSize ScaledWindowMinimum(const QSize &size, qreal scale)
+{
+	return {ScaledWindowMetric(size.width(), scale), ScaledWindowMetric(size.height(), scale)};
+}
+
+QSize ScaledWindowMaximum(const QSize &size, qreal scale)
+{
+	const int width = size.width() >= QWIDGETSIZE_MAX ? QWIDGETSIZE_MAX : ScaledWindowMetric(size.width(), scale);
+	const int height = size.height() >= QWIDGETSIZE_MAX ? QWIDGETSIZE_MAX
+							    : ScaledWindowMetric(size.height(), scale);
+	return {width, height};
+}
+
+QString ScaledWindowStyleSheet(const QString &source, qreal scale)
+{
+	QString result = source;
+	const QRegularExpression pixels(QStringLiteral("(\\d+(?:\\.\\d+)?)px"));
+	QList<QRegularExpressionMatch> matches;
+	auto matchIterator = pixels.globalMatch(source);
+	while (matchIterator.hasNext())
+		matches.push_back(matchIterator.next());
+	for (auto it = matches.crbegin(); it != matches.crend(); ++it) {
+		const QRegularExpressionMatch &match = *it;
+		const qreal value = match.captured(1).toDouble();
+		const int scaled = value <= 0.0 ? 0 : std::max(1, qRound(value * scale));
+		result.replace(match.capturedStart(), match.capturedLength(), QStringLiteral("%1px").arg(scaled));
+	}
+	return result;
+}
+
+bool IsTempestScalableWindow(QWidget *window, const OBSBasic *main)
+{
+	if (!window || !window->isWindow() || window == main || window->isFullScreen() ||
+	    window->inherits("OBSProjector"))
+		return false;
+	if (auto *dock = qobject_cast<OBSDock *>(window); dock && dock->HasContentScaling())
+		return false;
+	const Qt::WindowType type = window->windowType();
+	if (type == Qt::Popup || type == Qt::ToolTip || type == Qt::SplashScreen || type == Qt::Desktop)
+		return false;
+	return qobject_cast<QDialog *>(window) || qobject_cast<QMainWindow *>(window) ||
+	       qobject_cast<QDockWidget *>(window);
 }
 } // namespace
 
@@ -130,9 +213,10 @@ void OBSBasic::InitializeTempestUiScaling()
 	if (!qApp->property("tempestBaseApplicationFont").isValid())
 		qApp->setProperty("tempestBaseApplicationFont", qApp->font());
 
-	const QList<OBSDock *> docks = {tempestCommandMatrix, tempestControlDeck,      tempestSignalReactor,
-					tempestMediaBay,      tempestSequenceDirector, tempestAssetVault,
-					tempestHUDComposer};
+	const QList<OBSDock *> docks = {tempestCommandMatrix, tempestSourceInspectorDock,
+					tempestControlDeck,   tempestSignalReactor,
+					tempestMediaBay,      tempestSequenceDirector,
+					tempestAssetVault,    tempestHUDComposer};
 	for (OBSDock *dock : docks)
 		RegisterTempestScaleDock(dock);
 
@@ -143,16 +227,86 @@ void OBSBasic::InitializeTempestUiScaling()
 	config_t *config = App()->GetUserConfig();
 	if (!config_has_user_value(config, TempestUiConfigSection, TempestAutoSizeKey))
 		config_set_bool(config, TempestUiConfigSection, TempestAutoSizeKey, true);
+	if (!config_has_user_value(config, TempestUiConfigSection, TempestAccentPresetKey))
+		config_set_string(config, TempestUiConfigSection, TempestAccentPresetKey, "tempest");
+	if (!config_has_user_value(config, TempestUiConfigSection, TempestCustomAccentKey))
+		config_set_string(config, TempestUiConfigSection, TempestCustomAccentKey, "#45d9ff");
+	const QString savedPreset =
+		QString::fromUtf8(config_get_string(config, TempestUiConfigSection, TempestAccentPresetKey));
+	const QColor savedCustomColor(
+		QString::fromUtf8(config_get_string(config, TempestUiConfigSection, TempestCustomAccentKey)));
+	SetTempestApplicationColor(savedPreset, savedCustomColor, false);
 	const int savedScale = (int)config_get_int(config, TempestUiConfigSection, TempestUiScaleKey);
 	SetTempestUiScalePercent(
 		savedScale >= MinimumTempestUiScale && savedScale <= MaximumTempestUiScale ? savedScale : 100, false);
 }
 
+void OBSBasic::SetTempestApplicationColor(const QString &preset, const QColor &customColor, bool save)
+{
+	const QString normalizedPreset = NormalizedAccentPreset(preset);
+	const QColor normalizedCustom = customColor.isValid() ? customColor : TempestAppearance::DefaultAccent();
+	const QColor accent = normalizedPreset == QStringLiteral("custom")
+				      ? normalizedCustom
+				      : TempestAppearance::PresetColor(normalizedPreset);
+	qApp->setProperty(TempestAppearance::AccentPresetProperty, normalizedPreset);
+	qApp->setProperty(TempestAppearance::AccentColorProperty, accent.name(QColor::HexRgb));
+	TempestAppearance::ApplyApplication(qApp);
+
+	if (tempestMainframeBar)
+		tempestMainframeBar->SetUiScalePercent(tempestUiScalePercent);
+	for (OBSDock *dock : findChildren<OBSDock *>()) {
+		if (dock->HasContentScaling())
+			dock->SetContentScalePercent(tempestUiScalePercent, false);
+	}
+	for (QWidget *window : QApplication::topLevelWidgets()) {
+		ApplyTempestWindowScaling(window, false);
+		TempestAppearance::ApplyWidgetTree(window);
+	}
+
+	if (save) {
+		config_t *config = App()->GetUserConfig();
+		config_set_string(config, TempestUiConfigSection, TempestAccentPresetKey,
+				  normalizedPreset.toUtf8().constData());
+		config_set_string(config, TempestUiConfigSection, TempestCustomAccentKey,
+				  normalizedCustom.name(QColor::HexRgb).toUtf8().constData());
+		config_save_safe(config, "tmp", nullptr);
+	}
+}
+
 bool OBSBasic::eventFilter(QObject *watched, QEvent *event)
 {
-	if (watched == this && (event->type() == QEvent::Resize || event->type() == QEvent::Move ||
-				event->type() == QEvent::WindowStateChange))
+	if (watched == this && !tempestInteractiveWindowMove &&
+	    (event->type() == QEvent::Resize || event->type() == QEvent::Move ||
+	     event->type() == QEvent::WindowStateChange))
 		ScheduleTempestResponsiveWorkspaceRefresh();
+
+	if (event->type() == QEvent::Show) {
+		if (auto *window = qobject_cast<QWidget *>(watched); IsTempestScalableWindow(window, this)) {
+			QPointer<QWidget> guard(window);
+			QTimer::singleShot(0, this, [this, guard]() {
+				if (guard) {
+					ApplyTempestWindowScaling(guard, true);
+					TempestAppearance::ApplyWidgetTree(guard);
+				}
+			});
+		}
+	} else if (event->type() == QEvent::ChildAdded) {
+		if (auto *child = qobject_cast<QWidget *>(watched)) {
+			QWidget *window = child->window();
+			if (IsTempestScalableWindow(window, this) &&
+			    window->property("tempestWindowScaleInitialized").toBool() &&
+			    !window->property("tempestWindowScaleRefreshQueued").toBool()) {
+				window->setProperty("tempestWindowScaleRefreshQueued", true);
+				QPointer<QWidget> guard(window);
+				QTimer::singleShot(0, this, [this, guard]() {
+					if (!guard)
+						return;
+					ApplyTempestWindowScaling(guard, false);
+					guard->setProperty("tempestWindowScaleRefreshQueued", false);
+				});
+			}
+		}
+	}
 
 	if (event->type() == QEvent::KeyPress) {
 		auto *key = static_cast<QKeyEvent *>(event);
@@ -196,6 +350,120 @@ void OBSBasic::RegisterTempestScaleDock(OBSDock *dock)
 	dock->SetContentScalePercent(tempestUiScalePercent, false);
 }
 
+void OBSBasic::ApplyTempestWindowScaling(QWidget *window, bool initializeGeometry)
+{
+	if (!IsTempestScalableWindow(window, this))
+		return;
+
+	window->ensurePolished();
+	const qreal scale = tempestUiScalePercent / 100.0;
+	if (!window->property("tempestWindowScaleBaseSize").isValid())
+		window->setProperty("tempestWindowScaleBaseSize", window->size());
+
+	QList<QWidget *> widgets = window->findChildren<QWidget *>();
+	widgets.prepend(window);
+	for (QWidget *child : std::as_const(widgets)) {
+		if (!child->property("tempestWindowScaleBaseMinimum").isValid())
+			child->setProperty("tempestWindowScaleBaseMinimum", child->minimumSize());
+		if (!child->property("tempestWindowScaleBaseMaximum").isValid())
+			child->setProperty("tempestWindowScaleBaseMaximum", child->maximumSize());
+		if (!child->property("tempestWindowScaleStyleManaged").isValid() && !child->styleSheet().isEmpty()) {
+			child->setProperty("tempestWindowScaleStyleManaged", true);
+			child->setProperty("tempestWindowScaleBaseStyle", child->styleSheet());
+		}
+	}
+
+	QList<QLayout *> layouts = window->findChildren<QLayout *>();
+	if (window->layout())
+		layouts.prepend(window->layout());
+	for (QLayout *layout : std::as_const(layouts)) {
+		if (!layout->property("tempestWindowScaleBaseMargins").isValid())
+			layout->setProperty("tempestWindowScaleBaseMargins",
+					    QVariant::fromValue(layout->contentsMargins()));
+		if (!layout->property("tempestWindowScaleBaseSpacing").isValid())
+			layout->setProperty("tempestWindowScaleBaseSpacing", layout->spacing());
+		if (auto *grid = qobject_cast<QGridLayout *>(layout)) {
+			if (!grid->property("tempestWindowScaleBaseHorizontalSpacing").isValid())
+				grid->setProperty("tempestWindowScaleBaseHorizontalSpacing", grid->horizontalSpacing());
+			if (!grid->property("tempestWindowScaleBaseVerticalSpacing").isValid())
+				grid->setProperty("tempestWindowScaleBaseVerticalSpacing", grid->verticalSpacing());
+		} else if (auto *form = qobject_cast<QFormLayout *>(layout)) {
+			if (!form->property("tempestWindowScaleBaseHorizontalSpacing").isValid())
+				form->setProperty("tempestWindowScaleBaseHorizontalSpacing", form->horizontalSpacing());
+			if (!form->property("tempestWindowScaleBaseVerticalSpacing").isValid())
+				form->setProperty("tempestWindowScaleBaseVerticalSpacing", form->verticalSpacing());
+		}
+	}
+
+	for (QWidget *child : std::as_const(widgets)) {
+		child->setMinimumSize(
+			ScaledWindowMinimum(child->property("tempestWindowScaleBaseMinimum").toSize(), scale));
+		child->setMaximumSize(
+			ScaledWindowMaximum(child->property("tempestWindowScaleBaseMaximum").toSize(), scale));
+		if (child->property("tempestWindowScaleStyleManaged").toBool())
+			TempestAppearance::SetManagedStyleSheet(
+				child, ScaledWindowStyleSheet(child->property("tempestWindowScaleBaseStyle").toString(),
+							      scale));
+	}
+	for (QLayout *layout : std::as_const(layouts)) {
+		const QMargins margins = layout->property("tempestWindowScaleBaseMargins").value<QMargins>();
+		layout->setContentsMargins(ScaledWindowMetric(margins.left(), scale),
+					   ScaledWindowMetric(margins.top(), scale),
+					   ScaledWindowMetric(margins.right(), scale),
+					   ScaledWindowMetric(margins.bottom(), scale));
+		const int spacing = layout->property("tempestWindowScaleBaseSpacing").toInt();
+		if (spacing >= 0)
+			layout->setSpacing(ScaledWindowMetric(spacing, scale));
+		if (auto *grid = qobject_cast<QGridLayout *>(layout)) {
+			const int horizontal = grid->property("tempestWindowScaleBaseHorizontalSpacing").toInt();
+			const int vertical = grid->property("tempestWindowScaleBaseVerticalSpacing").toInt();
+			if (horizontal >= 0)
+				grid->setHorizontalSpacing(ScaledWindowMetric(horizontal, scale));
+			if (vertical >= 0)
+				grid->setVerticalSpacing(ScaledWindowMetric(vertical, scale));
+		} else if (auto *form = qobject_cast<QFormLayout *>(layout)) {
+			const int horizontal = form->property("tempestWindowScaleBaseHorizontalSpacing").toInt();
+			const int vertical = form->property("tempestWindowScaleBaseVerticalSpacing").toInt();
+			if (horizontal >= 0)
+				form->setHorizontalSpacing(ScaledWindowMetric(horizontal, scale));
+			if (vertical >= 0)
+				form->setVerticalSpacing(ScaledWindowMetric(vertical, scale));
+		}
+		layout->invalidate();
+		layout->activate();
+	}
+
+	QScreen *targetScreen = window->screen() ? window->screen() : QGuiApplication::primaryScreen();
+	if (!targetScreen)
+		return;
+	const QRect available = targetScreen->availableGeometry();
+	const QMargins frameMargins = window->windowHandle() ? window->windowHandle()->frameMargins() : QMargins();
+	const QSize maximumContent(std::max(1, available.width() - frameMargins.left() - frameMargins.right()),
+				   std::max(1, available.height() - frameMargins.top() - frameMargins.bottom()));
+	const QSize baseSize = window->property("tempestWindowScaleBaseSize").toSize();
+	QSize desired = ScaledWindowMinimum(baseSize, scale).expandedTo(window->minimumSizeHint());
+	desired.setWidth(std::min(desired.width(), maximumContent.width()));
+	desired.setHeight(std::min(desired.height(), maximumContent.height()));
+	QSize minimum = window->minimumSize().boundedTo(maximumContent);
+	window->setMinimumSize(minimum);
+	if (initializeGeometry || window->size() != desired)
+		window->resize(desired);
+
+	QRect frame = window->frameGeometry();
+	QPoint correction;
+	if (frame.left() < available.left())
+		correction.rx() += available.left() - frame.left();
+	if (frame.right() > available.right())
+		correction.rx() -= frame.right() - available.right();
+	if (frame.top() < available.top())
+		correction.ry() += available.top() - frame.top();
+	if (frame.bottom() > available.bottom())
+		correction.ry() -= frame.bottom() - available.bottom();
+	if (!correction.isNull())
+		window->move(window->pos() + correction);
+	window->setProperty("tempestWindowScaleInitialized", true);
+}
+
 void OBSBasic::SetTempestUiScalePercent(int percent, bool save)
 {
 	tempestUiScalePercent = std::clamp(percent, MinimumTempestUiScale, MaximumTempestUiScale);
@@ -212,6 +480,8 @@ void OBSBasic::SetTempestUiScalePercent(int percent, bool save)
 	}
 	if (auto *dock = qobject_cast<OBSDock *>(tempestStreamInfoDock.data()); dock && dock->HasContentScaling())
 		dock->SetContentScalePercent(tempestUiScalePercent, false);
+	for (QWidget *window : QApplication::topLevelWidgets())
+		ApplyTempestWindowScaling(window, false);
 
 	if (save) {
 		config_t *config = App()->GetUserConfig();
@@ -352,12 +622,12 @@ void OBSBasic::SetTempestResponsiveProfile(const QString &profile, bool force)
 
 void OBSBasic::ScheduleTempestResponsiveWorkspaceRefresh()
 {
-	if (!tempestResponsiveProfilesInitialized || tempestResponsiveRefreshQueued)
+	if (!tempestResponsiveProfilesInitialized || tempestResponsiveRefreshQueued || tempestInteractiveWindowMove)
 		return;
 	tempestResponsiveRefreshQueued = true;
 	QTimer::singleShot(120, this, [this]() {
 		tempestResponsiveRefreshQueued = false;
-		if (isMinimized())
+		if (isMinimized() || tempestInteractiveWindowMove)
 			return;
 		config_t *config = App()->GetUserConfig();
 		const bool automatic = config_get_bool(config, TempestResponsiveConfigSection, TempestAutoProfileKey);
@@ -370,6 +640,58 @@ void OBSBasic::ScheduleTempestResponsiveWorkspaceRefresh()
 		else
 			ApplyTempestResponsiveDockPriorities();
 	});
+}
+
+void OBSBasic::SetTempestInteractiveWindowMove(bool moving)
+{
+	if (tempestInteractiveWindowMove == moving)
+		return;
+
+	tempestInteractiveWindowMove = moving;
+	for (OBSQTDisplay *display : findChildren<OBSQTDisplay *>()) {
+		obs_display_t *renderDisplay = display ? display->GetDisplay() : nullptr;
+		if (!renderDisplay)
+			continue;
+		if (moving) {
+			display->setProperty("tempestMoveDisplayWasEnabled", obs_display_enabled(renderDisplay));
+			obs_display_set_enabled(renderDisplay, false);
+			continue;
+		}
+
+		const QVariant priorState = display->property("tempestMoveDisplayWasEnabled");
+		if (!priorState.isValid())
+			continue;
+		display->setProperty("tempestMoveDisplayWasEnabled", QVariant());
+		obs_display_set_enabled(renderDisplay, priorState.toBool());
+		if (priorState.toBool()) {
+			display->OnMove();
+			display->update();
+		}
+	}
+
+#ifdef BROWSER_AVAILABLE
+	for (BrowserDock *dock : findChildren<BrowserDock *>()) {
+		QCefWidget *browser = dock && dock->cefWidget ? dock->cefWidget.data() : nullptr;
+		if (!browser)
+			continue;
+		if (moving) {
+			browser->setProperty("tempestMoveBrowserWasVisible", browser->isVisible());
+			if (browser->isVisible())
+				browser->hide();
+			continue;
+		}
+
+		const QVariant priorState = browser->property("tempestMoveBrowserWasVisible");
+		if (!priorState.isValid())
+			continue;
+		browser->setProperty("tempestMoveBrowserWasVisible", QVariant());
+		if (priorState.toBool())
+			browser->show();
+	}
+#endif
+
+	if (!moving)
+		ScheduleTempestResponsiveWorkspaceRefresh();
 }
 
 void OBSBasic::ApplyTempestResponsiveDockPriorities(bool force)
@@ -457,6 +779,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestControlDeck->setFloating(false);
 	tempestSignalReactor->setFloating(false);
 	tempestCommandMatrix->setFloating(false);
+	tempestSourceInspectorDock->setFloating(false);
 	tempestMediaBay->setFloating(false);
 	tempestSequenceDirector->setFloating(false);
 	tempestAssetVault->setFloating(false);
@@ -465,6 +788,8 @@ void OBSBasic::ConfigureTempestCommandLayout()
 		tempestStreamInfoDock->setFloating(false);
 
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
+	addDockWidget(Qt::LeftDockWidgetArea, tempestSourceInspectorDock);
+	tabifyDockWidget(tempestCommandMatrix, tempestSourceInspectorDock);
 	addDockWidget(Qt::RightDockWidgetArea, tempestControlDeck);
 	addDockWidget(Qt::RightDockWidgetArea, tempestSignalReactor);
 	tabifyDockWidget(tempestControlDeck, tempestSignalReactor);
@@ -477,6 +802,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
 
 	tempestCommandMatrix->setVisible(true);
+	tempestSourceInspectorDock->setVisible(true);
 	ui->scenesDock->setVisible(false);
 	ui->sourcesDock->setVisible(false);
 	ui->mixerDock->setVisible(true);
@@ -488,6 +814,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestHUDComposer->setVisible(true);
 	if (tempestStreamInfoDock)
 		tempestStreamInfoDock->setVisible(true);
+	tempestCommandMatrix->raise();
 	tempestControlDeck->raise();
 	ui->transitionsDock->setVisible(false);
 	controlsDock->setVisible(false);
@@ -510,18 +837,19 @@ void OBSBasic::OpenTempestDockManager()
 	};
 
 	const QVector<DockEntry> entries = {
-		{QStringLiteral("Transmission Matrix"), tempestCommandMatrix},
-		{QStringLiteral("Control Deck"), tempestControlDeck},
-		{QStringLiteral("Signal Reactor"), tempestSignalReactor},
-		{QStringLiteral("Signal Media Bay"), tempestMediaBay},
+		{QStringLiteral("Scene Control"), tempestCommandMatrix},
+		{QStringLiteral("Source Operations"), tempestSourceInspectorDock},
+		{QStringLiteral("Stream Overlay"), tempestControlDeck},
+		{QStringLiteral("Audio Reactor"), tempestSignalReactor},
+		{QStringLiteral("Media Controls"), tempestMediaBay},
 		{QStringLiteral("Sequence Director"), tempestSequenceDirector},
-		{QStringLiteral("Asset Vault"), tempestAssetVault},
-		{QStringLiteral("HUD Composer"), tempestHUDComposer},
+		{QStringLiteral("Asset Library"), tempestAssetVault},
+		{QStringLiteral("Overlay Designer"), tempestHUDComposer},
 		{QStringLiteral("Stream Information"), tempestStreamInfoDock},
 	};
 
 	QDialog dialog(this);
-	dialog.setWindowTitle(QStringLiteral("Mainframe Dock Layout Director"));
+	dialog.setWindowTitle(QStringLiteral("Tempest Workspace Layout"));
 	dialog.setModal(true);
 	const qreal dialogScale = tempestUiScalePercent / 100.0;
 	dialog.resize(qRound(760 * dialogScale), qRound(590 * dialogScale));
@@ -539,11 +867,10 @@ void OBSBasic::OpenTempestDockManager()
 	auto *root = new QVBoxLayout(&dialog);
 	root->setContentsMargins(14, 14, 14, 14);
 	root->setSpacing(10);
-	auto *title = new QLabel(QStringLiteral("DOCK LAYOUT DIRECTOR"), &dialog);
+	auto *title = new QLabel(QStringLiteral("WORKSPACE LAYOUT"), &dialog);
 	title->setObjectName(QStringLiteral("layoutTitle"));
 	auto *subtitle = new QLabel(
-		QStringLiteral(
-			"Monitor profiles, responsive reflow, visibility, scale, and recovery for the Mainframe workstation."),
+		QStringLiteral("Monitor profiles, responsive reflow, visibility, scale, and workspace recovery."),
 		&dialog);
 	subtitle->setObjectName(QStringLiteral("layoutSubtitle"));
 	root->addWidget(title);
@@ -600,6 +927,62 @@ void OBSBasic::OpenTempestDockManager()
 	applicationScaleRow->addWidget(autoSizeOnStartup);
 	root->addLayout(applicationScaleRow);
 
+	auto *applicationColorRow = new QHBoxLayout();
+	auto *applicationColorLabel = new QLabel(QStringLiteral("APPLICATION COLOR"), &dialog);
+	applicationColorLabel->setObjectName(QStringLiteral("layoutHeader"));
+	auto *applicationColor = new QComboBox(&dialog);
+	auto addColorPreset = [applicationColor](const QString &label, const QString &id, const QColor &color) {
+		applicationColor->addItem(AccentIcon(color), label, id);
+	};
+	addColorPreset(QStringLiteral("TEMPEST CYAN // DEFAULT"), QStringLiteral("tempest"),
+		       TempestAppearance::DefaultAccent());
+	addColorPreset(QStringLiteral("ULTRAVIOLET"), QStringLiteral("ultraviolet"),
+		       TempestAppearance::PresetColor(QStringLiteral("ultraviolet")));
+	addColorPreset(QStringLiteral("NEON MAGENTA"), QStringLiteral("magenta"),
+		       TempestAppearance::PresetColor(QStringLiteral("magenta")));
+	addColorPreset(QStringLiteral("EMBER"), QStringLiteral("ember"),
+		       TempestAppearance::PresetColor(QStringLiteral("ember")));
+	addColorPreset(QStringLiteral("EMERALD"), QStringLiteral("emerald"),
+		       TempestAppearance::PresetColor(QStringLiteral("emerald")));
+	addColorPreset(QStringLiteral("ICE BLUE"), QStringLiteral("ice"),
+		       TempestAppearance::PresetColor(QStringLiteral("ice")));
+	QColor selectedCustomColor(
+		QString::fromUtf8(config_get_string(config, TempestUiConfigSection, TempestCustomAccentKey)));
+	if (!selectedCustomColor.isValid())
+		selectedCustomColor = TempestAppearance::DefaultAccent();
+	addColorPreset(QStringLiteral("CUSTOM"), QStringLiteral("custom"), selectedCustomColor);
+	const QString activeAccentPreset =
+		NormalizedAccentPreset(qApp->property(TempestAppearance::AccentPresetProperty).toString());
+	applicationColor->setCurrentIndex(std::max(0, applicationColor->findData(activeAccentPreset)));
+	applicationColor->setAccessibleName(QStringLiteral("Application color palette"));
+	auto *customColorButton = new QPushButton(&dialog);
+	auto updateCustomColorButton = [customColorButton, applicationColor, &selectedCustomColor]() {
+		customColorButton->setIcon(AccentIcon(selectedCustomColor));
+		customColorButton->setText(
+			QStringLiteral("CUSTOM COLOR // %1").arg(selectedCustomColor.name(QColor::HexRgb).toUpper()));
+		customColorButton->setEnabled(applicationColor->currentData().toString() == QStringLiteral("custom"));
+		const int customIndex = applicationColor->findData(QStringLiteral("custom"));
+		if (customIndex >= 0)
+			applicationColor->setItemIcon(customIndex, AccentIcon(selectedCustomColor));
+	};
+	updateCustomColorButton();
+	connect(applicationColor, &QComboBox::currentIndexChanged, &dialog,
+		[updateCustomColorButton](int) { updateCustomColorButton(); });
+	connect(customColorButton, &QPushButton::clicked, &dialog,
+		[&dialog, &selectedCustomColor, updateCustomColorButton]() {
+			const QColor selected = QColorDialog::getColor(
+				selectedCustomColor, &dialog, QStringLiteral("Choose Tempest Application Color"),
+				QColorDialog::DontUseNativeDialog);
+			if (!selected.isValid())
+				return;
+			selectedCustomColor = selected;
+			updateCustomColorButton();
+		});
+	applicationColorRow->addWidget(applicationColorLabel);
+	applicationColorRow->addWidget(applicationColor, 1);
+	applicationColorRow->addWidget(customColorButton);
+	root->addLayout(applicationColorRow);
+
 	auto *grid = new QGridLayout();
 	grid->setHorizontalSpacing(12);
 	grid->setVerticalSpacing(7);
@@ -654,7 +1037,7 @@ void OBSBasic::OpenTempestDockManager()
 	auto *showAll = new QPushButton(QStringLiteral("SHOW ALL"), &dialog);
 	auto *resetScales = new QPushButton(QStringLiteral("RESET UI SCALE"), &dialog);
 	auto *recover = new QPushButton(QStringLiteral("RECOVER COMMAND LAYOUT"), &dialog);
-	recover->setToolTip(QStringLiteral("Dock every Mainframe panel back into the canonical Command workspace."));
+	recover->setToolTip(QStringLiteral("Dock every Tempest panel back into the standard Command workspace."));
 	utilityRow->addWidget(showAll);
 	utilityRow->addWidget(resetScales);
 	utilityRow->addWidget(recover);
@@ -681,6 +1064,7 @@ void OBSBasic::OpenTempestDockManager()
 	if (dialog.exec() != QDialog::Accepted)
 		return;
 	SetTempestUiScalePercent(applicationScale->currentData().toInt());
+	SetTempestApplicationColor(applicationColor->currentData().toString(), selectedCustomColor);
 	config_set_bool(config, TempestUiConfigSection, TempestAutoSizeKey, autoSizeOnStartup->isChecked());
 	const QString profileSelection = responsiveProfile->currentData().toString();
 	const bool useAutomaticProfile = profileSelection == QStringLiteral("auto");
@@ -782,6 +1166,23 @@ void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
 			on_resetDocks_triggered(true);
 		menuBar()->setVisible(true);
 	}
+	config_t *config = App()->GetUserConfig();
+	if (commandMode && tempestSourceInspectorDock &&
+	    !config_has_user_value(config, "BasicWindow", "TempestSourceOperationsDockInitialized")) {
+		tempestSourceInspectorDock->setFloating(false);
+		Qt::DockWidgetArea matrixArea = dockWidgetArea(tempestCommandMatrix);
+		if (matrixArea == Qt::NoDockWidgetArea)
+			matrixArea = Qt::LeftDockWidgetArea;
+		addDockWidget(matrixArea, tempestSourceInspectorDock);
+		tabifyDockWidget(tempestCommandMatrix, tempestSourceInspectorDock);
+		tempestCommandMatrix->setVisible(true);
+		tempestSourceInspectorDock->setVisible(true);
+		tempestCommandMatrix->raise();
+		config_set_bool(config, "BasicWindow", "TempestSourceOperationsDockInitialized", true);
+		tempestCommandDockState = saveState();
+		if (tempestResponsiveProfilesInitialized)
+			StoreTempestResponsiveProfileStates(tempestResponsiveProfile);
+	}
 	if (tempestStreamInfoDock)
 		IntegrateTempestStreamInfoDock(tempestStreamInfoDock);
 
@@ -791,9 +1192,8 @@ void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
 		tempestResponsiveBreakpoint.clear();
 		ApplyTempestResponsiveDockPriorities(true);
 	}
-	config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace",
-			  commandMode ? "command" : "engineering");
-	config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+	config_set_string(config, "BasicWindow", "TempestWorkspace", commandMode ? "command" : "engineering");
+	config_save_safe(config, "tmp", nullptr);
 }
 
 void OBSBasic::SaveTempestWorkspaceState()
@@ -865,6 +1265,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 		IntegrateTempestStreamInfoDock(tempestStreamInfoDock, true);
 	tempestControlDeck->raise();
 	tempestCommandMatrix->setVisible(false);
+	tempestSourceInspectorDock->setVisible(false);
 	statsDock->setVisible(false);
 	statsDock->setFloating(true);
 
@@ -899,6 +1300,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	tempestControlDeck->setFeatures(features);
 	tempestSignalReactor->setFeatures(features);
 	tempestCommandMatrix->setFeatures(features);
+	tempestSourceInspectorDock->setFeatures(features);
 	tempestMediaBay->setFeatures(features);
 	tempestSequenceDirector->setFeatures(features);
 	tempestAssetVault->setFeatures(features);

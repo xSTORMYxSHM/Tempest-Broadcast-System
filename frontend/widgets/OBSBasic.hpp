@@ -459,6 +459,7 @@ private:
 	QPointer<TempestSignalReactor> tempestSignalReactor;
 	QPointer<TempestStudioBridge> tempestStudioBridge;
 	QPointer<TempestCommandMatrix> tempestCommandMatrix;
+	QPointer<OBSDock> tempestSourceInspectorDock;
 	QPointer<TempestMediaBay> tempestMediaBay;
 	QPointer<TempestSequenceDirector> tempestSequenceDirector;
 	QPointer<TempestAssetVault> tempestAssetVault;
@@ -474,6 +475,7 @@ private:
 	QString tempestResponsiveBreakpoint;
 	bool tempestResponsiveProfilesInitialized = false;
 	bool tempestResponsiveRefreshQueued = false;
+	bool tempestInteractiveWindowMove = false;
 
 	void SetTempestWorkspace(bool commandMode, bool initial = false);
 	void ConfigureTempestCommandLayout();
@@ -483,13 +485,16 @@ private:
 	bool eventFilter(QObject *watched, QEvent *event) override;
 	void InitializeTempestUiScaling();
 	void RegisterTempestScaleDock(OBSDock *dock);
+	void ApplyTempestWindowScaling(QWidget *window, bool initializeGeometry = false);
 	void SetTempestUiScalePercent(int percent, bool save = true);
+	void SetTempestApplicationColor(const QString &preset, const QColor &customColor, bool save = true);
 	void ApplyTempestStartupSizing();
 	void InitializeTempestResponsiveWorkspaceProfiles();
 	QString DetectTempestResponsiveProfile() const;
 	bool LoadTempestResponsiveProfileStates(const QString &profile);
 	void StoreTempestResponsiveProfileStates(const QString &profile);
 	void SetTempestResponsiveProfile(const QString &profile, bool force = false);
+	void SetTempestInteractiveWindowMove(bool moving);
 	void ScheduleTempestResponsiveWorkspaceRefresh();
 	void ApplyTempestResponsiveDockPriorities(bool force = false);
 	int tempestUiScalePercent = 100;
@@ -924,6 +929,7 @@ signals:
 	void OutputResized(uint32_t width, uint32_t height);
 
 	/* Preview signals */
+	void PreviewEnabledChanged(bool enabled);
 	void PreviewZoomIn();
 	void PreviewZoomOut();
 	void PreviewResetZoom();

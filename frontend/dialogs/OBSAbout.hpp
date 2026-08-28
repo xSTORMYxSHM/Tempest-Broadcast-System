@@ -13,7 +13,12 @@ public:
 	std::unique_ptr<Ui::OBSAbout> ui;
 
 private slots:
-	void ShowAbout();
+	void ShowTempest();
+	void ShowOBSProject();
 	void ShowAuthors();
 	void ShowLicense();
+
+private:
+	void SetOBSResourcesVisible(bool visible);
+	QString activePage;
 };

@@ -28,6 +28,7 @@
 #include <docks/TempestSignalReactor.hpp>
 #include <docks/TempestStudioBridge.hpp>
 #include <docks/TempestCommandMatrix.hpp>
+#include <docks/OBSDock.hpp>
 #include <docks/TempestMediaBay.hpp>
 #include <docks/TempestSequenceDirector.hpp>
 #include <docks/TempestAssetVault.hpp>
@@ -257,7 +258,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	ui->previewDisabledWidget->setVisible(false);
 
 	tempestMainframeBar = new TempestMainframeBar(this);
-	tempestCommandToolbar = new QToolBar(QStringLiteral("Mainframe Command Nexus"), this);
+	tempestCommandToolbar = new QToolBar(QStringLiteral("Tempest Broadcast Control Bar"), this);
 	tempestCommandToolbar->setObjectName(QStringLiteral("tempestCommandToolbar"));
 	tempestCommandToolbar->setMovable(false);
 	tempestCommandToolbar->setFloatable(false);
@@ -270,6 +271,15 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 		[this](bool commandMode) { SetTempestWorkspace(commandMode); });
 	connect(tempestMainframeBar, &TempestMainframeBar::DockManagerRequested, this,
 		[this]() { OpenTempestDockManager(); });
+	connect(tempestMainframeBar, &TempestMainframeBar::CanvasVisibilityRequested, this, [this](bool visible) {
+		visible ? EnablePreview() : DisablePreview();
+		tempestMainframeBar->SetCanvasVisible(IsPreviewProgramMode() ? true : previewEnabled);
+	});
+	connect(this, &OBSBasic::PreviewEnabledChanged, tempestMainframeBar, &TempestMainframeBar::SetCanvasVisible);
+	connect(this, &OBSBasic::PreviewProgramModeChanged, this, [this](bool enabled) {
+		tempestMainframeBar->SetCanvasVisible(enabled ? true : previewEnabled);
+		tempestMainframeBar->SetCanvasControlEnabled(!enabled);
+	});
 
 	/* Set up streaming connections */
 	connect(
@@ -390,6 +400,16 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	tempestCommandMatrix->SetSignalReactor(tempestSignalReactor);
 	addDockWidget(Qt::LeftDockWidgetArea, tempestCommandMatrix);
 	tempestCommandMatrix->setVisible(false);
+	tempestSourceInspectorDock = new OBSDock(this);
+	tempestSourceInspectorDock->setObjectName(QStringLiteral("tempestSourceInspectorDock"));
+	tempestSourceInspectorDock->setWindowTitle(QStringLiteral("Source Operations"));
+	tempestSourceInspectorDock->setMinimumWidth(340);
+	if (QWidget *sourceInspector = tempestCommandMatrix->TakeSourceInspectorPanel())
+		tempestSourceInspectorDock->setWidget(sourceInspector);
+	tempestSourceInspectorDock->EnableContentScaling(tempestSourceInspectorDock->objectName());
+	addDockWidget(Qt::LeftDockWidgetArea, tempestSourceInspectorDock);
+	tabifyDockWidget(tempestCommandMatrix, tempestSourceInspectorDock);
+	tempestSourceInspectorDock->setVisible(false);
 	tempestMediaBay = new TempestMediaBay(this);
 	addDockWidget(Qt::BottomDockWidgetArea, tempestMediaBay);
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
@@ -581,6 +601,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(tempestSignalReactor);
 	SETUP_DOCK(tempestStudioBridge);
 	SETUP_DOCK(tempestCommandMatrix);
+	SETUP_DOCK(tempestSourceInspectorDock);
 	SETUP_DOCK(tempestMediaBay);
 	SETUP_DOCK(tempestSequenceDirector);
 	SETUP_DOCK(tempestAssetVault);
@@ -1189,6 +1210,7 @@ void OBSBasic::OBSInit()
 	loaded = true;
 
 	previewEnabled = config_get_bool(App()->GetUserConfig(), "BasicWindow", "PreviewEnabled");
+	emit PreviewEnabledChanged(previewEnabled);
 
 	if (!previewEnabled && !IsPreviewProgramMode())
 		QMetaObject::invokeMethod(this, "EnablePreviewDisplay", Qt::QueuedConnection,
@@ -1824,10 +1846,16 @@ bool OBSBasic::nativeEvent(const QByteArray &, void *message, qintptr *)
 #ifdef _WIN32
 	const MSG &msg = *static_cast<MSG *>(message);
 	switch (msg.message) {
+	case WM_ENTERSIZEMOVE:
+		SetTempestInteractiveWindowMove(true);
+		break;
+	case WM_EXITSIZEMOVE:
+		SetTempestInteractiveWindowMove(false);
+		break;
 	case WM_MOVE:
-		for (OBSQTDisplay *const display : findChildren<OBSQTDisplay *>()) {
-			display->OnMove();
-		}
+		if (!tempestInteractiveWindowMove)
+			for (OBSQTDisplay *const display : findChildren<OBSQTDisplay *>())
+				display->OnMove();
 		break;
 	case WM_DISPLAYCHANGE:
 		for (OBSQTDisplay *const display : findChildren<OBSQTDisplay *>()) {

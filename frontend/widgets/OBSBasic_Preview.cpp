@@ -268,6 +268,7 @@ void OBSBasic::TogglePreview()
 {
 	previewEnabled = !previewEnabled;
 	EnablePreviewDisplay(previewEnabled);
+	emit PreviewEnabledChanged(previewEnabled);
 }
 
 void OBSBasic::EnablePreview()
@@ -277,6 +278,7 @@ void OBSBasic::EnablePreview()
 
 	previewEnabled = true;
 	EnablePreviewDisplay(true);
+	emit PreviewEnabledChanged(true);
 }
 
 void OBSBasic::DisablePreview()
@@ -286,6 +288,7 @@ void OBSBasic::DisablePreview()
 
 	previewEnabled = false;
 	EnablePreviewDisplay(false);
+	emit PreviewEnabledChanged(false);
 }
 
 static bool nudge_callback(obs_scene_t *, obs_sceneitem_t *item, void *param)

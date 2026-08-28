@@ -44,6 +44,8 @@ private:
 	void HandleReactionTrigger(const QJsonObject &message, const QJsonObject &payload);
 	void HandleReactionClear(const QJsonObject &message, const QJsonObject &payload);
 	void HandleAudioPlay(const QJsonObject &message, const QJsonObject &payload);
+	void HandleVisualShow(const QJsonObject &message, const QJsonObject &payload);
+	void HandleVisualHide(const QJsonObject &message, const QJsonObject &payload);
 	void HandleStatusRequest(const QJsonObject &message);
 	void ExpireLease(const QString &leaseKey);
 	void RememberCommand(const QString &key);
@@ -60,6 +62,7 @@ private:
 	QString ResolveToken(QString *error = nullptr) const;
 	QString CommandKey(const QJsonObject &payload) const;
 	QString LeaseKey(const QJsonObject &payload) const;
+	bool SetCurrentSceneSourceVisible(const QString &sourceName, bool visible, bool restartMedia = false);
 
 	QPointer<OBSBasic> main;
 	QPointer<TempestSignalReactor> reactor;
@@ -75,6 +78,7 @@ private:
 	QPointer<QTimer> heartbeatTimer;
 	std::unique_ptr<ClientState> client;
 	QHash<QString, QPointer<QTimer>> activeLeases;
+	QHash<QString, QString> activeVisualSources;
 	QSet<QString> processedCommands;
 	QStringList processedCommandOrder;
 	QString currentLeaseKey;

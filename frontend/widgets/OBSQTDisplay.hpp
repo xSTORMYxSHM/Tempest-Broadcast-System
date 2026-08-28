@@ -6,6 +6,8 @@
 
 #define GREY_COLOR_BACKGROUND 0xFF4C4C4C
 
+class QTimer;
+
 class OBSQTDisplay : public QWidget {
 	Q_OBJECT
 	Q_PROPERTY(QColor displayBackgroundColor MEMBER backgroundColor READ GetDisplayBackgroundColor WRITE
@@ -13,6 +15,7 @@ class OBSQTDisplay : public QWidget {
 
 	OBSDisplay display;
 	bool destroying = false;
+	QTimer *colorSpaceRefreshTimer = nullptr;
 
 protected:
 	virtual void paintEvent(QPaintEvent *event) override;

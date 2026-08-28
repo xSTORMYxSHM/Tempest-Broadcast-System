@@ -31,8 +31,14 @@
 !CODESTYLE.md
 !COPYING
 !INSTALL
+!NOTICE.txt
+!PUBLIC_RELEASE.md
 !README.rst
+!RELEASE_NOTES_*.md
+!/scripts
+!/scripts/Build-PublicRelease.ps1
 !TEMPEST_FORK.md
+!TEMPEST_WARUDO_BRIDGE.md
 
 # Exclude lock files
 *.lock.json

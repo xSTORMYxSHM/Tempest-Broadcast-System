@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 #include "moc_TempestSignalReactor.cpp"
@@ -50,12 +51,48 @@ int SuggestedSourceIndex(QComboBox *selector, const QStringList &terms)
 	}
 	return selector->count() > 1 ? 1 : 0;
 }
+
+bool IsTempestBrowserSource(obs_source_t *source)
+{
+	if (!source || strcmp(obs_source_get_unversioned_id(source), "browser_source") != 0)
+		return false;
+	const char *name = obs_source_get_name(source);
+	return name && strncmp(name, "Tempest", 7) == 0;
+}
+
+bool EnableTempestBrowserLifecycle(void *, obs_source_t *source)
+{
+	if (!IsTempestBrowserSource(source))
+		return true;
+	OBSDataAutoRelease settings = obs_source_get_settings(source);
+	if (!obs_data_get_bool(settings, "shutdown") || !obs_data_get_bool(settings, "fps_custom") ||
+	    obs_data_get_int(settings, "fps") != 30) {
+		obs_data_set_bool(settings, "shutdown", true);
+		obs_data_set_bool(settings, "fps_custom", true);
+		obs_data_set_int(settings, "fps", 30);
+		obs_source_update(source, settings);
+	}
+	return true;
+}
+
+bool PublishTempestBrowserTelemetry(void *param, obs_source_t *source)
+{
+	if (!IsTempestBrowserSource(source))
+		return true;
+	auto *payload = static_cast<const QByteArray *>(param);
+	calldata_t data = {0};
+	calldata_set_string(&data, "eventName", "tempestTelemetry");
+	calldata_set_string(&data, "jsonString", payload->constData());
+	proc_handler_call(obs_source_get_proc_handler(source), "javascript_event", &data);
+	calldata_free(&data);
+	return true;
+}
 } // namespace
 
 TempestSignalReactor::TempestSignalReactor(OBSBasic *main, QWidget *parent) : OBSDock(parent), main(main)
 {
 	setObjectName(QStringLiteral("tempestSignalReactor"));
-	setWindowTitle(QStringLiteral("Mainframe Signal Reactor"));
+	setWindowTitle(QStringLiteral("Audio Reactor"));
 	setMinimumWidth(360);
 
 	BuildInterface();
@@ -66,12 +103,19 @@ TempestSignalReactor::TempestSignalReactor(OBSBasic *main, QWidget *parent) : OB
 	LoadState();
 
 	telemetryTimer = new QTimer(this);
-	telemetryTimer->setInterval(50);
+	telemetryTimer->setInterval(100);
 	connect(telemetryTimer, &QTimer::timeout, this, &TempestSignalReactor::PublishTelemetry);
 	telemetryTimer->start();
 
 	RefreshAudioSources();
 	QTimer::singleShot(3500, this, &TempestSignalReactor::RefreshAudioSources);
+	// Scene collections finish loading after the docks are constructed.  Delay the
+	// one-time browser-source migration so it sees the restored scene sources.
+	QTimer::singleShot(6000, this, [this]() {
+		obs_enum_sources(EnableTempestBrowserLifecycle, nullptr);
+		if (this->main)
+			this->main->SaveProject();
+	});
 }
 
 TempestSignalReactor::~TempestSignalReactor()
@@ -111,15 +155,15 @@ void TempestSignalReactor::BuildInterface()
 	layout->setContentsMargins(10, 10, 10, 10);
 	layout->setSpacing(8);
 
-	auto *title = new QLabel(QStringLiteral("SIGNAL REACTOR"), root);
+	auto *title = new QLabel(QStringLiteral("AUDIO REACTOR"), root);
 	title->setObjectName(QStringLiteral("reactorTitle"));
-	auto *subtitle = new QLabel(QStringLiteral("Live audio energy routing for Tempest HUD elements"), root);
+	auto *subtitle = new QLabel(QStringLiteral("Audio-driven reactions for overlays and scene sources"), root);
 	subtitle->setObjectName(QStringLiteral("reactorSubtitle"));
 	layout->addWidget(title);
 	layout->addWidget(subtitle);
 
 	reactorEnabled = new QCheckBox(QStringLiteral("REACTOR ONLINE"), root);
-	reactorEnabled->setAccessibleName(QStringLiteral("Enable Tempest Signal Reactor"));
+	reactorEnabled->setAccessibleName(QStringLiteral("Enable reactive audio engine"));
 	layout->addWidget(reactorEnabled);
 
 	auto addChannel = [root, layout](const QString &label, QPointer<QComboBox> &selector,
@@ -173,14 +217,6 @@ void TempestSignalReactor::BuildInterface()
 	beatLayout->addWidget(beatMeter);
 	layout->addWidget(beatFrame);
 
-	auto *masterForm = new QFormLayout();
-	smoothing = new QDoubleSpinBox(root);
-	smoothing->setRange(0.50, 0.98);
-	smoothing->setSingleStep(0.02);
-	smoothing->setDecimals(2);
-	smoothing->setAccessibleName(QStringLiteral("Signal decay smoothing"));
-	masterForm->addRow(QStringLiteral("Signal smoothing"), smoothing);
-	layout->addLayout(masterForm);
 	auto *masterLabel = new QLabel(QStringLiteral("MASTER REACTION BUS"), root);
 	masterLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
 	masterMeter = new QProgressBar(root);
@@ -189,13 +225,99 @@ void TempestSignalReactor::BuildInterface()
 	layout->addWidget(masterLabel);
 	layout->addWidget(masterMeter);
 
+	auto *directorFrame = new QFrame(root);
+	directorFrame->setObjectName(QStringLiteral("reactorChannel"));
+	directorFrame->setAccessibleName(QStringLiteral("Global overlay Reactivity Director"));
+	auto *directorLayout = new QVBoxLayout(directorFrame);
+	directorLayout->setContentsMargins(8, 8, 8, 8);
+	directorLayout->setSpacing(6);
+	auto *directorLabel = new QLabel(QStringLiteral("REACTIVITY DIRECTOR // GLOBAL OVERLAY BUS"), directorFrame);
+	directorLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	auto *directorHint =
+		new QLabel(QStringLiteral("One persistent response profile drives every generated stream overlay."),
+			   directorFrame);
+	directorHint->setObjectName(QStringLiteral("reactorHint"));
+	directorHint->setWordWrap(true);
+	reactionProfile = new QComboBox(directorFrame);
+	reactionProfile->addItem(QStringLiteral("CALM"), QStringLiteral("calm"));
+	reactionProfile->addItem(QStringLiteral("STANDARD"), QStringLiteral("mainframe"));
+	reactionProfile->addItem(QStringLiteral("HIGH ENERGY"), QStringLiteral("storm"));
+	reactionProfile->addItem(QStringLiteral("ALERT DANCE"), QStringLiteral("dance"));
+	reactionProfile->addItem(QStringLiteral("ALERT WARNING"), QStringLiteral("alert"));
+	reactionProfile->setAccessibleName(QStringLiteral("Reactivity Director profile"));
+	reactionPalette = new QComboBox(directorFrame);
+	reactionPalette->addItem(QStringLiteral("TEMPEST // CYAN TO MAGENTA"), QStringLiteral("tempest"));
+	reactionPalette->addItem(QStringLiteral("ULTRAVIOLET"), QStringLiteral("ultraviolet"));
+	reactionPalette->addItem(QStringLiteral("EMBER WARNING"), QStringLiteral("ember"));
+	reactionPalette->addItem(QStringLiteral("VERDANT"), QStringLiteral("verdant"));
+	reactionPalette->addItem(QStringLiteral("FULL SPECTRUM"), QStringLiteral("spectrum"));
+	reactionPalette->setAccessibleName(QStringLiteral("Global reactive color palette"));
+	reactionThreshold = new QDoubleSpinBox(directorFrame);
+	reactionThreshold->setRange(0.0, 0.80);
+	reactionThreshold->setSingleStep(0.01);
+	reactionThreshold->setDecimals(2);
+	reactionThreshold->setAccessibleName(QStringLiteral("Global reaction noise threshold"));
+	reactionAttack = new QDoubleSpinBox(directorFrame);
+	reactionAttack->setRange(0.05, 1.0);
+	reactionAttack->setSingleStep(0.05);
+	reactionAttack->setDecimals(2);
+	reactionAttack->setAccessibleName(QStringLiteral("Global reaction attack speed"));
+	smoothing = new QDoubleSpinBox(directorFrame);
+	smoothing->setRange(0.50, 0.98);
+	smoothing->setSingleStep(0.02);
+	smoothing->setDecimals(2);
+	smoothing->setAccessibleName(QStringLiteral("Global reaction release smoothing"));
+	reactionMotion = new QDoubleSpinBox(directorFrame);
+	reactionMotion->setRange(0.0, 200.0);
+	reactionMotion->setSingleStep(5.0);
+	reactionMotion->setDecimals(0);
+	reactionMotion->setSuffix(QStringLiteral(" %"));
+	reactionMotion->setAccessibleName(QStringLiteral("Global overlay motion intensity"));
+	reactionGlow = new QDoubleSpinBox(directorFrame);
+	reactionGlow->setRange(0.0, 200.0);
+	reactionGlow->setSingleStep(5.0);
+	reactionGlow->setDecimals(0);
+	reactionGlow->setSuffix(QStringLiteral(" %"));
+	reactionGlow->setAccessibleName(QStringLiteral("Global overlay glow intensity"));
+	reactionTestStrength = new QDoubleSpinBox(directorFrame);
+	reactionTestStrength->setRange(5.0, 150.0);
+	reactionTestStrength->setSingleStep(5.0);
+	reactionTestStrength->setDecimals(0);
+	reactionTestStrength->setSuffix(QStringLiteral(" %"));
+	reactionTestStrength->setAccessibleName(QStringLiteral("Reactivity Director test signal strength"));
+	reducedMotion = new QCheckBox(QStringLiteral("REDUCED MOTION // KEEP COLOR + GLOW"), directorFrame);
+	reducedMotion->setAccessibleName(QStringLiteral("Reduce overlay reaction motion"));
+	auto *directorForm = new QFormLayout();
+	directorForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	directorForm->addRow(QStringLiteral("Response profile"), reactionProfile);
+	directorForm->addRow(QStringLiteral("Color palette"), reactionPalette);
+	directorForm->addRow(QStringLiteral("Noise threshold"), reactionThreshold);
+	directorForm->addRow(QStringLiteral("Attack"), reactionAttack);
+	directorForm->addRow(QStringLiteral("Release"), smoothing);
+	directorForm->addRow(QStringLiteral("Motion"), reactionMotion);
+	directorForm->addRow(QStringLiteral("Glow"), reactionGlow);
+	directorForm->addRow(QStringLiteral("Test strength"), reactionTestStrength);
+	auto *directorButtons = new QHBoxLayout();
+	auto *applyProfile = new QPushButton(QStringLiteral("APPLY PRESET"), directorFrame);
+	auto *testProfile = new QPushButton(QStringLiteral("TEST PROFILE"), directorFrame);
+	applyProfile->setAccessibleName(QStringLiteral("Apply selected Reactivity Director preset"));
+	testProfile->setAccessibleName(QStringLiteral("Test current Reactivity Director settings"));
+	directorButtons->addWidget(applyProfile);
+	directorButtons->addWidget(testProfile);
+	directorLayout->addWidget(directorLabel);
+	directorLayout->addWidget(directorHint);
+	directorLayout->addLayout(directorForm);
+	directorLayout->addWidget(reducedMotion);
+	directorLayout->addLayout(directorButtons);
+	layout->addWidget(directorFrame);
+
 	auto *networkFrame = new QFrame(root);
 	networkFrame->setObjectName(QStringLiteral("reactorChannel"));
 	networkFrame->setAccessibleName(QStringLiteral("Source reaction network controls"));
 	auto *networkLayout = new QVBoxLayout(networkFrame);
 	networkLayout->setContentsMargins(8, 8, 8, 8);
 	networkLayout->setSpacing(6);
-	auto *networkLabel = new QLabel(QStringLiteral("SOURCE REACTION NETWORK"), networkFrame);
+	auto *networkLabel = new QLabel(QStringLiteral("REACTIVE SOURCE CONTROLS"), networkFrame);
 	networkLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
 	sourceNetworkStatus = new QLabel(QStringLiteral("NETWORK // NO SOURCE RIGS BOUND"), networkFrame);
 	sourceNetworkStatus->setObjectName(QStringLiteral("reactorStatus"));
@@ -367,17 +489,17 @@ void TempestSignalReactor::BuildInterface()
 	auto *pulseRow = new QHBoxLayout();
 	pulseButton = new QPushButton(QStringLiteral("TEST PULSE"), root);
 	peakButton = new QPushButton(QStringLiteral("TEST PEAK"), root);
-	pulseButton->setAccessibleName(QStringLiteral("Trigger Tempest signal pulse"));
-	peakButton->setAccessibleName(QStringLiteral("Trigger Tempest signal peak"));
+	pulseButton->setAccessibleName(QStringLiteral("Trigger reaction pulse"));
+	peakButton->setAccessibleName(QStringLiteral("Trigger reaction peak"));
 	auto *refresh = new QPushButton(QStringLiteral("REFRESH SOURCES"), root);
-	refresh->setAccessibleName(QStringLiteral("Refresh Signal Reactor audio sources"));
+	refresh->setAccessibleName(QStringLiteral("Refresh Audio Reactor sources"));
 	pulseRow->addWidget(pulseButton);
 	pulseRow->addWidget(peakButton);
 	pulseRow->addWidget(refresh);
 	layout->addLayout(pulseRow);
 	controlLabel = new QLabel(QStringLiteral("CONTROL BRIDGE // INITIALIZING"), root);
 	controlLabel->setObjectName(QStringLiteral("reactorControl"));
-	controlLabel->setAccessibleName(QStringLiteral("Signal Reactor external control status"));
+	controlLabel->setAccessibleName(QStringLiteral("Audio Reactor external control status"));
 	layout->addWidget(controlLabel);
 
 	auto *hint = new QLabel(
@@ -405,6 +527,17 @@ void TempestSignalReactor::BuildInterface()
 	connect(microphoneSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(beatSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(smoothing, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(reactionProfile, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::SaveState);
+	connect(reactionPalette, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::SaveState);
+	connect(reactionThreshold, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(reactionAttack, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(reactionMotion, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(reactionGlow, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(reactionTestStrength, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(reducedMotion, &QCheckBox::toggled, this, &TempestSignalReactor::SaveState);
+	connect(applyProfile, &QPushButton::clicked, this, &TempestSignalReactor::ApplyReactivityProfile);
+	connect(testProfile, &QPushButton::clicked, this,
+		[this]() { TriggerPulse(float(reactionTestStrength->value() / 100.0), QStringLiteral("director")); });
 	connect(sourceNetworkArmed, &QCheckBox::toggled, this, [this](bool armed) {
 		SaveState();
 		RefreshSourceNetworkCircuitMonitors();
@@ -477,8 +610,8 @@ void TempestSignalReactor::RegisterHotkeys()
 		float strength;
 	};
 	constexpr Definition definitions[] = {
-		{"TempestMainframe.Signal.Pulse", "Tempest Mainframe: Trigger Signal Pulse", 0.65f},
-		{"TempestMainframe.Signal.Peak", "Tempest Mainframe: Trigger Signal Peak", 1.0f},
+		{"TempestMainframe.Signal.Pulse", "Tempest Broadcast: Trigger Reaction Pulse", 0.65f},
+		{"TempestMainframe.Signal.Peak", "Tempest Broadcast: Trigger Reaction Peak", 1.0f},
 	};
 	for (const Definition &definition : definitions) {
 		const obs_hotkey_id id =
@@ -494,17 +627,16 @@ void TempestSignalReactor::RegisterHotkeys()
 		const char *action;
 	};
 	constexpr NetworkDefinition networkDefinitions[] = {
-		{"TempestMainframe.ReactionNetwork.Toggle", "Tempest Mainframe: Toggle Source Reaction Network",
-		 "toggle"},
-		{"TempestMainframe.ReactionNetwork.Test", "Tempest Mainframe: Test All Source Reaction Rigs", "test"},
-		{"TempestMainframe.ReactionNetwork.Restore", "Tempest Mainframe: Disarm Reactions and Restore Bases",
+		{"TempestMainframe.ReactionNetwork.Toggle", "Tempest Broadcast: Toggle Source Reactions", "toggle"},
+		{"TempestMainframe.ReactionNetwork.Test", "Tempest Broadcast: Test All Source Reactions", "test"},
+		{"TempestMainframe.ReactionNetwork.Restore", "Tempest Broadcast: Disable Reactions and Restore Sources",
 		 "restore"},
-		{"TempestMainframe.ReactionNetwork.Scope", "Tempest Mainframe: Toggle Active Scene Reaction Scope",
+		{"TempestMainframe.ReactionNetwork.Scope", "Tempest Broadcast: Toggle Active Scene Reaction Scope",
 		 "scope"},
-		{"TempestMainframe.ReactionNetwork.Circuits",
-		 "Tempest Mainframe: Cycle Source Reaction Circuit Profile", "circuits"},
-		{"TempestMainframe.ReactionNetwork.MixerReset",
-		 "Tempest Mainframe: Reset Source Reaction Circuit Mixer", "mixer-reset"},
+		{"TempestMainframe.ReactionNetwork.Circuits", "Tempest Broadcast: Cycle Source Reaction Profile",
+		 "circuits"},
+		{"TempestMainframe.ReactionNetwork.MixerReset", "Tempest Broadcast: Reset Source Reaction Mixer",
+		 "mixer-reset"},
 	};
 	for (const NetworkDefinition &definition : networkDefinitions) {
 		const obs_hotkey_id id =
@@ -521,8 +653,8 @@ void TempestSignalReactor::RegisterHotkeys()
 	};
 	constexpr EventDefinition eventDefinitions[] = {
 		{"TempestMainframe.ExternalEvent.SoundAlertDance",
-		 "Tempest Mainframe: Warudo Sound Alert Dance Reaction", "sound_alert_dance"},
-		{"TempestMainframe.ExternalEvent.TwitchInteraction", "Tempest Mainframe: Twitch Interaction Reaction",
+		 "Tempest Broadcast: Warudo Sound Alert Dance Reaction", "sound_alert_dance"},
+		{"TempestMainframe.ExternalEvent.TwitchInteraction", "Tempest Broadcast: Twitch Interaction Reaction",
 		 "twitch_interaction"},
 	};
 	for (const EventDefinition &definition : eventDefinitions) {
@@ -612,6 +744,45 @@ void TempestSignalReactor::HotkeyCallback(void *data, obs_hotkey_id id, obs_hotk
 		Qt::QueuedConnection);
 }
 
+void TempestSignalReactor::ApplyReactivityProfile()
+{
+	if (!reactionProfile || !reactionPalette)
+		return;
+	struct Preset {
+		double threshold;
+		double attack;
+		double release;
+		double motion;
+		double glow;
+		const char *palette;
+	};
+	const QString profile = reactionProfile->currentData().toString();
+	Preset preset{0.05, 0.55, 0.82, 100.0, 100.0, "tempest"};
+	if (profile == QStringLiteral("calm"))
+		preset = {0.12, 0.28, 0.90, 45.0, 65.0, "tempest"};
+	else if (profile == QStringLiteral("storm"))
+		preset = {0.03, 0.72, 0.76, 140.0, 150.0, "ultraviolet"};
+	else if (profile == QStringLiteral("dance"))
+		preset = {0.01, 0.90, 0.70, 170.0, 165.0, "spectrum"};
+	else if (profile == QStringLiteral("alert"))
+		preset = {0.04, 0.80, 0.75, 115.0, 180.0, "ember"};
+
+	const bool previousLoadingState = loadingState;
+	loadingState = true;
+	reactionThreshold->setValue(preset.threshold);
+	reactionAttack->setValue(preset.attack);
+	smoothing->setValue(preset.release);
+	reactionMotion->setValue(preset.motion);
+	reactionGlow->setValue(preset.glow);
+	const int paletteIndex = reactionPalette->findData(QString::fromUtf8(preset.palette));
+	if (paletteIndex >= 0)
+		reactionPalette->setCurrentIndex(paletteIndex);
+	reducedMotion->setChecked(false);
+	loadingState = previousLoadingState;
+	SaveState();
+	SetStatus(QStringLiteral("DIRECTOR PRESET APPLIED // %1").arg(reactionProfile->currentText()));
+}
+
 void TempestSignalReactor::LoadState()
 {
 	loadingState = true;
@@ -626,6 +797,37 @@ void TempestSignalReactor::LoadState()
 	microphoneSensitivity->setValue(microphoneGain > 0.0 ? microphoneGain : 1.2);
 	beatSensitivity->setValue(savedBeatSensitivity > 0.0 ? savedBeatSensitivity : 1.8);
 	smoothing->setValue(savedSmoothing >= 0.50 ? savedSmoothing : 0.82);
+	const QString savedReactionProfile =
+		QString::fromUtf8(config_get_string(config, ConfigSection, "ReactionProfile"));
+	const int reactionProfileIndex = reactionProfile->findData(savedReactionProfile);
+	reactionProfile->setCurrentIndex(reactionProfileIndex >= 0
+						 ? reactionProfileIndex
+						 : reactionProfile->findData(QStringLiteral("mainframe")));
+	const QString savedReactionPalette =
+		QString::fromUtf8(config_get_string(config, ConfigSection, "ReactionPalette"));
+	const int reactionPaletteIndex = reactionPalette->findData(savedReactionPalette);
+	reactionPalette->setCurrentIndex(reactionPaletteIndex >= 0 ? reactionPaletteIndex : 0);
+	const double savedReactionThreshold = config_get_double(config, ConfigSection, "ReactionThreshold");
+	reactionThreshold->setValue(config_has_user_value(config, ConfigSection, "ReactionThreshold")
+					    ? std::clamp(savedReactionThreshold, 0.0, 0.80)
+					    : 0.05);
+	const double savedReactionAttack = config_get_double(config, ConfigSection, "ReactionAttack");
+	reactionAttack->setValue(config_has_user_value(config, ConfigSection, "ReactionAttack")
+					 ? std::clamp(savedReactionAttack, 0.05, 1.0)
+					 : 0.55);
+	const double savedReactionMotion = config_get_double(config, ConfigSection, "ReactionMotion");
+	reactionMotion->setValue(config_has_user_value(config, ConfigSection, "ReactionMotion")
+					 ? std::clamp(savedReactionMotion, 0.0, 200.0)
+					 : 100.0);
+	const double savedReactionGlow = config_get_double(config, ConfigSection, "ReactionGlow");
+	reactionGlow->setValue(config_has_user_value(config, ConfigSection, "ReactionGlow")
+				       ? std::clamp(savedReactionGlow, 0.0, 200.0)
+				       : 100.0);
+	const double savedTestStrength = config_get_double(config, ConfigSection, "ReactionTestStrength");
+	reactionTestStrength->setValue(config_has_user_value(config, ConfigSection, "ReactionTestStrength")
+					       ? std::clamp(savedTestStrength, 5.0, 150.0)
+					       : 65.0);
+	reducedMotion->setChecked(config_get_bool(config, ConfigSection, "ReducedMotion"));
 	sourceNetworkArmed->setChecked(!config_has_user_value(config, ConfigSection, "SourceNetworkArmed") ||
 				       config_get_bool(config, ConfigSection, "SourceNetworkArmed"));
 	sourceNetworkActiveSceneOnly->setChecked(
@@ -684,6 +886,16 @@ void TempestSignalReactor::SaveState()
 	config_set_double(config, ConfigSection, "MicrophoneSensitivity", microphoneSensitivity->value());
 	config_set_double(config, ConfigSection, "BeatSensitivity", beatSensitivity->value());
 	config_set_double(config, ConfigSection, "Smoothing", smoothing->value());
+	config_set_string(config, ConfigSection, "ReactionProfile",
+			  reactionProfile->currentData().toString().toUtf8().constData());
+	config_set_string(config, ConfigSection, "ReactionPalette",
+			  reactionPalette->currentData().toString().toUtf8().constData());
+	config_set_double(config, ConfigSection, "ReactionThreshold", reactionThreshold->value());
+	config_set_double(config, ConfigSection, "ReactionAttack", reactionAttack->value());
+	config_set_double(config, ConfigSection, "ReactionMotion", reactionMotion->value());
+	config_set_double(config, ConfigSection, "ReactionGlow", reactionGlow->value());
+	config_set_double(config, ConfigSection, "ReactionTestStrength", reactionTestStrength->value());
+	config_set_bool(config, ConfigSection, "ReducedMotion", reducedMotion->isChecked());
 	config_set_bool(config, ConfigSection, "SourceNetworkArmed", sourceNetworkArmed->isChecked());
 	config_set_bool(config, ConfigSection, "SourceNetworkActiveSceneOnly",
 			sourceNetworkActiveSceneOnly->isChecked());
@@ -986,7 +1198,8 @@ void TempestSignalReactor::SetSourceCircuitActivity(const QString &circuit, floa
 	if (!sourceNetworkCircuitMeters.contains(circuit))
 		return;
 	sourceNetworkCircuitActivities[circuit] = std::clamp(activity, 0.0f, 2.0f);
-	RefreshSourceNetworkCircuitMonitor(circuit);
+	if (isVisible())
+		RefreshSourceNetworkCircuitMonitor(circuit);
 }
 
 bool TempestSignalReactor::SourceNetworkArmed() const
@@ -1235,9 +1448,14 @@ void TempestSignalReactor::UpdateControlBridgeState()
 
 void TempestSignalReactor::PublishTelemetry()
 {
-	const float decay = (float)smoothing->value();
-	auto processChannel = [decay](SignalChannel &channel, float input) {
-		channel.smoothedLevel = std::max(input, channel.smoothedLevel * decay);
+	// Preserve the original 50 ms response curve while publishing at 10 Hz.
+	const float decay = std::pow((float)smoothing->value(), 2.0f);
+	const float attack = 1.0f - std::pow(1.0f - (float)reactionAttack->value(), 2.0f);
+	auto processChannel = [attack, decay](SignalChannel &channel, float input) {
+		if (input > channel.smoothedLevel)
+			channel.smoothedLevel += (input - channel.smoothedLevel) * attack;
+		else
+			channel.smoothedLevel *= decay;
 		return channel.smoothedLevel;
 	};
 	const float desktopInput =
@@ -1248,9 +1466,9 @@ void TempestSignalReactor::PublishTelemetry()
 						 0.0f, 1.5f);
 	float desktop = processChannel(desktopChannel, desktopInput);
 	float microphone = processChannel(microphoneChannel, microphoneInput);
-	beatBaseline += (desktopInput - beatBaseline) * 0.055f;
+	beatBaseline += (desktopInput - beatBaseline) * (1.0f - std::pow(1.0f - 0.055f, 2.0f));
 	const float transient = std::max(0.0f, desktopInput - beatBaseline);
-	beatLevel = std::max(transient * (float)beatSensitivity->value() * 2.6f, beatLevel * 0.68f);
+	beatLevel = std::max(transient * (float)beatSensitivity->value() * 2.6f, beatLevel * std::pow(0.68f, 2.0f));
 	float beat = std::clamp(beatLevel, 0.0f, 1.5f);
 	manualPulse *= decay;
 	if (!reactorEnabled->isChecked()) {
@@ -1261,18 +1479,31 @@ void TempestSignalReactor::PublishTelemetry()
 		beatLevel = 0.0f;
 		manualPulse = 0.0f;
 	}
-	const float master = std::clamp(std::max({desktop, microphone, manualPulse}), 0.0f, 1.5f);
+	const float threshold = (float)reactionThreshold->value();
+	auto applyThreshold = [threshold](float level) {
+		if (level <= threshold)
+			return 0.0f;
+		return std::clamp((level - threshold) / std::max(0.01f, 1.0f - threshold), 0.0f, 1.5f);
+	};
+	desktop = applyThreshold(desktop);
+	microphone = applyThreshold(microphone);
+	beat = applyThreshold(beat);
+	const float pulse = applyThreshold(manualPulse);
+	const float master = std::clamp(std::max({desktop, microphone, pulse}), 0.0f, 1.5f);
 	emit LevelsUpdated(master, desktop, microphone, beat);
-	desktopMeter->setValue((int)(std::min(desktop, 1.0f) * 1000.0f));
-	microphoneMeter->setValue((int)(std::min(microphone, 1.0f) * 1000.0f));
-	beatMeter->setValue((int)(std::min(beat, 1.0f) * 1000.0f));
-	masterMeter->setValue((int)(std::min(master, 1.0f) * 1000.0f));
-	statusLabel->setStyleSheet(QStringLiteral("color:#45d9ff;"));
-	statusLabel->setText(QStringLiteral("MASTER %1% // DESKTOP %2% // VOICE %3% // BEAT %4%")
-				     .arg(qRound(master * 100.0f), 3)
-				     .arg(qRound(desktop * 100.0f), 3)
-				     .arg(qRound(microphone * 100.0f), 3)
-				     .arg(qRound(beat * 100.0f), 3));
+	if (isVisible()) {
+		desktopMeter->setValue((int)(std::min(desktop, 1.0f) * 1000.0f));
+		microphoneMeter->setValue((int)(std::min(microphone, 1.0f) * 1000.0f));
+		beatMeter->setValue((int)(std::min(beat, 1.0f) * 1000.0f));
+		masterMeter->setValue((int)(std::min(master, 1.0f) * 1000.0f));
+		const QString status = QStringLiteral("MASTER %1% // DESKTOP %2% // VOICE %3% // BEAT %4%")
+					       .arg(qRound(master * 100.0f), 3)
+					       .arg(qRound(desktop * 100.0f), 3)
+					       .arg(qRound(microphone * 100.0f), 3)
+					       .arg(qRound(beat * 100.0f), 3);
+		if (statusLabel->text() != status)
+			statusLabel->setText(status);
+	}
 
 	if (telemetryPath.isEmpty() && !EnsureOutputDirectory())
 		return;
@@ -1282,7 +1513,16 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("desktop"), desktop);
 	telemetry.insert(QStringLiteral("microphone"), microphone);
 	telemetry.insert(QStringLiteral("beat"), beat);
-	telemetry.insert(QStringLiteral("pulse"), manualPulse);
+	telemetry.insert(QStringLiteral("pulse"), pulse);
+	telemetry.insert(QStringLiteral("reactorEnabled"), reactorEnabled->isChecked());
+	telemetry.insert(QStringLiteral("reactionProfile"), reactionProfile->currentData().toString());
+	telemetry.insert(QStringLiteral("reactionPalette"), reactionPalette->currentData().toString());
+	telemetry.insert(QStringLiteral("reactionThreshold"), reactionThreshold->value());
+	telemetry.insert(QStringLiteral("reactionAttack"), reactionAttack->value());
+	telemetry.insert(QStringLiteral("reactionRelease"), smoothing->value());
+	telemetry.insert(QStringLiteral("reactionMotion"), reactionMotion->value() / 100.0);
+	telemetry.insert(QStringLiteral("reactionGlow"), reactionGlow->value() / 100.0);
+	telemetry.insert(QStringLiteral("reducedMotion"), reducedMotion->isChecked());
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const bool externalEventActive = ExternalEventBridgeArmed() && now < activeExternalEventUntil;
 	telemetry.insert(QStringLiteral("externalEventActive"), externalEventActive);
@@ -1313,10 +1553,12 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("sourceNetworkCircuitActivity"), circuitActivity);
 	telemetry.insert(QStringLiteral("sourceNetworkCircuitStates"), circuitStates);
 	telemetry.insert(QStringLiteral("timestamp"), QDateTime::currentMSecsSinceEpoch());
+	const QByteArray payload = QJsonDocument(telemetry).toJson(QJsonDocument::Compact);
+	obs_enum_sources(PublishTempestBrowserTelemetry, const_cast<QByteArray *>(&payload));
 	QSaveFile file(telemetryPath);
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
 		return;
-	file.write(QJsonDocument(telemetry).toJson(QJsonDocument::Compact));
+	file.write(payload);
 	file.commit();
 }
 

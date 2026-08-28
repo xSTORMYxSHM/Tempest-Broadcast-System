@@ -1,5 +1,6 @@
 #include "TempestMainframeBar.hpp"
 
+#include "../TempestAppearance.hpp"
 #include "OBSBasic.hpp"
 
 #include <obs.h>
@@ -58,13 +59,13 @@ TempestMainframeBar::TempestMainframeBar(OBSBasic *main) : QFrame(main), main(ma
 
 	connect(main, &OBSBasic::StreamingPreparing, this, [this]() {
 		streamStarting = true;
-		SetTransmissionState(QStringLiteral("PREPARING"), QStringLiteral("VALIDATING TRANSMISSION PATH"),
+		SetTransmissionState(QStringLiteral("PREPARING"), QStringLiteral("CHECKING STREAM CONNECTION"),
 				     QStringLiteral("#edb74a"));
 		UpdateActionButtons();
 	});
 	connect(main, &OBSBasic::StreamingStarting, this, [this](bool) {
 		streamStarting = true;
-		SetTransmissionState(QStringLiteral("INITIALIZING"), QStringLiteral("ESTABLISHING UPLINK"),
+		SetTransmissionState(QStringLiteral("INITIALIZING"), QStringLiteral("CONNECTING TO STREAM SERVICE"),
 				     QStringLiteral("#edb74a"));
 		UpdateActionButtons();
 	});
@@ -73,13 +74,13 @@ TempestMainframeBar::TempestMainframeBar(OBSBasic *main) : QFrame(main), main(ma
 		streamStopping = false;
 		armButton->setChecked(false);
 		streamElapsed.restart();
-		SetTransmissionState(QStringLiteral("LIVE TRANSMISSION"), QStringLiteral("UPLINK STABLE"),
+		SetTransmissionState(QStringLiteral("LIVE"), QStringLiteral("STREAM CONNECTION STABLE"),
 				     QStringLiteral("#45d9ff"));
 		UpdateActionButtons();
 	});
 	connect(main, &OBSBasic::StreamingStopping, this, [this]() {
 		streamStopping = true;
-		SetTransmissionState(QStringLiteral("TERMINATING"), QStringLiteral("CLOSING UPLINK"),
+		SetTransmissionState(QStringLiteral("STOPPING"), QStringLiteral("CLOSING STREAM CONNECTION"),
 				     QStringLiteral("#ff799c"));
 		UpdateActionButtons();
 	});
@@ -87,19 +88,19 @@ TempestMainframeBar::TempestMainframeBar(OBSBasic *main) : QFrame(main), main(ma
 		streamStarting = false;
 		streamStopping = false;
 		streamElapsed.invalidate();
-		SetTransmissionState(armButton->isChecked() ? QStringLiteral("SYSTEM ARMED")
+		SetTransmissionState(armButton->isChecked() ? QStringLiteral("STREAM ARMED")
 							    : QStringLiteral("OFFLINE"),
-				     armButton->isChecked() ? QStringLiteral("AWAITING TRANSMISSION COMMAND")
-							    : QStringLiteral("MAINFRAME STANDBY"),
+				     armButton->isChecked() ? QStringLiteral("READY TO START STREAM")
+							    : QStringLiteral("BROADCAST STANDBY"),
 				     armButton->isChecked() ? QStringLiteral("#edb74a") : QStringLiteral("#748fa4"));
 		UpdateActionButtons();
 	});
 	connect(main, &OBSBasic::StreamingStartFailed, this, [this]() {
 		streamStarting = false;
 		streamStopping = false;
-		SetTransmissionState(armButton->isChecked() ? QStringLiteral("SYSTEM ARMED")
+		SetTransmissionState(armButton->isChecked() ? QStringLiteral("STREAM ARMED")
 							    : QStringLiteral("OFFLINE"),
-				     QStringLiteral("UPLINK START FAILED"), QStringLiteral("#ff799c"));
+				     QStringLiteral("STREAM START FAILED"), QStringLiteral("#ff799c"));
 		UpdateActionButtons();
 	});
 
@@ -113,7 +114,7 @@ TempestMainframeBar::TempestMainframeBar(OBSBasic *main) : QFrame(main), main(ma
 	});
 
 	telemetryTimer = new QTimer(this);
-	telemetryTimer->setInterval(500);
+	telemetryTimer->setInterval(1000);
 	connect(telemetryTimer, &QTimer::timeout, this, &TempestMainframeBar::RefreshTelemetry);
 	telemetryTimer->start();
 	RefreshTelemetry();
@@ -148,6 +149,8 @@ void TempestMainframeBar::BuildInterface()
 		QPushButton#tempestDockManager { min-width: 82px; }
 		QPushButton#tempestUiScaleStep { min-width: 24px; padding: 0 5px; }
 		QPushButton#tempestUiScaleReset { min-width: 48px; padding: 0 5px; }
+		QPushButton#tempestCanvas { min-width: 78px; padding: 0 8px; }
+		QPushButton#tempestCanvas:!checked { color: #edb74a; border-color: #6b5526; background: #221b0d; }
 		QPushButton#tempestStream { min-width: 132px; }
 		QPushButton#tempestRecord:checked { border-color: #ff4b70; color: white; background: #64142b; }
 		QPushButton#tempestEmergency { color: #ff799c; border-color: #82203a; }
@@ -160,9 +163,9 @@ void TempestMainframeBar::BuildInterface()
 
 	auto *identity = new QVBoxLayout();
 	identity->setSpacing(0);
-	auto *identityLabel = new QLabel(QStringLiteral("TEMPEST MAINFRAME"), this);
+	auto *identityLabel = new QLabel(QStringLiteral("TEMPEST BROADCAST"), this);
 	identityLabel->setObjectName(QStringLiteral("tempestIdentity"));
-	identitySublineLabel = new QLabel(QStringLiteral("BROADCAST COMMAND NEXUS"), this);
+	identitySublineLabel = new QLabel(QStringLiteral("LIVE PRODUCTION WORKSTATION"), this);
 	identitySublineLabel->setObjectName(QStringLiteral("tempestSubline"));
 	identity->addWidget(identityLabel);
 	identity->addWidget(identitySublineLabel);
@@ -182,7 +185,7 @@ void TempestMainframeBar::BuildInterface()
 	workspaceLayout->addWidget(engineeringWorkspaceButton);
 	dockManagerButton = new QPushButton(QStringLiteral("LAYOUT"), this);
 	dockManagerButton->setObjectName(QStringLiteral("tempestDockManager"));
-	dockManagerButton->setToolTip(QStringLiteral("Open Mainframe Dock Layout Director"));
+	dockManagerButton->setToolTip(QStringLiteral("Open workspace layout settings"));
 	workspaceLayout->addWidget(dockManagerButton);
 	root->addLayout(workspaceLayout);
 
@@ -203,18 +206,29 @@ void TempestMainframeBar::BuildInterface()
 	uiScaleLayout->addWidget(uiScaleUp);
 	root->addLayout(uiScaleLayout);
 
+	canvasButton = new QPushButton(QStringLiteral("CANVAS ON"), this);
+	canvasButton->setObjectName(QStringLiteral("tempestCanvas"));
+	canvasButton->setCheckable(true);
+	canvasButton->setChecked(true);
+	canvasButton->setAccessibleName(QStringLiteral("Local canvas preview"));
+	canvasButton->setToolTip(QStringLiteral(
+		"Show or suspend the local canvas preview. Streaming, recording, projectors, and source output continue."));
+	root->addWidget(canvasButton);
+
 	connect(commandWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(true); });
 	connect(engineeringWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(false); });
 	connect(dockManagerButton, &QPushButton::clicked, this, [this]() { emit DockManagerRequested(); });
 	connect(uiScaleDown, &QPushButton::clicked, this, [this]() { emit UiScaleRequested(uiScalePercent - 10); });
 	connect(uiScaleResetButton, &QPushButton::clicked, this, [this]() { emit UiScaleRequested(100); });
 	connect(uiScaleUp, &QPushButton::clicked, this, [this]() { emit UiScaleRequested(uiScalePercent + 10); });
+	connect(canvasButton, &QPushButton::clicked, this,
+		[this](bool visible) { emit CanvasVisibilityRequested(visible); });
 
 	auto *stateLayout = new QVBoxLayout();
 	stateLayout->setSpacing(0);
 	stateLabel = new QLabel(QStringLiteral("OFFLINE"), this);
 	stateLabel->setObjectName(QStringLiteral("tempestState"));
-	detailLabel = new QLabel(QStringLiteral("MAINFRAME STANDBY"), this);
+	detailLabel = new QLabel(QStringLiteral("BROADCAST STANDBY"), this);
 	detailLabel->setObjectName(QStringLiteral("tempestSubline"));
 	stateLayout->addWidget(stateLabel);
 	stateLayout->addWidget(detailLabel);
@@ -236,7 +250,7 @@ void TempestMainframeBar::BuildInterface()
 	clockLayout->setSpacing(0);
 	clockLabel = new QLabel(QStringLiteral("00:00:00"), this);
 	clockLabel->setObjectName(QStringLiteral("tempestClock"));
-	recordStateLabel = new QLabel(QStringLiteral("ARCHIVE IDLE"), this);
+	recordStateLabel = new QLabel(QStringLiteral("NOT RECORDING"), this);
 	recordStateLabel->setObjectName(QStringLiteral("tempestRecordState"));
 	clockLayout->addWidget(clockLabel, 0, Qt::AlignRight);
 	clockLayout->addWidget(recordStateLabel, 0, Qt::AlignRight);
@@ -245,12 +259,12 @@ void TempestMainframeBar::BuildInterface()
 	armButton = new QPushButton(QStringLiteral("ARM"), this);
 	armButton->setObjectName(QStringLiteral("tempestArm"));
 	armButton->setCheckable(true);
-	streamButton = new QPushButton(QStringLiteral("UPLINK LOCKED"), this);
+	streamButton = new QPushButton(QStringLiteral("STREAM LOCKED"), this);
 	streamButton->setObjectName(QStringLiteral("tempestStream"));
 	recordButton = new QPushButton(QStringLiteral("RECORD"), this);
 	recordButton->setObjectName(QStringLiteral("tempestRecord"));
 	recordButton->setCheckable(true);
-	emergencyButton = new QPushButton(QStringLiteral("CUT UPLINK"), this);
+	emergencyButton = new QPushButton(QStringLiteral("FORCE STOP"), this);
 	emergencyButton->setObjectName(QStringLiteral("tempestEmergency"));
 
 	root->addWidget(armButton);
@@ -263,14 +277,14 @@ void TempestMainframeBar::BuildInterface()
 	connect(recordButton, &QPushButton::clicked, this, &TempestMainframeBar::TriggerRecord);
 	connect(emergencyButton, &QPushButton::clicked, this, &TempestMainframeBar::EmergencyCut);
 
-	SetTransmissionState(QStringLiteral("OFFLINE"), QStringLiteral("MAINFRAME STANDBY"), QStringLiteral("#748fa4"));
+	SetTransmissionState(QStringLiteral("OFFLINE"), QStringLiteral("BROADCAST STANDBY"), QStringLiteral("#748fa4"));
 }
 
 void TempestMainframeBar::SetUiScalePercent(int percent)
 {
 	uiScalePercent = std::clamp(percent, 60, 160);
 	const qreal scale = uiScalePercent / 100.0;
-	setStyleSheet(ScaledStyleSheet(baseStyleSheet, scale));
+	TempestAppearance::SetManagedStyleSheet(this, ScaledStyleSheet(baseStyleSheet, scale));
 	setMinimumHeight(ScaledMetric(baseMinimumHeight, scale));
 	setMaximumHeight(ScaledMetric(baseMaximumHeight, scale));
 	if (uiScaleResetButton)
@@ -300,11 +314,34 @@ void TempestMainframeBar::SetResponsiveProfile(const QString &profileLabel, bool
 {
 	if (!identitySublineLabel)
 		return;
-	identitySublineLabel->setText(QStringLiteral("BROADCAST COMMAND NEXUS // %1%2")
+	identitySublineLabel->setText(QStringLiteral("LIVE PRODUCTION WORKSTATION // %1%2")
 					      .arg(profileLabel, automatic ? QStringLiteral(" AUTO") : QString()));
 	identitySublineLabel->setToolTip(
 		QStringLiteral("Responsive workspace profile: %1%2")
 			.arg(profileLabel, automatic ? QStringLiteral(" (automatic)") : QString()));
+}
+
+void TempestMainframeBar::SetCanvasVisible(bool visible)
+{
+	if (!canvasButton)
+		return;
+	canvasButton->setChecked(visible);
+	canvasButton->setText(visible ? QStringLiteral("CANVAS ON") : QStringLiteral("CANVAS OFF"));
+	canvasButton->setToolTip(
+		visible ? QStringLiteral(
+				  "Local canvas preview is active. Click to suspend only the local preview; streaming and recording continue.")
+			: QStringLiteral(
+				  "Local canvas preview is suspended to reduce presentation overhead. Click to restore it; streaming and recording continue."));
+}
+
+void TempestMainframeBar::SetCanvasControlEnabled(bool enabled)
+{
+	if (!canvasButton)
+		return;
+	canvasButton->setEnabled(enabled);
+	if (!enabled)
+		canvasButton->setToolTip(QStringLiteral(
+			"The local canvas is required while Studio Mode is active. Exit Studio Mode to suspend it."));
 }
 
 void TempestMainframeBar::resizeEvent(QResizeEvent *event)
@@ -339,9 +376,8 @@ void TempestMainframeBar::ToggleArm(bool armed)
 	if (!main || main->StreamingActive())
 		return;
 
-	SetTransmissionState(armed ? QStringLiteral("SYSTEM ARMED") : QStringLiteral("OFFLINE"),
-			     armed ? QStringLiteral("AWAITING TRANSMISSION COMMAND")
-				   : QStringLiteral("MAINFRAME STANDBY"),
+	SetTransmissionState(armed ? QStringLiteral("STREAM ARMED") : QStringLiteral("OFFLINE"),
+			     armed ? QStringLiteral("READY TO START STREAM") : QStringLiteral("BROADCAST STANDBY"),
 			     armed ? QStringLiteral("#edb74a") : QStringLiteral("#748fa4"));
 	UpdateActionButtons();
 }
@@ -374,8 +410,8 @@ void TempestMainframeBar::EmergencyCut()
 	if (!main || !main->StreamingActive())
 		return;
 
-	auto result = QMessageBox::warning(this, QStringLiteral("Emergency Uplink Cut"),
-					   QStringLiteral("Immediately terminate the active transmission?\n\n"
+	auto result = QMessageBox::warning(this, QStringLiteral("Force Stop Stream"),
+					   QStringLiteral("Immediately stop the active stream?\n\n"
 							  "Local recording will continue."),
 					   QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
 	if (result == QMessageBox::Yes)
@@ -405,7 +441,7 @@ void TempestMainframeBar::RefreshTelemetry()
 	if (main->StreamingActive()) {
 		clockLabel->setText(ElapsedText());
 		if (!streamStopping)
-			SetTransmissionState(QStringLiteral("LIVE TRANSMISSION"), QStringLiteral("UPLINK STABLE"),
+			SetTransmissionState(QStringLiteral("LIVE"), QStringLiteral("STREAM CONNECTION STABLE"),
 					     QStringLiteral("#45d9ff"));
 	} else if (!streamStarting && !streamStopping) {
 		clockLabel->setText(QStringLiteral("00:00:00"));
@@ -431,13 +467,13 @@ void TempestMainframeBar::UpdateActionButtons()
 	const bool busy = streamStarting || streamStopping;
 	armButton->setEnabled(!live && !busy);
 	streamButton->setEnabled(!busy && (live || armButton->isChecked()));
-	streamButton->setText(live                     ? QStringLiteral("END TRANSMISSION")
-			      : armButton->isChecked() ? QStringLiteral("INITIATE UPLINK")
-						       : QStringLiteral("UPLINK LOCKED"));
+	streamButton->setText(live                     ? QStringLiteral("STOP STREAM")
+			      : armButton->isChecked() ? QStringLiteral("START STREAM")
+						       : QStringLiteral("STREAM LOCKED"));
 	emergencyButton->setEnabled(live && !streamStopping);
 	recordButton->setChecked(recording);
 	recordButton->setText(recording ? QStringLiteral("STOP RECORD") : QStringLiteral("RECORD"));
-	recordStateLabel->setText(recording ? QStringLiteral("ARCHIVE RECORDING") : QStringLiteral("ARCHIVE IDLE"));
+	recordStateLabel->setText(recording ? QStringLiteral("RECORDING ACTIVE") : QStringLiteral("NOT RECORDING"));
 }
 
 QString TempestMainframeBar::ElapsedText() const

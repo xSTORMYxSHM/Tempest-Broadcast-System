@@ -1,5 +1,7 @@
 #include "OBSDock.hpp"
 
+#include "../TempestAppearance.hpp"
+
 #include <OBSApp.hpp>
 #include <widgets/OBSBasic.hpp>
 
@@ -217,8 +219,8 @@ void OBSDock::ApplyContentScale(int percent, bool save)
 		child->setMinimumSize(ScaledMinimumSize(minimum, scale));
 		child->setMaximumSize(ScaledMaximumSize(maximum, scale));
 		if (child->property("tempestScaleStyleManaged").toBool())
-			child->setStyleSheet(
-				ScaledStyleSheet(child->property("tempestScaleBaseStyle").toString(), scale));
+			TempestAppearance::SetManagedStyleSheet(
+				child, ScaledStyleSheet(child->property("tempestScaleBaseStyle").toString(), scale));
 	}
 
 	const QList<QLayout *> layouts = scaledContent->findChildren<QLayout *>();
@@ -275,8 +277,8 @@ bool OBSDock::eventFilter(QObject *watched, QEvent *event)
 	if (scaledContent && event->type() == QEvent::ChildAdded && !scaleRefreshQueued) {
 		scaleRefreshQueued = true;
 		QTimer::singleShot(0, this, [this]() {
-			scaleRefreshQueued = false;
 			ApplyContentScale(contentScalePercent, false);
+			scaleRefreshQueued = false;
 		});
 	}
 	if (scaledContent && event->type() == QEvent::Wheel) {

@@ -207,7 +207,17 @@
       <item>
        <widget class="ClickableLabel" name="about">
         <property name="text">
-         <string>About</string>
+         <string>Tempest</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="ClickableLabel" name="obsProject">
+        <property name="text">
+         <string>OBS Project</string>
         </property>
         <property name="alignment">
          <set>Qt::AlignCenter</set>

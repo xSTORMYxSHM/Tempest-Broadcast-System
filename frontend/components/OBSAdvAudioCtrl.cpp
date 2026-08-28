@@ -69,7 +69,7 @@ OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *, obs_source_t *source_) : source(
 	hlayout = new QHBoxLayout();
 	hlayout->setContentsMargins(0, 0, 0, 0);
 	balanceContainer->setLayout(hlayout);
-	balanceContainer->setFixedWidth(150);
+	balanceContainer->setMinimumWidth(150);
 
 	labelL->setText("L");
 	labelR->setText("R");
@@ -110,8 +110,8 @@ OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *, obs_source_t *source_) : source(
 	percent->setValue((int)(obs_source_get_volume(source) * 100.0f));
 	percent->setAccessibleName(QTStr("Basic.AdvAudio.VolumeSource").arg(sourceName));
 
-	stackedWidget->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-	stackedWidget->setFixedWidth(100);
+	stackedWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+	stackedWidget->setMinimumWidth(100);
 	stackedWidget->addWidget(volume);
 	stackedWidget->addWidget(percent);
 
@@ -145,7 +145,7 @@ OBSAdvAudioCtrl::OBSAdvAudioCtrl(QGridLayout *, obs_source_t *source_) : source(
 	syncOffset->setMaximum(20000);
 	syncOffset->setSuffix(" ms");
 	syncOffset->setValue(int(cur_sync / NSEC_PER_MSEC));
-	syncOffset->setFixedWidth(100);
+	syncOffset->setMinimumWidth(100);
 	syncOffset->setAccessibleName(QTStr("Basic.AdvAudio.SyncOffsetSource").arg(sourceName));
 
 	int idx;

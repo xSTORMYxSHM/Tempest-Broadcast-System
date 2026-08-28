@@ -3,12 +3,13 @@
 #include "OBSDock.hpp"
 
 #include <obs.h>
+#include <QJsonObject>
 #include <QString>
 
 class QComboBox;
+class QFileSystemWatcher;
 class QLabel;
 class QLineEdit;
-class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QTimer;
@@ -30,6 +31,13 @@ private slots:
 	void ResetCountdown();
 	void UpdateCountdownPreview();
 	void CreateOrUpdateSource();
+	void ComposeRotationMessage();
+	void OpenRotationLibrary();
+	void OpenMessageVariables();
+	void ChangeContentProfile(int index);
+	void NewContentProfile();
+	void DuplicateContentProfile();
+	void OpenContentProfileFolder();
 
 private:
 	void BuildInterface();
@@ -38,8 +46,31 @@ private:
 	void LoadModeState(const QString &mode);
 	void SaveModeState(const QString &mode);
 	bool EnsureOverlayDirectory();
+	bool EnsureRotationLibrary();
+	bool EnsureProfilesDirectory();
+	bool EnsureMessageFile(const QString &path, const QString &description) const;
+	bool EnsureVariablesFile(const QString &path, const QString &description) const;
+	QJsonObject CreateProfileDocument(const QString &name, bool migrateExisting) const;
+	bool WriteProfileDocument(const QString &profileId, const QJsonObject &document);
+	bool LoadContentProfile(const QString &profileId);
+	void RefreshContentProfiles(const QString &selectProfile = QString());
+	void WatchContentProfileFiles();
+	QString ProfileFilePath(const QString &profileId) const;
+	QString ProfileMessagePath(const QString &profileId) const;
+	QString ProfileVariablesPath(const QString &profileId) const;
+	QStringList MessageLibraryRelativePaths(bool vaultElement) const;
+	QStringList VariableLibraryRelativePaths(bool vaultElement) const;
+	static QString ProfileIdForName(const QString &name);
+	QStringList ReadRotationMessages(const QString &fallback = QString(), const QString &modeId = QString()) const;
+	QJsonObject ReadMessageVariables() const;
+	bool AppendRotationMessages(const QString &messages, const QString &playlist = QStringLiteral("common"));
+	void RefreshMessagePlaylists(const QString &selectPlaylist = QString());
+	void RefreshRotationLibrarySummary();
 	void UpdateOverlayPath();
-	QString BuildOverlayHtml() const;
+	QString BuildOverlayStateJson(const QString &modeId = QString(), bool vaultElement = false) const;
+	QString BuildOverlayHtml(const QString &modeId = QString()) const;
+	QString BuildVaultElementHtml(const QString &elementId, int width, int height) const;
+	bool RenderVaultElements();
 	QString CurrentModeId() const;
 	QString CurrentModeLabel() const;
 	QString CurrentSourceName() const;
@@ -47,10 +78,15 @@ private:
 	void ApplySourceSettings(obs_source_t *source);
 	void SetStatus(const QString &message, bool isError = false);
 
+	QComboBox *contentProfile = nullptr;
 	QComboBox *overlayMode = nullptr;
 	QLineEdit *streamTitle = nullptr;
 	QLineEdit *statusLine = nullptr;
-	QPlainTextEdit *rotationMessages = nullptr;
+	QPushButton *rotationLibraryButton = nullptr;
+	QPushButton *composeMessageButton = nullptr;
+	QPushButton *messageVariablesButton = nullptr;
+	QComboBox *messageOrder = nullptr;
+	QComboBox *messagePlaylist = nullptr;
 	QSpinBox *rotationSeconds = nullptr;
 	QSpinBox *countdownMinutes = nullptr;
 	QLabel *countdownPreview = nullptr;
@@ -59,13 +95,25 @@ private:
 	QPushButton *startCountdownButton = nullptr;
 	QPushButton *resetCountdownButton = nullptr;
 	QPushButton *createSourceButton = nullptr;
+	QPushButton *newProfileButton = nullptr;
+	QPushButton *duplicateProfileButton = nullptr;
+	QPushButton *openProfileFolderButton = nullptr;
+	QFileSystemWatcher *rotationLibraryWatcher = nullptr;
 	QTimer *renderDebounce = nullptr;
 	QTimer *clockTimer = nullptr;
 
 	QString overlayDirectory;
 	QString overlayPath;
+	QString profilesDirectory;
+	QString globalRotationLibraryPath;
+	QString globalMessageVariablesPath;
+	QString rotationLibraryPath;
+	QString messageVariablesPath;
+	QString activeProfileId;
+	QJsonObject activeProfileDocument;
 	QString activeModeId;
 	qint64 countdownEndMs = 0;
 	bool countdownRunning = false;
+	bool loadingProfile = false;
 	quint64 renderRevision = 0;
 };

@@ -64,13 +64,13 @@ function Package {
         $CpackArgs += ('--verbose')
     }
 
-    Log-Group "Packaging obs-studio..."
+    Log-Group "Packaging Tempest Broadcast System..."
 
     Push-Location -Stack PackageTemp "build_${Target}"
 
     cpack @CpackArgs
 
-    $Package = Get-ChildItem -filter "obs-studio-*-windows-${Target}.zip" -File
+    $Package = Get-ChildItem -filter "tempest-broadcast-system-*-windows-${Target}.zip" -File
     Move-Item -Path $Package -Destination "${OutputName}-windows-${Target}.zip"
 
     Pop-Location -Stack PackageTemp

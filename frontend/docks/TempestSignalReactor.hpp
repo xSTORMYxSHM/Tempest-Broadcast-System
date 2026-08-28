@@ -101,6 +101,7 @@ private:
 	QString SourceNetworkCircuitState(const QString &circuit) const;
 	void RefreshSourceNetworkCircuitMonitor(const QString &circuit);
 	void RefreshSourceNetworkCircuitMonitors();
+	void ApplyReactivityProfile();
 	void ToggleSourceNetworkCircuitMute(const QString &circuit);
 	void ToggleSourceNetworkCircuitSolo(const QString &circuit);
 	void SetStatus(const QString &message, bool error = false);
@@ -113,6 +114,14 @@ private:
 	QPointer<QDoubleSpinBox> microphoneSensitivity;
 	QPointer<QDoubleSpinBox> beatSensitivity;
 	QPointer<QDoubleSpinBox> smoothing;
+	QPointer<QComboBox> reactionProfile;
+	QPointer<QComboBox> reactionPalette;
+	QPointer<QDoubleSpinBox> reactionThreshold;
+	QPointer<QDoubleSpinBox> reactionAttack;
+	QPointer<QDoubleSpinBox> reactionMotion;
+	QPointer<QDoubleSpinBox> reactionGlow;
+	QPointer<QDoubleSpinBox> reactionTestStrength;
+	QPointer<QCheckBox> reducedMotion;
 	QPointer<QProgressBar> desktopMeter;
 	QPointer<QProgressBar> microphoneMeter;
 	QPointer<QProgressBar> beatMeter;
