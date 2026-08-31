@@ -58,6 +58,7 @@ The source archive must be generated from the same clean commit used for the bin
 - Test first launch with `%APPDATA%\tempest-broadcast-system` absent or temporarily renamed.
 - Verify preview, recording, streaming, browser sources, audio monitoring, hotkeys, UI scaling, dock recovery, scene switching, and shutdown.
 - Scan the binary and source archives for personal paths, credentials, scene collections, logs, cookies, and generated assets.
+- Use only the `Tempest Mainframe` public brand in repository pages, release notes, notices, manifests, and executable version metadata. Keep personal identity and signing-account details confined to private signing configuration, except for identity information that Authenticode must expose to verify the publisher.
 - Confirm the public binary archive contains no PDB, crash-dump, log, or user-configuration files.
 - Confirm the release builder reports a valid Authenticode signature for every shipped `.exe`, `.dll`, and `.pyd` file before it creates the final archive.
 - Install silently into an isolated location, verify the installed executable and generated uninstaller signatures, launch the application, and confirm silent uninstall leaves user configuration untouched.

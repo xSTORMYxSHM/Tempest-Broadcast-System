@@ -665,7 +665,6 @@ $manifest = [ordered]@{
     configuration = $Configuration
     signed = [bool] $signatureSummary.enabled
     signing_service = $signatureSummary.service
-    signing_certificate_profile = $signatureSummary.certificate_profile
     newly_signed_files = $signatureSummary.newly_signed_files
     verified_executable_files = $signatureSummary.verified_executable_files
     installer = [ordered]@{

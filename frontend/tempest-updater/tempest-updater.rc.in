@@ -23,7 +23,7 @@ BEGIN
       VALUE "FileDescription", "Tempest Broadcast System Updater"
       VALUE "FileVersion", "@TEMPEST_PRODUCT_VERSION@"
       VALUE "InternalName", "tempest-broadcast-updater.exe"
-      VALUE "LegalCopyright", "Copyright (C) Lain Bailey"
+      VALUE "LegalCopyright", "Copyright (C) Tempest Mainframe contributors"
       VALUE "OriginalFilename", "tempest-broadcast-updater.exe"
       VALUE "ProductName", "Tempest Broadcast System"
       VALUE "ProductVersion", "@TEMPEST_PRODUCT_VERSION@"

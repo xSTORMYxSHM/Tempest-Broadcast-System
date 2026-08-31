@@ -51,7 +51,7 @@ VIAddVersionKey /LANG=1033 "ProductVersion" "${PRODUCT_VERSION}"
 VIAddVersionKey /LANG=1033 "CompanyName" "${PRODUCT_PUBLISHER}"
 VIAddVersionKey /LANG=1033 "FileDescription" "${PRODUCT_NAME} Installer"
 VIAddVersionKey /LANG=1033 "FileVersion" "${PRODUCT_VERSION}"
-VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (C) Lain Bailey"
+VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (C) Tempest Mainframe contributors"
 
 !define MUI_ABORTWARNING
 !define MUI_ICON "${PROJECT_ROOT}\frontend\cmake\windows\tempest-broadcast-system.ico"

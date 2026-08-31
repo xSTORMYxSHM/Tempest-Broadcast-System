@@ -45,7 +45,7 @@ set(OBS_COMPANY_NAME "Tempest Mainframe")
 set(OBS_PRODUCT_NAME "Tempest Broadcast System")
 set(OBS_WEBSITE "https://www.obsproject.com")
 set(OBS_COMMENTS "Open-source Tempest Mainframe broadcast workstation, built on OBS Studio")
-set(OBS_LEGAL_COPYRIGHT "(C) Lain Bailey")
+set(OBS_LEGAL_COPYRIGHT "(C) Tempest Mainframe contributors")
 set(TEMPEST_PRODUCT_VERSION "1.0.1" CACHE STRING "Tempest Broadcast product version")
 
 if(NOT TEMPEST_PRODUCT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
