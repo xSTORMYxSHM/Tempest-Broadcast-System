@@ -10,6 +10,8 @@ param(
 
     [switch] $SkipBuild,
 
+    [switch] $SkipInstaller,
+
     [switch] $Sign,
 
     [string] $TrustedSigningEndpoint = 'https://wus2.codesigning.azure.net/',
@@ -60,6 +62,59 @@ function Find-CMake {
     }
 
     throw 'CMake was not found. Install CMake or add cmake.exe to PATH.'
+}
+
+function Find-NSIS {
+    $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    $candidates = @(
+        'C:\Program Files (x86)\NSIS\makensis.exe',
+        'C:\Program Files\NSIS\makensis.exe'
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+
+    throw 'NSIS was not found. Install NSIS 3 or run the release builder with -SkipInstaller.'
+}
+
+function Wait-TrustedSigningHelpers {
+    param(
+        [int[]] $ExistingProcessIds = @()
+    )
+
+    $trustedSigningRoot = Join-Path $env:LOCALAPPDATA 'TrustedSigning'
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        $helpers = @(
+            Get-Process -Name signtool -ErrorAction SilentlyContinue | Where-Object {
+                if ($_.Id -in $ExistingProcessIds) {
+                    return $false
+                }
+                try {
+                    return $_.Path -like "${trustedSigningRoot}\*"
+                } catch {
+                    return $false
+                }
+            }
+        )
+        if ($helpers.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    foreach ($helper in $helpers) {
+        Write-Warning "Stopping an orphaned Trusted Signing helper process after its timeout: $($helper.Id)"
+        Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
 }
 
 function Invoke-PublicCodeSigning {
@@ -126,10 +181,13 @@ function Invoke-PublicCodeSigning {
             $signedAndTimestamped = $false
             foreach ($attempt in 1..4) {
                 Write-Host "Signing file ${fileNumber} of $($unsignedFiles.Count), attempt ${attempt}: $($unsignedFile.File.Name)"
+                $existingSignerProcessIds = @(Get-Process -Name signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
                 try {
                     Invoke-TrustedSigning @signingParameters | Out-Host
                 } catch {
                     Write-Warning "Trusted Signing attempt ${attempt} failed: $($_.Exception.Message)"
+                } finally {
+                    Wait-TrustedSigningHelpers -ExistingProcessIds $existingSignerProcessIds
                 }
 
                 try {
@@ -273,11 +331,110 @@ function New-PublicBinaryArchive {
     }
 }
 
+function New-PublicInstaller {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $SourceArchive,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Destination,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Version,
+
+        [Parameter(Mandatory = $true)]
+        [string] $ProjectRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string] $NSIS,
+
+        [switch] $Sign,
+
+        [string] $TrustedSigningEndpoint,
+
+        [string] $TrustedSigningAccount,
+
+        [string] $TrustedSigningProfile
+    )
+
+    $installerStage = Join-Path ([System.IO.Path]::GetTempPath()) ("tempest-installer-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $installerStage -Force | Out-Null
+
+    try {
+        Expand-Archive -LiteralPath $SourceArchive -DestinationPath $installerStage
+        $mainExecutable = Join-Path $installerStage 'bin\64bit\tempest-broadcast-system.exe'
+        if (-not (Test-Path -LiteralPath $mainExecutable)) {
+            throw 'The signed installer payload is missing the main executable.'
+        }
+
+        $versionParts = @($Version -split '\.')
+        if ($versionParts.Count -ne 3 -or @($versionParts | Where-Object { $_ -notmatch '^\d+$' }).Count -ne 0) {
+            throw "Installer versions must use numeric major.minor.patch form: ${Version}"
+        }
+        $numericFileVersion = "{0}.{1}.{2}.0" -f $versionParts[0], $versionParts[1], $versionParts[2]
+        $installSizeBytes = (Get-ChildItem -LiteralPath $installerStage -Recurse -File | Measure-Object -Property Length -Sum).Sum
+        $installSizeKB = [Math]::Ceiling($installSizeBytes / 1KB)
+
+        $installerScript = Join-Path $ProjectRoot 'installer\TempestBroadcastSystem.nsi'
+        $arguments = @(
+            '/V3',
+            "/DPRODUCT_VERSION=${Version}",
+            "/DNUMERIC_FILE_VERSION=${numericFileVersion}",
+            "/DINSTALL_SIZE_KB=${installSizeKB}",
+            "/DPAYLOAD_DIR=${installerStage}",
+            "/DOUTPUT_FILE=${Destination}",
+            "/DPROJECT_ROOT=${ProjectRoot}"
+        )
+        if ($Sign) {
+            $arguments += @(
+                "/DSIGN_SCRIPT=$(Join-Path $ProjectRoot 'scripts\Sign-WindowsFile.ps1')",
+                "/DTRUSTED_SIGNING_ENDPOINT=${TrustedSigningEndpoint}",
+                "/DTRUSTED_SIGNING_ACCOUNT=${TrustedSigningAccount}",
+                "/DTRUSTED_SIGNING_PROFILE=${TrustedSigningProfile}"
+            )
+        }
+        $arguments += $installerScript
+        Invoke-Checked -FilePath $NSIS -Arguments $arguments | Out-Host
+
+        if (-not (Test-Path -LiteralPath $Destination)) {
+            throw "NSIS did not create the expected installer: ${Destination}"
+        }
+
+        $signature = Get-AuthenticodeSignature -LiteralPath $Destination
+        if ($Sign -and ($signature.Status -ne 'Valid' -or $null -eq $signature.TimeStamperCertificate)) {
+            throw "The installer does not have a valid timestamped Authenticode signature: ${Destination}"
+        }
+
+        [pscustomobject]@{
+            enabled = $true
+            signed = [bool] $Sign
+            signature_status = $signature.Status.ToString()
+            timestamped = ($null -ne $signature.TimeStamperCertificate)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $installerStage) {
+            foreach ($attempt in 1..5) {
+                try {
+                    Remove-Item -LiteralPath $installerStage -Recurse -Force
+                    break
+                } catch {
+                    if ($attempt -eq 5) {
+                        Write-Warning "Could not fully remove temporary installer staging directory: ${installerStage}"
+                    } else {
+                        Start-Sleep -Milliseconds 500
+                    }
+                }
+            }
+        }
+    }
+}
+
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $buildDirectory = Join-Path $projectRoot "build_${Target}"
 $cmake = Find-CMake
 $cpack = Join-Path (Split-Path -Parent $cmake) 'cpack.exe'
 $git = (Get-Command git.exe -ErrorAction Stop).Source
+$makensis = if ($SkipInstaller) { $null } else { Find-NSIS }
 
 if (-not (Test-Path -LiteralPath $cpack)) {
     throw "CPack was not found beside CMake: ${cpack}"
@@ -356,11 +513,13 @@ $releaseDirectory = Join-Path $OutputRoot $version
 $binaryName = "tempest-broadcast-system-${version}-windows-${Target}.zip"
 $sourceName = "tempest-broadcast-system-${version}-source"
 $sourceArchiveName = "${sourceName}.zip"
+$installerName = "tempest-broadcast-system-${version}-windows-${Target}-installer.exe"
 $binaryDestination = Join-Path $releaseDirectory $binaryName
 $sourceDestination = Join-Path $releaseDirectory $sourceArchiveName
+$installerDestination = Join-Path $releaseDirectory $installerName
 
 New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
-foreach ($artifact in @($binaryDestination, $sourceDestination, (Join-Path $releaseDirectory 'SHA256SUMS.txt'))) {
+foreach ($artifact in @($binaryDestination, $sourceDestination, $installerDestination, (Join-Path $releaseDirectory 'SHA256SUMS.txt'))) {
     if (Test-Path -LiteralPath $artifact) {
         throw "Release artifact already exists and will not be overwritten: ${artifact}"
     }
@@ -405,6 +564,19 @@ $signatureSummary = New-PublicBinaryArchive -Source $builtBinary -Destination $b
     'PUBLIC_RELEASE.md',
     "RELEASE_NOTES_${version}.md"
 )
+
+$installerSummary = if ($SkipInstaller) {
+    [pscustomobject]@{
+        enabled = $false
+        signed = $false
+        signature_status = $null
+        timestamped = $false
+    }
+} else {
+    New-PublicInstaller -SourceArchive $binaryDestination -Destination $installerDestination -Version $version `
+        -ProjectRoot $projectRoot -NSIS $makensis -Sign:$Sign -TrustedSigningEndpoint $TrustedSigningEndpoint `
+        -TrustedSigningAccount $TrustedSigningAccount -TrustedSigningProfile $TrustedSigningProfile
+}
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tempest-release-" + [guid]::NewGuid().ToString('N'))
 $sourceStage = Join-Path $temporaryRoot $sourceName
@@ -479,11 +651,21 @@ $manifest = [ordered]@{
     signing_certificate_profile = $signatureSummary.certificate_profile
     newly_signed_files = $signatureSummary.newly_signed_files
     verified_executable_files = $signatureSummary.verified_executable_files
+    installer = [ordered]@{
+        included = [bool] $installerSummary.enabled
+        file = if ($installerSummary.enabled) { $installerName } else { $null }
+        signed = [bool] $installerSummary.signed
+        signature_status = $installerSummary.signature_status
+        timestamped = [bool] $installerSummary.timestamped
+    }
     generated_utc = [DateTime]::UtcNow.ToString('o')
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releaseDirectory 'release-manifest.json') -Encoding UTF8
 
 $checksummedFiles = @($binaryDestination, $sourceDestination)
+if ($installerSummary.enabled) {
+    $checksummedFiles += $installerDestination
+}
 $checksumLines = foreach ($file in $checksummedFiles) {
     $hash = Get-FileHash -LiteralPath $file -Algorithm SHA256
     "{0} *{1}" -f $hash.Hash.ToLowerInvariant(), (Split-Path -Leaf $file)

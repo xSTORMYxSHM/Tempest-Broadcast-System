@@ -2,14 +2,16 @@
 
 Tempest Broadcast System is an independent, Tempest-themed live production workstation built from OBS Studio. It keeps the OBS scene, source, plugin, encoder, recording, and streaming engine while adding Scene Control, Stream Overlay, reactive overlay tools, an Asset Library, an Audio Reactor, and optional Tempest Studio integration.
 
-The supported public target is 64-bit Windows 10 or Windows 11. Version 1.00.0 is the first release whose previously unsigned Windows executable code is signed and timestamped through Microsoft Trusted Signing.
+The supported public target is 64-bit Windows 10 or Windows 11. Version 1.0.0 is the first release whose Windows executable code, per-user installer, and generated uninstaller are signed and timestamped through Microsoft Trusted Signing.
 
 ## Install and first run
 
-1. Download the Windows x64 binary ZIP and its matching SHA-256 checksum.
-2. Extract the complete ZIP into a new folder. Do not run the executable from inside the archive.
-3. Start `bin/64bit/tempest-broadcast-system.exe`.
-4. Confirm that Windows reports a valid digital signature before first launch. SmartScreen reputation can still take time to develop for a new publisher certificate.
+1. Download the Windows x64 installer and `SHA256SUMS.txt` from the same GitHub release.
+2. Confirm the installer checksum and that Windows reports a valid digital signature.
+3. Run the installer. It installs for the current user under `%LOCALAPPDATA%\Programs\Tempest Broadcast System`, adds Start Menu shortcuts, and optionally adds a desktop shortcut.
+4. Start Tempest Broadcast System from the Start Menu. SmartScreen reputation can still take time to develop for a new publisher certificate.
+
+The portable ZIP remains available for users who do not want an installed copy. Extract the complete ZIP into a new folder, then start `bin/64bit/tempest-broadcast-system.exe`; do not run the executable from inside the archive.
 
 Tempest Broadcast stores its user configuration in `%APPDATA%\tempest-broadcast-system`, independently from `%APPDATA%\obs-studio`. Public packages do not contain the publisher's profiles, accounts, scenes, browser cookies, tokens, logs, media files, or generated overlays.
 
@@ -24,7 +26,7 @@ To migrate an existing OBS setup without replacing the Tempest interface, close 
 
 ## Known limitations
 
-- Official packages contain Authenticode-signed executable code. The ZIP files themselves are authenticated by their published SHA-256 checksums and GitHub release provenance.
+- Official packages contain Authenticode-signed executable code. The installer and its generated uninstaller are also signed and timestamped. ZIP files themselves are authenticated by their published SHA-256 checksums and GitHub release provenance.
 - Twitch OAuth and the authenticated Stream Information dock require Tempest-owned Twitch application credentials at build time. Builds without those credentials can still use a manually supplied stream key.
 - Tempest Studio is optional, but Studio-routed Twitch events and Sound Alerts require a compatible Studio installation.
 - AJA and DeckLink modules can report harmless initialization failures on systems without their vendor runtimes or hardware.
@@ -37,6 +39,7 @@ Tempest Broadcast System is distributed under GNU GPL version 2 or, at your opti
 Each binary release must publish all of the following together:
 
 - `tempest-broadcast-system-<version>-windows-x64.zip`
+- `tempest-broadcast-system-<version>-windows-x64-installer.exe`
 - `tempest-broadcast-system-<version>-source.zip`
 - `SHA256SUMS.txt`
 - `release-manifest.json`
@@ -49,10 +52,11 @@ The source archive must be generated from the same clean commit used for the bin
 - Commit all intended source and documentation changes.
 - Confirm `git status --short` is empty.
 - Tag the exact commit with `tempest-v<version>`.
-- Build on a clean Windows environment with PowerShell 7 using `pwsh -File scripts/Build-PublicRelease.ps1 -Sign`.
+- Build on a clean Windows environment with PowerShell 7 and NSIS 3 using `pwsh -File scripts/Build-PublicRelease.ps1 -Sign`.
 - Test first launch with `%APPDATA%\tempest-broadcast-system` absent or temporarily renamed.
 - Verify preview, recording, streaming, browser sources, audio monitoring, hotkeys, UI scaling, dock recovery, scene switching, and shutdown.
 - Scan the binary and source archives for personal paths, credentials, scene collections, logs, cookies, and generated assets.
 - Confirm the public binary archive contains no PDB, crash-dump, log, or user-configuration files.
 - Confirm the release builder reports a valid Authenticode signature for every shipped `.exe`, `.dll`, and `.pyd` file before it creates the final archive.
-- Upload the binary, corresponding source, checksum file, NOTICE, and release notes together.
+- Install silently into an isolated location, verify the installed executable and generated uninstaller signatures, launch the application, and confirm silent uninstall leaves user configuration untouched.
+- Upload the installer, portable binary, corresponding source, checksum file, manifest, NOTICE, release guide, and release notes together.
