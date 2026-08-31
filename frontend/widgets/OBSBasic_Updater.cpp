@@ -21,9 +21,6 @@
 
 #include <dialogs/OBSWhatsNew.hpp>
 
-#ifdef _WIN32
-#include <utility/AutoUpdateThread.hpp>
-#endif
 #ifdef ENABLE_SPARKLE_UPDATER
 #include <utility/MacUpdateThread.hpp>
 #include <utility/OBSSparkle.hpp>
@@ -37,6 +34,12 @@
 #include <browser-panel.hpp>
 #endif
 #include <qt-wrappers.hpp>
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QProcess>
+#include <QTimer>
 
 #ifdef _WIN32
 #define UPDATE_CHECK_INTERVAL (60 * 60 * 24 * 4) /* 4 days */
@@ -204,13 +207,27 @@ void OBSBasic::CheckForUpdates(bool manualUpdate)
 {
 #if _WIN32
 	ui->actionCheckForUpdates->setEnabled(false);
-	ui->actionRepair->setEnabled(false);
 
-	if (updateCheckThread && updateCheckThread->isRunning()) {
-		return;
+	const QString applicationDirectory = QCoreApplication::applicationDirPath();
+	const QString updaterPath =
+		QDir(applicationDirectory).filePath(QStringLiteral("tempest-broadcast-updater.exe"));
+	QStringList arguments{QStringLiteral("--parent-pid"), QString::number(QCoreApplication::applicationPid())};
+	if (!manualUpdate) {
+		arguments.prepend(QStringLiteral("--quiet"));
 	}
-	updateCheckThread.reset(new AutoUpdateThread(manualUpdate));
-	updateCheckThread->start();
+
+	bool started = QFileInfo::exists(updaterPath) &&
+		       QProcess::startDetached(updaterPath, arguments, applicationDirectory);
+	if (!started && manualUpdate) {
+		OBSMessageBox::warning(this, QStringLiteral("Tempest Updater"),
+				       QStringLiteral("The Tempest updater is missing or could not be started. "
+						      "Reinstall Tempest Broadcast System to restore it."));
+	}
+	if (started && !manualUpdate) {
+		config_set_int(App()->GetAppConfig(), "General", "LastUpdateCheck", (long long)time(nullptr));
+	}
+
+	QTimer::singleShot(1500, this, [this]() { ui->actionCheckForUpdates->setEnabled(true); });
 #elif defined(ENABLE_SPARKLE_UPDATER)
 	ui->actionCheckForUpdates->setEnabled(false);
 

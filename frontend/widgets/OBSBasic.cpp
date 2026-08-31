@@ -1467,11 +1467,12 @@ void OBSBasic::OBSInit()
 #endif
 
 #if defined(_WIN32) || defined(__APPLE__)
+#if defined(_WIN32)
+	delete ui->actionRepair;
+	ui->actionRepair = nullptr;
+#endif
 	if (App()->IsUpdaterDisabled()) {
 		ui->actionCheckForUpdates->setEnabled(false);
-#if defined(_WIN32)
-		ui->actionRepair->setEnabled(false);
-#endif
 	}
 #endif
 

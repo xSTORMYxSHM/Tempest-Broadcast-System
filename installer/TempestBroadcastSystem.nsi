@@ -3,6 +3,7 @@ Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "x64.nsh"
+!include "FileFunc.nsh"
 
 !ifndef PRODUCT_VERSION
   !error "PRODUCT_VERSION must be supplied by the release builder."
@@ -27,6 +28,7 @@ Unicode true
 !define PRODUCT_PUBLISHER "Tempest Mainframe"
 !define PRODUCT_WEBSITE "https://github.com/xSTORMYxSHM/Tempest-Broadcast-System"
 !define PRODUCT_EXECUTABLE "bin\64bit\tempest-broadcast-system.exe"
+!define PRODUCT_UPDATER "bin\64bit\tempest-broadcast-updater.exe"
 !define PRODUCT_REGISTRY_KEY "Software\Tempest Mainframe\Tempest Broadcast System"
 !define UNINSTALL_REGISTRY_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Tempest Broadcast System"
 
@@ -63,6 +65,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (C) Lain Bailey"
 !define MUI_STARTMENUPAGE_DEFAULTFOLDER "Tempest Broadcast System"
 
 Var StartMenuFolder
+Var UpdateMode
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PROJECT_ROOT}\COPYING"
@@ -100,6 +103,20 @@ Function .onInit
   ${EndIf}
   SetShellVarContext current
   SetRegView 64
+
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/UPDATE" $R1
+  ${IfNot} ${Errors}
+    StrCpy $UpdateMode "1"
+  ${EndIf}
+FunctionEnd
+
+Function .onInstSuccess
+  ${If} $UpdateMode == "1"
+    SetOutPath "$INSTDIR\bin\64bit"
+    ExecShell "open" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+  ${EndIf}
 FunctionEnd
 
 Function un.onInit
@@ -125,13 +142,15 @@ Section "${PRODUCT_NAME}" SectionMain
   WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayIcon" "$INSTDIR\${PRODUCT_EXECUTABLE}"
   WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "QuietUninstallString" '$\"$INSTDIR\Uninstall.exe$\" /S'
+  WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "ModifyPath" '$\"$INSTDIR\${PRODUCT_UPDATER}$\"'
   WriteRegDWORD HKCU "${UNINSTALL_REGISTRY_KEY}" "EstimatedSize" ${INSTALL_SIZE_KB}
-  WriteRegDWORD HKCU "${UNINSTALL_REGISTRY_KEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${UNINSTALL_REGISTRY_KEY}" "NoModify" 0
   WriteRegDWORD HKCU "${UNINSTALL_REGISTRY_KEY}" "NoRepair" 1
 
   !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
     CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
+    CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Check for Updates.lnk" "$INSTDIR\${PRODUCT_UPDATER}" "" "$INSTDIR\${PRODUCT_UPDATER}" 0
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Uninstall ${PRODUCT_NAME}.lnk" "$INSTDIR\Uninstall.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
 SectionEnd
@@ -145,6 +164,7 @@ Section "Uninstall"
 
   !insertmacro MUI_STARTMENU_GETFOLDER Application $StartMenuFolder
   Delete "$SMPROGRAMS\$StartMenuFolder\${PRODUCT_NAME}.lnk"
+  Delete "$SMPROGRAMS\$StartMenuFolder\Check for Updates.lnk"
   Delete "$SMPROGRAMS\$StartMenuFolder\Uninstall ${PRODUCT_NAME}.lnk"
   RMDir "$SMPROGRAMS\$StartMenuFolder"
 

@@ -18,12 +18,7 @@ target_sources(
   obs-studio
   PRIVATE
     cmake/windows/obs.manifest
-    dialogs/OBSUpdate.cpp
-    dialogs/OBSUpdate.hpp
-    forms/OBSUpdate.ui
     obs.rc
-    utility/AutoUpdateThread.cpp
-    utility/AutoUpdateThread.hpp
     utility/CrashHandler_Windows.cpp
     utility/NativeEventFilter_Windows.cpp
     utility/WhatsNewBrowserInitThread.cpp
@@ -41,17 +36,11 @@ target_sources(
     utility/win-dll-blocklist.c
 )
 
-add_library(obs-updater-manifest INTERFACE)
-add_library(OBS::updater-manifest ALIAS obs-updater-manifest)
-
-target_sources(obs-updater-manifest INTERFACE updater/manifest.hpp)
-
 target_link_libraries(
   obs-studio
   PRIVATE
     crypt32
     OBS::blake2
-    OBS::updater-manifest
     OBS::w32-pthreads
     MbedTLS::mbedtls
     nlohmann_json::nlohmann_json
@@ -62,16 +51,7 @@ target_compile_definitions(obs-studio PRIVATE PSAPI_VERSION=2)
 
 target_link_options(obs-studio PRIVATE /IGNORE:4099 $<$<CONFIG:DEBUG>:/NODEFAULTLIB:MSVCRT>)
 
-# Set commit for untagged version comparisons in the Windows updater
-if(OBS_VERSION MATCHES ".+g[a-f0-9]+.*")
-  string(REGEX REPLACE ".+g([a-f0-9]+).*$" "\\1" OBS_COMMIT ${OBS_VERSION})
-else()
-  set(OBS_COMMIT "")
-endif()
-
-set_source_files_properties(utility/AutoUpdateThread.cpp PROPERTIES COMPILE_DEFINITIONS OBS_COMMIT="${OBS_COMMIT}")
-
-add_subdirectory(updater)
+add_subdirectory(tempest-updater)
 
 set_property(TARGET obs-studio APPEND PROPERTY AUTORCC_OPTIONS --format-version 1)
 

@@ -366,6 +366,14 @@ function New-PublicInstaller {
         if (-not (Test-Path -LiteralPath $mainExecutable)) {
             throw 'The signed installer payload is missing the main executable.'
         }
+        $updaterExecutable = Join-Path $installerStage 'bin\64bit\tempest-broadcast-updater.exe'
+        if (-not (Test-Path -LiteralPath $updaterExecutable)) {
+            throw 'The signed installer payload is missing the Tempest updater.'
+        }
+        $updaterSignature = Get-AuthenticodeSignature -LiteralPath $updaterExecutable
+        if ($Sign -and ($updaterSignature.Status -ne 'Valid' -or $null -eq $updaterSignature.TimeStamperCertificate)) {
+            throw 'The Tempest updater does not have a valid timestamped Authenticode signature.'
+        }
 
         $versionParts = @($Version -split '\.')
         if ($versionParts.Count -ne 3 -or @($versionParts | Where-Object { $_ -notmatch '^\d+$' }).Count -ne 0) {
@@ -410,6 +418,10 @@ function New-PublicInstaller {
             signed = [bool] $Sign
             signature_status = $signature.Status.ToString()
             timestamped = ($null -ne $signature.TimeStamperCertificate)
+            updater_file = 'bin/64bit/tempest-broadcast-updater.exe'
+            updater_signed = ($updaterSignature.Status -eq 'Valid')
+            updater_signature_status = $updaterSignature.Status.ToString()
+            updater_timestamped = ($null -ne $updaterSignature.TimeStamperCertificate)
         }
     } finally {
         if (Test-Path -LiteralPath $installerStage) {
@@ -553,6 +565,7 @@ $signatureSummary = New-PublicBinaryArchive -Source $builtBinary -Destination $b
     -TrustedSigningEndpoint $TrustedSigningEndpoint -TrustedSigningAccount $TrustedSigningAccount `
     -TrustedSigningProfile $TrustedSigningProfile -RequiredEntries @(
     'bin/64bit/tempest-broadcast-system.exe',
+    'bin/64bit/tempest-broadcast-updater.exe',
     'obs-plugins/64bit/obs-browser.dll',
     'obs-plugins/64bit/obs-browser-page.exe',
     'obs-plugins/64bit/libcef.dll',
@@ -571,6 +584,10 @@ $installerSummary = if ($SkipInstaller) {
         signed = $false
         signature_status = $null
         timestamped = $false
+        updater_file = 'bin/64bit/tempest-broadcast-updater.exe'
+        updater_signed = $false
+        updater_signature_status = $null
+        updater_timestamped = $false
     }
 } else {
     New-PublicInstaller -SourceArchive $binaryDestination -Destination $installerDestination -Version $version `
@@ -657,6 +674,14 @@ $manifest = [ordered]@{
         signed = [bool] $installerSummary.signed
         signature_status = $installerSummary.signature_status
         timestamped = [bool] $installerSummary.timestamped
+    }
+    updater = [ordered]@{
+        included = $true
+        file = $installerSummary.updater_file
+        signed = [bool] $installerSummary.updater_signed
+        signature_status = $installerSummary.updater_signature_status
+        timestamped = [bool] $installerSummary.updater_timestamped
+        release_source = 'https://github.com/xSTORMYxSHM/Tempest-Broadcast-System/releases/latest'
     }
     generated_utc = [DateTime]::UtcNow.ToString('o')
 }

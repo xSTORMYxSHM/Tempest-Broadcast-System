@@ -4,6 +4,8 @@ Tempest Broadcast System is an independent, Tempest-themed live production works
 
 The supported public target is 64-bit Windows 10 or Windows 11. Version 1.0.0 is the first release whose Windows executable code, per-user installer, and generated uninstaller are signed and timestamped through Microsoft Trusted Signing.
 
+Beginning with version 1.0.1, installed copies include the signed Tempest Broadcast Updater. It checks only final releases from the official Tempest GitHub repository, verifies the release asset's SHA-256 digest, Windows file version, and Authenticode trust, and then runs the signed installer to preserve the existing per-user configuration while updating the application.
+
 ## Install and first run
 
 1. Download the Windows x64 installer and `SHA256SUMS.txt` from the same GitHub release.

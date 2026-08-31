@@ -9,7 +9,7 @@ set(_obs_version_canonical ${_obs_default_version})
 if(NOT DEFINED OBS_VERSION_OVERRIDE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
   execute_process(
     # Tempest release tags are product identifiers (for example,
-    # tempest-v1.0.0), while OBS_VERSION must remain the numeric upstream
+    # tempest-v1.0.1), while OBS_VERSION must remain the numeric upstream
     # engine version. Limit version discovery to upstream-style numeric tags.
     COMMAND git describe --always --tags --match "[0-9]*" --dirty=-modified
     OUTPUT_VARIABLE _obs_version

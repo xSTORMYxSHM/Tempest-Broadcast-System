@@ -36,9 +36,6 @@
 #endif
 #include <dialogs/OBSRemux.hpp>
 #include <settings/OBSBasicSettings.hpp>
-#ifdef _WIN32
-#include <utility/AutoUpdateThread.hpp>
-#endif
 #include <utility/RemoteTextThread.hpp>
 #if defined(_WIN32) || defined(WHATSNEW_ENABLED)
 #include <utility/WhatsNewInfoThread.hpp>
@@ -120,7 +117,9 @@ void OBSBasic::CreateFiltersWindow(obs_source_t *source)
 void OBSBasic::updateCheckFinished()
 {
 	ui->actionCheckForUpdates->setEnabled(true);
-	ui->actionRepair->setEnabled(true);
+	if (ui->actionRepair) {
+		ui->actionRepair->setEnabled(true);
+	}
 }
 
 void OBSBasic::ResetUI()
@@ -379,15 +378,10 @@ void OBSBasic::on_actionCheckForUpdates_triggered()
 void OBSBasic::on_actionRepair_triggered()
 {
 #if defined(_WIN32)
-	ui->actionCheckForUpdates->setEnabled(false);
-	ui->actionRepair->setEnabled(false);
-
-	if (updateCheckThread && updateCheckThread->isRunning()) {
-		return;
-	}
-
-	updateCheckThread.reset(new AutoUpdateThread(false, true));
-	updateCheckThread->start();
+	OBSMessageBox::information(this, QStringLiteral("Repair Tempest Broadcast System"),
+				   QStringLiteral(
+					   "Run the latest signed Tempest installer again to repair the installation. "
+					   "Your user configuration will be preserved."));
 #endif
 }
 
