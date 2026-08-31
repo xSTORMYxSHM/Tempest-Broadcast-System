@@ -2,14 +2,14 @@
 
 Tempest Broadcast System is an independent, Tempest-themed live production workstation built from OBS Studio. It keeps the OBS scene, source, plugin, encoder, recording, and streaming engine while adding Scene Control, Stream Overlay, reactive overlay tools, an Asset Library, an Audio Reactor, and optional Tempest Studio integration.
 
-The first supported public target is 64-bit Windows 10 or Windows 11. Version 0.21.0 should be presented as a public preview until it has been tested with a fresh Windows account, common capture hardware, a real Twitch stream, and an installed-versus-portable upgrade cycle.
+The supported public target is 64-bit Windows 10 or Windows 11. Version 1.00.0 is the first release whose previously unsigned Windows executable code is signed and timestamped through Microsoft Trusted Signing.
 
 ## Install and first run
 
 1. Download the Windows x64 binary ZIP and its matching SHA-256 checksum.
 2. Extract the complete ZIP into a new folder. Do not run the executable from inside the archive.
 3. Start `bin/64bit/tempest-broadcast-system.exe`.
-4. Windows SmartScreen may warn about preview builds until releases are signed with a trusted code-signing certificate.
+4. Confirm that Windows reports a valid digital signature before first launch. SmartScreen reputation can still take time to develop for a new publisher certificate.
 
 Tempest Broadcast stores its user configuration in `%APPDATA%\tempest-broadcast-system`, independently from `%APPDATA%\obs-studio`. Public packages do not contain the publisher's profiles, accounts, scenes, browser cookies, tokens, logs, media files, or generated overlays.
 
@@ -22,9 +22,9 @@ To migrate an existing OBS setup without replacing the Tempest interface, close 
 - Radio Player overlays connect only to the AzuraCast station URL supplied by the user for metadata, cover artwork, and audio playback.
 - Upstream OBS automatic application updates and the upstream What's New feed are disabled. Public Tempest releases do not currently include an automatic updater.
 
-## Known public-preview limitations
+## Known limitations
 
-- Builds are unsigned unless the publisher signs them after packaging.
+- Official packages contain Authenticode-signed executable code. The ZIP files themselves are authenticated by their published SHA-256 checksums and GitHub release provenance.
 - Twitch OAuth and the authenticated Stream Information dock require Tempest-owned Twitch application credentials at build time. Builds without those credentials can still use a manually supplied stream key.
 - Tempest Studio is optional, but Studio-routed Twitch events and Sound Alerts require a compatible Studio installation.
 - AJA and DeckLink modules can report harmless initialization failures on systems without their vendor runtimes or hardware.
@@ -49,10 +49,10 @@ The source archive must be generated from the same clean commit used for the bin
 - Commit all intended source and documentation changes.
 - Confirm `git status --short` is empty.
 - Tag the exact commit with `tempest-v<version>`.
-- Build on a clean Windows environment using `scripts/Build-PublicRelease.ps1`.
+- Build on a clean Windows environment with PowerShell 7 using `pwsh -File scripts/Build-PublicRelease.ps1 -Sign`.
 - Test first launch with `%APPDATA%\tempest-broadcast-system` absent or temporarily renamed.
 - Verify preview, recording, streaming, browser sources, audio monitoring, hotkeys, UI scaling, dock recovery, scene switching, and shutdown.
 - Scan the binary and source archives for personal paths, credentials, scene collections, logs, cookies, and generated assets.
 - Confirm the public binary archive contains no PDB, crash-dump, log, or user-configuration files.
-- Sign the executable and archive if a signing certificate is available, then regenerate checksums.
+- Confirm the release builder reports a valid Authenticode signature for every shipped `.exe`, `.dll`, and `.pyd` file before it creates the final archive.
 - Upload the binary, corresponding source, checksum file, NOTICE, and release notes together.

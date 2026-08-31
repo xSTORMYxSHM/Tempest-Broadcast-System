@@ -7,12 +7,12 @@ encoder, recording, and streaming engine while adding the Tempest Broadcast
 production interface, reactive overlay design, asset management, audio-driven
 effects, automation, and an optional connection to Tempest Studio.
 
-The current Tempest product version is **0.21.0**. The upstream OBS engine
+The current Tempest product version is **1.00.0**. The upstream OBS engine
 version remains visible separately in the application title and logs so plugin
 and encoder compatibility can be diagnosed accurately.
 
-Public preview
---------------
+Signed public release
+---------------------
 
 The first supported public target is 64-bit Windows 10 or Windows 11. Public
 packages must include both the Windows binary archive and the complete source
@@ -40,11 +40,13 @@ documented in ``TEMPEST_WARUDO_BRIDGE.md``.
 
 Create a clean tagged Windows release with::
 
-  powershell -ExecutionPolicy Bypass -File scripts/Build-PublicRelease.ps1
+  pwsh -File scripts/Build-PublicRelease.ps1 -Sign
 
 The release script refuses dirty or untagged source, packages all pinned Git
-submodules, generates SHA-256 checksums, and places artifacts on drive G when
-available or in the local ``release`` directory otherwise.
+submodules, signs and verifies shipped Windows binaries through Microsoft
+Trusted Signing when ``-Sign`` is supplied, generates SHA-256 checksums, and
+places artifacts on drive G when available or in the local ``release``
+directory otherwise.
 
 OBS Studio foundation
 ---------------------

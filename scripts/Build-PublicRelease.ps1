@@ -8,11 +8,23 @@ param(
 
     [string] $OutputRoot,
 
-    [switch] $SkipBuild
+    [switch] $SkipBuild,
+
+    [switch] $Sign,
+
+    [string] $TrustedSigningEndpoint = 'https://wus2.codesigning.azure.net/',
+
+    [string] $TrustedSigningAccount = 'Tempest',
+
+    [string] $TrustedSigningProfile = 'TempestSoftwarePublic'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+
+if ($Sign -and $PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'Signed releases require PowerShell 7 (pwsh) and the TrustedSigning module.'
+}
 
 function Invoke-Checked {
     param(
@@ -50,6 +62,117 @@ function Find-CMake {
     throw 'CMake was not found. Install CMake or add cmake.exe to PATH.'
 }
 
+function Invoke-PublicCodeSigning {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Source,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Endpoint,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Account,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Profile
+    )
+
+    $signableFiles = @(
+        Get-ChildItem -LiteralPath $Source -Recurse -File | Where-Object {
+            $_.Extension -in @('.exe', '.dll', '.pyd')
+        }
+    )
+    if ($signableFiles.Count -eq 0) {
+        throw 'The public binary package does not contain any signable Windows files.'
+    }
+
+    $signatureState = @(
+        foreach ($file in $signableFiles) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            [pscustomobject]@{
+                File = $file
+                Status = $signature.Status.ToString()
+            }
+        }
+    )
+    $invalidSignatures = @($signatureState | Where-Object { $_.Status -notin @('Valid', 'NotSigned') })
+    if ($invalidSignatures.Count -ne 0) {
+        $details = $invalidSignatures | ForEach-Object {
+            "{0}: {1}" -f $_.Status, $_.File.FullName
+        }
+        throw "The package contains invalid pre-existing signatures.`n$($details -join "`n")"
+    }
+
+    $unsignedFiles = @($signatureState | Where-Object { $_.Status -eq 'NotSigned' })
+    if ($unsignedFiles.Count -ne 0) {
+        Import-Module TrustedSigning -MinimumVersion 0.5.8 -ErrorAction Stop
+        $fileNumber = 0
+        foreach ($unsignedFile in $unsignedFiles) {
+            $fileNumber++
+            $signingParameters = @{
+                Endpoint = $Endpoint
+                CodeSigningAccountName = $Account
+                CertificateProfileName = $Profile
+                Files = $unsignedFile.File.FullName
+                FileDigest = 'SHA256'
+                TimestampRfc3161 = 'http://timestamp.acs.microsoft.com'
+                TimestampDigest = 'SHA256'
+                Description = 'Tempest Broadcast System'
+                DescriptionUrl = 'https://github.com/xSTORMYxSHM/Tempest-Broadcast-System'
+                Timeout = 600
+                ErrorAction = 'Stop'
+            }
+
+            $signedAndTimestamped = $false
+            foreach ($attempt in 1..4) {
+                Write-Host "Signing file ${fileNumber} of $($unsignedFiles.Count), attempt ${attempt}: $($unsignedFile.File.Name)"
+                try {
+                    Invoke-TrustedSigning @signingParameters | Out-Host
+                } catch {
+                    Write-Warning "Trusted Signing attempt ${attempt} failed: $($_.Exception.Message)"
+                }
+
+                try {
+                    $signature = Get-AuthenticodeSignature -LiteralPath $unsignedFile.File.FullName
+                } catch {
+                    Write-Warning "Could not read the signature after attempt ${attempt}: $($_.Exception.Message)"
+                    Start-Sleep -Milliseconds 500
+                    continue
+                }
+                if ($signature.Status -eq 'Valid' -and $null -ne $signature.TimeStamperCertificate) {
+                    $signedAndTimestamped = $true
+                    break
+                }
+                Write-Warning "Signature verification after attempt ${attempt}: status=$($signature.Status), timestamped=$($null -ne $signature.TimeStamperCertificate)"
+            }
+
+            if (-not $signedAndTimestamped) {
+                throw "Could not produce a valid timestamped signature after four attempts: $($unsignedFile.File.FullName)"
+            }
+        }
+    }
+
+    $failedVerification = @(
+        foreach ($file in $signableFiles) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($signature.Status -ne 'Valid' -or $null -eq $signature.TimeStamperCertificate) {
+                "status={0}, timestamped={1}: {2}" -f $signature.Status, ($null -ne $signature.TimeStamperCertificate), $file.FullName
+            }
+        }
+    )
+    if ($failedVerification.Count -ne 0) {
+        throw "Every shipped Windows executable must have a valid timestamped Authenticode signature.`n$($failedVerification -join "`n")"
+    }
+
+    [pscustomobject]@{
+        enabled = $true
+        newly_signed_files = $unsignedFiles.Count
+        verified_executable_files = $signableFiles.Count
+        service = 'Microsoft Trusted Signing'
+        certificate_profile = $Profile
+    }
+}
+
 function New-PublicBinaryArchive {
     param(
         [Parameter(Mandatory = $true)]
@@ -59,22 +182,27 @@ function New-PublicBinaryArchive {
         [string] $Destination,
 
         [Parameter(Mandatory = $true)]
-        [string[]] $RequiredEntries
+        [string[]] $RequiredEntries,
+
+        [switch] $Sign,
+
+        [string] $TrustedSigningEndpoint,
+
+        [string] $TrustedSigningAccount,
+
+        [string] $TrustedSigningProfile
     )
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $sourceArchive = [System.IO.Compression.ZipFile]::OpenRead($Source)
-    $destinationArchive = $null
+    $stageRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tempest-binary-" + [guid]::NewGuid().ToString('N'))
+    $stagePrefix = $stageRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
     $copiedEntries = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::OrdinalIgnoreCase
     )
+    New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
 
     try {
-        $destinationArchive = [System.IO.Compression.ZipFile]::Open(
-            $Destination,
-            [System.IO.Compression.ZipArchiveMode]::Create
-        )
-
         foreach ($entry in $sourceArchive.Entries) {
             $entryName = $entry.FullName.Replace('\', '/')
             if ($entryName -match '(?i)\.pdb$') {
@@ -85,37 +213,62 @@ function New-PublicBinaryArchive {
                 throw "The binary package contains a forbidden user or diagnostic artifact: ${entryName}"
             }
 
-            $newEntry = $destinationArchive.CreateEntry(
-                $entryName,
-                [System.IO.Compression.CompressionLevel]::Optimal
-            )
-            if ($entry.LastWriteTime.Year -ge 1980) {
-                $newEntry.LastWriteTime = $entry.LastWriteTime
-            }
             $null = $copiedEntries.Add($entryName)
-
             if ($entryName.EndsWith('/')) {
                 continue
             }
-            $inputStream = $entry.Open()
-            $outputStream = $newEntry.Open()
-            try {
-                $inputStream.CopyTo($outputStream)
-            } finally {
-                $outputStream.Dispose()
-                $inputStream.Dispose()
+
+            $stagedPath = [System.IO.Path]::GetFullPath((Join-Path $stageRoot $entryName))
+            if (-not $stagedPath.StartsWith($stagePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "The binary package contains an unsafe path: ${entryName}"
+            }
+            $stagedParent = Split-Path -Parent $stagedPath
+            if (-not (Test-Path -LiteralPath $stagedParent)) {
+                New-Item -ItemType Directory -Path $stagedParent -Force | Out-Null
+            }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $stagedPath, $false)
+        }
+
+        foreach ($requiredEntry in $RequiredEntries) {
+            if (-not $copiedEntries.Contains($requiredEntry)) {
+                throw "The public binary package is missing required content: ${requiredEntry}"
             }
         }
-    } finally {
-        if ($destinationArchive) {
-            $destinationArchive.Dispose()
-        }
-        $sourceArchive.Dispose()
-    }
 
-    foreach ($requiredEntry in $RequiredEntries) {
-        if (-not $copiedEntries.Contains($requiredEntry)) {
-            throw "The public binary package is missing required content: ${requiredEntry}"
+        $signatureSummary = if ($Sign) {
+            Invoke-PublicCodeSigning -Source $stageRoot -Endpoint $TrustedSigningEndpoint -Account $TrustedSigningAccount -Profile $TrustedSigningProfile
+        } else {
+            [pscustomobject]@{
+                enabled = $false
+                newly_signed_files = 0
+                verified_executable_files = 0
+                service = $null
+                certificate_profile = $null
+            }
+        }
+
+        [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            $stageRoot,
+            $Destination,
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $false
+        )
+        $signatureSummary
+    } finally {
+        $sourceArchive.Dispose()
+        if (Test-Path -LiteralPath $stageRoot) {
+            foreach ($attempt in 1..5) {
+                try {
+                    Remove-Item -LiteralPath $stageRoot -Recurse -Force
+                    break
+                } catch {
+                    if ($attempt -eq 5) {
+                        Write-Warning "Could not fully remove temporary package staging directory: ${stageRoot}"
+                    } else {
+                        Start-Sleep -Milliseconds 500
+                    }
+                }
+            }
         }
     }
 }
@@ -169,10 +322,17 @@ if ($invalidSubmodules.Count -ne 0) {
     throw "Every submodule must be initialized at its pinned commit.`n$($invalidSubmodules -join "`n")"
 }
 
-$forbiddenValues = @(
-    $env:USERPROFILE,
-    $projectRoot
-) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+$machinePathProjectRoot = $projectRoot
+if ([System.IO.Path]::GetPathRoot($projectRoot) -eq $projectRoot) {
+    $driveName = [System.IO.Path]::GetPathRoot($projectRoot).Substring(0, 2)
+    $substitution = @(& subst.exe 2>$null) | Where-Object { $_ -like "${driveName}\:*" } | Select-Object -First 1
+    if ($substitution -and $substitution -match '=>\s*(.+)$') {
+        $machinePathProjectRoot = $Matches[1].Trim()
+    }
+}
+
+$forbiddenValues = @($env:USERPROFILE, $machinePathProjectRoot) |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 
 foreach ($forbidden in $forbiddenValues) {
     & $git -C $projectRoot grep -I -l -F -- $forbidden -- ':!scripts/Build-PublicRelease.ps1' 2>$null
@@ -230,7 +390,9 @@ $builtBinary = Join-Path $buildDirectory $binaryName
 if (-not (Test-Path -LiteralPath $builtBinary)) {
     throw "The expected binary package was not produced: ${builtBinary}"
 }
-New-PublicBinaryArchive -Source $builtBinary -Destination $binaryDestination -RequiredEntries @(
+$signatureSummary = New-PublicBinaryArchive -Source $builtBinary -Destination $binaryDestination -Sign:$Sign `
+    -TrustedSigningEndpoint $TrustedSigningEndpoint -TrustedSigningAccount $TrustedSigningAccount `
+    -TrustedSigningProfile $TrustedSigningProfile -RequiredEntries @(
     'bin/64bit/tempest-broadcast-system.exe',
     'obs-plugins/64bit/obs-browser.dll',
     'obs-plugins/64bit/obs-browser-page.exe',
@@ -312,7 +474,11 @@ $manifest = [ordered]@{
     source_tag = $requiredTag
     platform = "windows-${Target}"
     configuration = $Configuration
-    signed = $false
+    signed = [bool] $signatureSummary.enabled
+    signing_service = $signatureSummary.service
+    signing_certificate_profile = $signatureSummary.certificate_profile
+    newly_signed_files = $signatureSummary.newly_signed_files
+    verified_executable_files = $signatureSummary.verified_executable_files
     generated_utc = [DateTime]::UtcNow.ToString('o')
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releaseDirectory 'release-manifest.json') -Encoding UTF8
