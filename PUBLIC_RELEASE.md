@@ -6,13 +6,13 @@ The supported public target is 64-bit Windows 10 or Windows 11. Version 1.0.0 is
 
 Beginning with version 1.0.1, installed copies include the signed Tempest Broadcast Updater. It checks only final releases from the official Tempest GitHub repository, verifies the release asset's SHA-256 digest, Windows file version, and Authenticode trust, and then runs the signed installer to preserve the existing per-user configuration while updating the application.
 
-Both **Check for Updates** inside Broadcast and the Start Menu's manual updater use that same verified installer path. Running a downloaded installer manually uses the same application-only update behavior. The installer is fixed to `%LOCALAPPDATA%\Programs\Tempest Broadcast System`; it never writes to or removes `%APPDATA%\tempest-broadcast-system`, where preferences, profiles, scenes, plugin configuration, generated overlays, and the managed Asset Vault are stored. Release builds fail if their installer payload contains a configuration folder or a portable-mode marker.
+Both **Check for Updates** inside Broadcast and the Start Menu's manual updater use that same verified installer path. Running a downloaded installer manually uses the same application-only update behavior. The default application location is `%LOCALAPPDATA%\Programs\Tempest Broadcast System`, but the installer allows another dedicated `Tempest Broadcast System` folder and records that choice for future updates and removal. It never writes to or removes `%APPDATA%\tempest-broadcast-system`, where preferences, profiles, scenes, plugin configuration, generated overlays, and the managed Asset Vault are stored. Release builds fail if their installer payload contains a configuration folder or a portable-mode marker.
 
 ## Install and first run
 
 1. Download the Windows x64 installer and `SHA256SUMS.txt` from the same GitHub release.
 2. Confirm the installer checksum and that Windows reports a valid digital signature.
-3. Run the installer. It installs for the current user under `%LOCALAPPDATA%\Programs\Tempest Broadcast System`, adds Start Menu shortcuts, and optionally adds a desktop shortcut.
+3. Run the installer. It defaults to `%LOCALAPPDATA%\Programs\Tempest Broadcast System`, allows another dedicated `Tempest Broadcast System` folder, adds Start Menu shortcuts, and optionally adds a desktop shortcut.
 4. Start Tempest Broadcast System from the Start Menu. SmartScreen reputation can still take time to develop for a new publisher certificate.
 
 The portable ZIP remains available for users who do not want an installed copy. Extract the complete ZIP into a new folder, then start `bin/64bit/tempest-broadcast-system.exe`; do not run the executable from inside the archive.

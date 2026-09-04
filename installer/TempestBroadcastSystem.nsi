@@ -35,6 +35,7 @@ Unicode true
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "${OUTPUT_FILE}"
 InstallDir "$LOCALAPPDATA\Programs\Tempest Broadcast System"
+InstallDirRegKey HKCU "${PRODUCT_REGISTRY_KEY}" "InstallLocation"
 RequestExecutionLevel user
 ManifestDPIAware true
 CRCCheck force
@@ -58,6 +59,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (C) Tempest Mainframe con
 !define MUI_WELCOMEPAGE_TITLE "Install ${PRODUCT_NAME} ${PRODUCT_VERSION}"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
 !define MUI_FINISHPAGE_RUN_TEXT "Start ${PRODUCT_NAME}"
+!define MUI_DIRECTORYPAGE_TEXT_TOP "Choose the installation folder. For safe updates and removal, the folder name must end with '${PRODUCT_NAME}'. Existing custom installations are also supported."
 !define MUI_STARTMENUPAGE_REGISTRY_ROOT HKCU
 !define MUI_STARTMENUPAGE_REGISTRY_KEY "${PRODUCT_REGISTRY_KEY}"
 !define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "StartMenuFolder"
@@ -68,6 +70,7 @@ Var UpdateMode
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PROJECT_ROOT}\COPYING"
+!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_STARTMENU Application $StartMenuFolder
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -77,6 +80,32 @@ Var UpdateMode
 !insertmacro MUI_UNPAGE_FINISH
 
 !insertmacro MUI_LANGUAGE "English"
+
+!macro ValidateInstallDirectory SafeLabel UnsafeLabel
+  GetFullPathName $R0 "$INSTDIR"
+  ${GetRoot} "$R0" $R1
+  ${If} $R0 == $R1
+    Goto ${UnsafeLabel}
+  ${EndIf}
+
+  ${GetFileName} "$R0" $R1
+  ${If} $R1 == "${PRODUCT_NAME}"
+    Goto ${SafeLabel}
+  ${EndIf}
+
+  ; Preserve upgrades from older releases that were installed in a custom
+  ; folder name, but only when the registered path and product executable both
+  ; prove that this is an existing Tempest installation.
+  ReadRegStr $R2 HKCU "${PRODUCT_REGISTRY_KEY}" "InstallLocation"
+  ${If} $R2 == ""
+    Goto ${UnsafeLabel}
+  ${EndIf}
+  GetFullPathName $R2 "$R2"
+  ${If} $R0 != $R2
+    Goto ${UnsafeLabel}
+  ${EndIf}
+  IfFileExists "$R0\${PRODUCT_EXECUTABLE}" ${SafeLabel} ${UnsafeLabel}
+!macroend
 
 !ifdef SIGN_SCRIPT
   !ifndef TRUSTED_SIGNING_ENDPOINT
@@ -101,10 +130,6 @@ Function .onInit
   ${EndIf}
   SetShellVarContext current
   SetRegView 64
-  ; Keep application files in one fixed, per-user location. User configuration
-  ; lives separately in $APPDATA\tempest-broadcast-system and is never an
-  ; installer payload or installation target.
-  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Tempest Broadcast System"
 
   ${GetParameters} $R0
   ClearErrors
@@ -112,6 +137,14 @@ Function .onInit
   ${IfNot} ${Errors}
     StrCpy $UpdateMode "1"
   ${EndIf}
+FunctionEnd
+
+Function .onVerifyInstDir
+  !insertmacro ValidateInstallDirectory valid_install_directory invalid_install_directory
+valid_install_directory:
+  Return
+invalid_install_directory:
+  Abort
 FunctionEnd
 
 Function .onInstSuccess
@@ -124,15 +157,33 @@ FunctionEnd
 Function un.onInit
   SetShellVarContext current
   SetRegView 64
-  StrCpy $R0 "$LOCALAPPDATA\Programs\Tempest Broadcast System"
-  ${If} $INSTDIR != $R0
-    MessageBox MB_ICONSTOP|MB_OK "For safety, ${PRODUCT_NAME} can only uninstall its dedicated application folder. User settings were not changed."
-    Abort
+  GetFullPathName $R0 "$INSTDIR"
+  ${GetRoot} "$R0" $R1
+  ${If} $R0 == $R1
+    Goto unsafe_uninstall_directory
   ${EndIf}
+  ReadRegStr $R2 HKCU "${PRODUCT_REGISTRY_KEY}" "InstallLocation"
+  ${If} $R2 == ""
+    Goto unsafe_uninstall_directory
+  ${EndIf}
+  GetFullPathName $R2 "$R2"
+  ${If} $R0 != $R2
+    Goto unsafe_uninstall_directory
+  ${EndIf}
+  Return
+unsafe_uninstall_directory:
+  MessageBox MB_ICONSTOP|MB_OK "For safety, ${PRODUCT_NAME} will only uninstall the exact application folder recorded during installation. User settings were not changed."
+  Abort
 FunctionEnd
 
 Section "${PRODUCT_NAME}" SectionMain
   SectionIn RO
+  !insertmacro ValidateInstallDirectory valid_section_install_directory invalid_section_install_directory
+invalid_section_install_directory:
+  MessageBox MB_ICONSTOP|MB_OK "Choose a dedicated folder ending with '${PRODUCT_NAME}'. User settings cannot be used as the installation folder." /SD IDOK
+  SetErrorLevel 2
+  Abort
+valid_section_install_directory:
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD_DIR}\*"
 

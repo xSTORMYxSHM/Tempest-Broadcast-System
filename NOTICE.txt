@@ -1,4 +1,4 @@
-Tempest Broadcast System 1.0.5
+Tempest Broadcast System 1.0.6
 Copyright (C) Tempest Mainframe contributors
 
 Tempest Broadcast System is a modified distribution of OBS Studio.
