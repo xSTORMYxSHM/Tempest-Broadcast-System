@@ -37,7 +37,7 @@
 #include "moc_TempestStudioBridge.cpp"
 
 #ifndef TEMPEST_PRODUCT_VERSION
-#define TEMPEST_PRODUCT_VERSION "1.0.1"
+#define TEMPEST_PRODUCT_VERSION "1.0.5"
 #endif
 
 namespace {

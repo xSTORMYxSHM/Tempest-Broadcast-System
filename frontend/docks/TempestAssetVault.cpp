@@ -40,9 +40,61 @@ constexpr char ConfigSection[] = "TempestAssetVault";
 constexpr char AssetBusName[] = "Tempest // Asset Bus";
 
 const QStringList BankNames = {
-	QStringLiteral("UNASSIGNED"), QStringLiteral("FRACTAL"), QStringLiteral("AVATAR"),
-	QStringLiteral("TEXT"),       QStringLiteral("ALERT"),   QStringLiteral("OVERLAY"),
+	QStringLiteral("UNASSIGNED"), QStringLiteral("AUDIO REACTIVE"), QStringLiteral("FRACTAL"),
+	QStringLiteral("AVATAR"),     QStringLiteral("TEXT"),           QStringLiteral("ALERT"),
+	QStringLiteral("OVERLAY"),
 };
+
+QByteArray HtmlPreview(const QString &path)
+{
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly))
+		return {};
+	return file.read(256 * 1024);
+}
+
+bool IsAudioReactiveHtml(const QFileInfo &info, const QByteArray &html)
+{
+	if (info.suffix().compare(QStringLiteral("html"), Qt::CaseInsensitive) != 0)
+		return false;
+	if (info.fileName().startsWith(QStringLiteral("hud-"), Qt::CaseInsensitive) ||
+	    info.dir().dirName().compare(QStringLiteral("vault-elements"), Qt::CaseInsensitive) == 0)
+		return true;
+	return html.contains("tempestTelemetry") || html.contains("telemetry.json");
+}
+
+QString FriendlyAssetName(const QFileInfo &info, const QByteArray &html)
+{
+	if (info.fileName().startsWith(QStringLiteral("hud-"), Qt::CaseInsensitive)) {
+		const QRegularExpression stateExpression(
+			QStringLiteral("<script\\s+id=[\\\"']hud-state[\\\"'][^>]*>(\\{.*?\\})</script>"),
+			QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+		const QRegularExpressionMatch match = stateExpression.match(QString::fromUtf8(html));
+		if (match.hasMatch()) {
+			const QJsonDocument state = QJsonDocument::fromJson(match.captured(1).toUtf8());
+			const QString primary = state.object().value(QStringLiteral("primary")).toString().trimmed();
+			if (!primary.isEmpty())
+				return primary;
+		}
+	}
+
+	QString name = info.completeBaseName();
+	name.remove(QRegularExpression(QStringLiteral("^[a-z0-9-]+--\\d+-"),
+				       QRegularExpression::CaseInsensitiveOption));
+	if (name.startsWith(QStringLiteral("hud-"), Qt::CaseInsensitive))
+		name.remove(0, 4);
+	name.replace(QRegularExpression(QStringLiteral("[-_]+")), QStringLiteral(" "));
+	QStringList words = name.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+	for (QString &word : words) {
+		const QString lower = word.toLower();
+		if (lower == QStringLiteral("hud") || lower == QStringLiteral("brb") ||
+		    lower == QStringLiteral("obs"))
+			word = lower.toUpper();
+		else if (!word.isEmpty())
+			word = word.left(1).toUpper() + word.mid(1).toLower();
+	}
+	return words.isEmpty() ? info.fileName() : words.join(QLatin1Char(' '));
+}
 } // namespace
 
 TempestAssetVault::TempestAssetVault(OBSBasic *main, TempestSequenceDirector *director, TempestMediaBay *mediaBay,
@@ -196,12 +248,17 @@ void TempestAssetVault::LoadState()
 		for (auto it = object.begin(); it != object.end(); ++it)
 			banks.insert(NormalizePath(it.key()), it.value().toString(QStringLiteral("UNASSIGNED")));
 	}
-	for (const char *builtInFolder : {"tempest-broadcast-system/control-deck/profiles",
-					  "tempest-broadcast-system/control-deck/vault-elements"}) {
-		char builtInPath[1024];
-		if (GetAppConfigPath(builtInPath, sizeof(builtInPath), builtInFolder) <= 0)
-			continue;
-		const QString path = NormalizePath(QString::fromUtf8(builtInPath));
+	char controlDeckPath[1024];
+	if (GetAppConfigPath(controlDeckPath, sizeof(controlDeckPath),
+			     "tempest-broadcast-system/control-deck") > 0) {
+		const QString path = NormalizePath(QString::fromUtf8(controlDeckPath));
+		const QString profilesPath = NormalizePath(QDir(path).filePath(QStringLiteral("profiles")));
+		const QString elementsPath = NormalizePath(QDir(path).filePath(QStringLiteral("vault-elements")));
+		for (qsizetype index = roots.size() - 1; index >= 0; --index) {
+			if (roots[index].compare(profilesPath, Qt::CaseInsensitive) == 0 ||
+			    roots[index].compare(elementsPath, Qt::CaseInsensitive) == 0)
+				roots.removeAt(index);
+		}
 		QDir().mkpath(path);
 		if (!roots.contains(path, Qt::CaseInsensitive))
 			roots.prepend(path);
@@ -283,6 +340,7 @@ void TempestAssetVault::StartScan()
 	scanTimer.stop();
 	iterator.reset();
 	assets.clear();
+	scannedPaths.clear();
 	scanRootIndex = 0;
 	scanning = !roots.isEmpty();
 	RebuildAssetList();
@@ -309,16 +367,25 @@ void TempestAssetVault::ScanBatch()
 								  QDirIterator::Subdirectories);
 		if (iterator->hasNext()) {
 			const QString path = NormalizePath(iterator->next());
+			++processed;
+			const QString pathKey = path.toCaseFolded();
+			if (scannedPaths.contains(pathKey))
+				continue;
+			scannedPaths.insert(pathKey);
 			const QFileInfo info(path);
+			if (info.fileName().compare(QStringLiteral("telemetry.json"), Qt::CaseInsensitive) == 0)
+				continue;
 			const bool browserAsset = info.suffix().compare(QStringLiteral("html"), Qt::CaseInsensitive) ==
 						  0;
 			const bool textAsset = info.suffix().compare(QStringLiteral("txt"), Qt::CaseInsensitive) == 0 ||
 					       info.suffix().compare(QStringLiteral("json"), Qt::CaseInsensitive) == 0;
-			const QString defaultBank = browserAsset ? QStringLiteral("OVERLAY")
+			const QByteArray html = browserAsset ? HtmlPreview(path) : QByteArray();
+			const QString defaultBank = IsAudioReactiveHtml(info, html) ? QStringLiteral("AUDIO REACTIVE")
+						    : browserAsset ? QStringLiteral("OVERLAY")
 						    : textAsset  ? QStringLiteral("TEXT")
 								 : QStringLiteral("UNASSIGNED");
-			assets.push_back({path, info.fileName(), banks.value(path, defaultBank), info.size()});
-			++processed;
+			assets.push_back(
+				{path, info.fileName(), FriendlyAssetName(info, html), banks.value(path, defaultBank), info.size()});
 		} else {
 			iterator.reset();
 			++scanRootIndex;
@@ -331,8 +398,10 @@ void TempestAssetVault::ScanBatch()
 	scanTimer.stop();
 	iterator.reset();
 	scanning = false;
-	std::sort(assets.begin(), assets.end(),
-		  [](const Asset &a, const Asset &b) { return a.name.compare(b.name, Qt::CaseInsensitive) < 0; });
+	std::sort(assets.begin(), assets.end(), [](const Asset &a, const Asset &b) {
+		const int bankOrder = a.bank.compare(b.bank, Qt::CaseInsensitive);
+		return bankOrder == 0 ? a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0 : bankOrder < 0;
+	});
 	RebuildAssetList();
 	RefreshWatchPaths();
 	SetStatus(QStringLiteral("LIBRARY READY // %1 ASSET%2")
@@ -388,10 +457,11 @@ void TempestAssetVault::RebuildAssetList()
 		if (!bank.isEmpty() && asset.bank != bank)
 			continue;
 		if (!search.isEmpty() && !asset.name.contains(search, Qt::CaseInsensitive) &&
+		    !asset.displayName.contains(search, Qt::CaseInsensitive) &&
 		    !asset.path.contains(search, Qt::CaseInsensitive))
 			continue;
 		auto *item = new QListWidgetItem(QStringLiteral("%1 // %2\n%3")
-							 .arg(asset.bank, asset.name,
+							 .arg(asset.bank, asset.displayName,
 							      QDir::toNativeSeparators(QFileInfo(asset.path).path())),
 						 assetList);
 		item->setData(Qt::UserRole, index);
@@ -430,9 +500,9 @@ void TempestAssetVault::SelectAsset()
 		detailLabel->setText(scanning ? QStringLiteral("INDEXING...") : QStringLiteral("NO ASSET SELECTED"));
 		return;
 	}
-	detailLabel->setText(
-		QStringLiteral("%1\n%2 // %3")
-			.arg(QDir::toNativeSeparators(asset->path), asset->bank, FormatBytes(asset->bytes)));
+	detailLabel->setText(QStringLiteral("%1\n%2\n%3 // %4")
+				     .arg(asset->displayName, QDir::toNativeSeparators(asset->path), asset->bank,
+					  FormatBytes(asset->bytes)));
 	const int bankIndex = assignBankSelector->findData(asset->bank);
 	if (bankIndex >= 0) {
 		QSignalBlocker blocker(assignBankSelector);

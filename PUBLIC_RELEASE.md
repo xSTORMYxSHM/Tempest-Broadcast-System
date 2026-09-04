@@ -6,6 +6,8 @@ The supported public target is 64-bit Windows 10 or Windows 11. Version 1.0.0 is
 
 Beginning with version 1.0.1, installed copies include the signed Tempest Broadcast Updater. It checks only final releases from the official Tempest GitHub repository, verifies the release asset's SHA-256 digest, Windows file version, and Authenticode trust, and then runs the signed installer to preserve the existing per-user configuration while updating the application.
 
+Both **Check for Updates** inside Broadcast and the Start Menu's manual updater use that same verified installer path. Running a downloaded installer manually uses the same application-only update behavior. The installer is fixed to `%LOCALAPPDATA%\Programs\Tempest Broadcast System`; it never writes to or removes `%APPDATA%\tempest-broadcast-system`, where preferences, profiles, scenes, plugin configuration, generated overlays, and the managed Asset Vault are stored. Release builds fail if their installer payload contains a configuration folder or a portable-mode marker.
+
 ## Install and first run
 
 1. Download the Windows x64 installer and `SHA256SUMS.txt` from the same GitHub release.
@@ -24,7 +26,7 @@ To migrate an existing OBS setup without replacing the Tempest interface, close 
 - Normal OBS streaming, service authentication, browser sources, updateable service lists, and plugins can make network requests selected by the operator.
 - The optional Tempest Studio Integration connects only to its configured WebSocket endpoint, which defaults to `ws://127.0.0.1:4765/v1/socket`. Its token is read from the local Studio token file and is not copied into Broadcast profile configuration.
 - Radio Player overlays connect only to the AzuraCast station URL supplied by the user for metadata, cover artwork, and audio playback.
-- Upstream OBS automatic application updates and the upstream What's New feed are disabled. Public Tempest releases do not currently include an automatic updater.
+- Upstream OBS update services and the upstream What's New feed are disabled. Tempest's signed updater checks the official Tempest GitHub releases instead.
 
 ## Known limitations
 
@@ -60,6 +62,7 @@ The source archive must be generated from the same clean commit used for the bin
 - Scan the binary and source archives for personal paths, credentials, scene collections, logs, cookies, and generated assets.
 - Use only the `Tempest Mainframe` public brand in repository pages, release notes, notices, manifests, and executable version metadata. Keep personal identity and signing-account details confined to private signing configuration, except for identity information that Authenticode must expose to verify the publisher.
 - Confirm the public binary archive contains no PDB, crash-dump, log, or user-configuration files.
+- Confirm an upgrade over a populated test profile leaves `%APPDATA%\tempest-broadcast-system` byte-for-byte unchanged except for settings that Broadcast itself writes during a normal clean shutdown.
 - Confirm the release builder reports a valid Authenticode signature for every shipped `.exe`, `.dll`, and `.pyd` file before it creates the final archive.
 - Install silently into an isolated location, verify the installed executable and generated uninstaller signatures, launch the application, and confirm silent uninstall leaves user configuration untouched.
 - Upload the installer, portable binary, corresponding source, checksum file, manifest, NOTICE, release guide, and release notes together.

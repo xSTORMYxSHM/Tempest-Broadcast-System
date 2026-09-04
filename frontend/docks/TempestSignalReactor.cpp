@@ -14,6 +14,7 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -24,6 +25,7 @@
 #include <QSaveFile>
 #include <QSignalBlocker>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -133,183 +135,244 @@ void TempestSignalReactor::BuildInterface()
 	root->setObjectName(QStringLiteral("tempestSignalReactorRoot"));
 	root->setStyleSheet(QStringLiteral(R"(
 		QWidget#tempestSignalReactorRoot { background: #07131e; }
-		QLabel#reactorTitle { color: #45d9ff; font-size: 15px; font-weight: 700; letter-spacing: 2px; }
-		QLabel#reactorSubtitle, QLabel#reactorChannelLabel { color: #748fa4; font-size: 10px; letter-spacing: 1px; }
+		QLabel#reactorTitle { color: #45d9ff; font-size: 17px; font-weight: 700; }
+		QLabel#reactorSubtitle { color: #8ca5b7; font-size: 11px; }
+		QLabel#reactorSectionTitle { color: #d8f8ff; font-size: 12px; font-weight: 700; }
+		QLabel#reactorChannelLabel { color: #8ca5b7; font-size: 10px; font-weight: 600; }
 		QLabel#reactorStatus { color: #45d9ff; font-size: 10px; }
-		QLabel#reactorCircuitState { color: #748fa4; font-size: 9px; letter-spacing: 1px; }
-		QLabel#reactorControl { color: #9b8cff; font-size: 10px; letter-spacing: 1px; padding: 5px; border: 1px solid #302d67; background: #090d1d; }
-		QLabel#reactorHint { color: #748fa4; font-size: 10px; padding: 7px; border: 1px solid #183a50; background: #06101a; }
+		QLabel#reactorCircuitState { color: #8ca5b7; font-size: 9px; }
+		QLabel#reactorControl { color: #b8adff; font-size: 10px; padding: 6px; border: 1px solid #302d67; background: #090d1d; }
+		QLabel#reactorHint { color: #8ca5b7; font-size: 10px; padding: 7px; border: 1px solid #183a50; background: #06101a; }
 		QFrame#reactorChannel { background: #081a27; border: 1px solid #183a50; }
 		QFrame#reactorCircuit { background: #06131e; border: 1px solid #17394f; }
 		QComboBox, QDoubleSpinBox { min-height: 29px; padding: 0 7px; color: #bdf6ff; background: #06101a; border: 1px solid #1f506d; }
 		QProgressBar { min-height: 9px; max-height: 9px; border: 1px solid #17394f; background: #04101a; }
 		QProgressBar::chunk { background: #45d9ff; }
 		QProgressBar#reactorCircuitMeter::chunk { background: #9b8cff; }
-		QPushButton { min-height: 31px; padding: 0 9px; color: #bdf6ff; background: #0d2230; border: 1px solid #1f506d; font-weight: 700; }
+		QPushButton { min-height: 31px; padding: 0 9px; color: #bdf6ff; background: #0d2230; border: 1px solid #1f506d; font-weight: 600; }
+		QPushButton#reactorPrimaryButton { color: #04101a; background: #45d9ff; border-color: #45d9ff; }
+		QPushButton#reactorPrimaryButton:hover { background: #8be9ff; }
 		QPushButton#reactorCircuitButton { min-height: 24px; padding: 0 3px; font-size: 8px; }
 		QPushButton#reactorCircuitButton:checked { color: #ffffff; border-color: #9b8cff; background: #302d67; }
 		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
-		QCheckBox { color: #9eb7c8; }
+		QCheckBox { color: #b8cbd7; spacing: 7px; }
+		QCheckBox#reactorEnable { color: #d8f8ff; font-size: 12px; font-weight: 700; padding: 4px 0; }
+		QToolButton#reactorDisclosure { min-height: 34px; padding: 0 7px; color: #bdf6ff; background: #071722; border: 1px solid #183a50; font-weight: 600; text-align: left; }
+		QToolButton#reactorDisclosure:hover { border-color: #45d9ff; background: #0a2232; }
 	)"));
 	auto *layout = new QVBoxLayout(root);
 	layout->setContentsMargins(10, 10, 10, 10);
 	layout->setSpacing(8);
 
-	auto *title = new QLabel(QStringLiteral("AUDIO REACTOR"), root);
+	auto *title = new QLabel(QStringLiteral("Audio Reactor"), root);
 	title->setObjectName(QStringLiteral("reactorTitle"));
-	auto *subtitle = new QLabel(QStringLiteral("Audio-driven reactions for overlays and scene sources"), root);
+	auto *subtitle = new QLabel(QStringLiteral("Make overlays and scene sources respond to your audio."), root);
 	subtitle->setObjectName(QStringLiteral("reactorSubtitle"));
+	subtitle->setWordWrap(true);
 	layout->addWidget(title);
 	layout->addWidget(subtitle);
 
-	reactorEnabled = new QCheckBox(QStringLiteral("REACTOR ONLINE"), root);
+	reactorEnabled = new QCheckBox(QStringLiteral("Enable audio reactions"), root);
+	reactorEnabled->setObjectName(QStringLiteral("reactorEnable"));
 	reactorEnabled->setAccessibleName(QStringLiteral("Enable reactive audio engine"));
 	layout->addWidget(reactorEnabled);
 
-	auto addChannel = [root, layout](const QString &label, QPointer<QComboBox> &selector,
-					 QPointer<QDoubleSpinBox> &sensitivity, QPointer<QProgressBar> &meter) {
-		auto *frame = new QFrame(root);
-		frame->setObjectName(QStringLiteral("reactorChannel"));
-		auto *channelLayout = new QVBoxLayout(frame);
-		channelLayout->setContentsMargins(8, 8, 8, 8);
-		channelLayout->setSpacing(6);
-		auto *channelLabel = new QLabel(label, frame);
+	auto *audioFrame = new QFrame(root);
+	audioFrame->setObjectName(QStringLiteral("reactorChannel"));
+	auto *audioLayout = new QVBoxLayout(audioFrame);
+	audioLayout->setContentsMargins(10, 10, 10, 10);
+	audioLayout->setSpacing(7);
+	auto *audioTitle = new QLabel(QStringLiteral("1. Choose what to listen to"), audioFrame);
+	audioTitle->setObjectName(QStringLiteral("reactorSectionTitle"));
+	auto *audioHint = new QLabel(
+		QStringLiteral("Choose your computer audio and microphone. The meters confirm that Broadcast can hear them."),
+		audioFrame);
+	audioHint->setObjectName(QStringLiteral("reactorSubtitle"));
+	audioHint->setWordWrap(true);
+	audioLayout->addWidget(audioTitle);
+	audioLayout->addWidget(audioHint);
+	auto addChannel = [audioFrame, audioLayout](const QString &label, QPointer<QComboBox> &selector,
+						 QPointer<QProgressBar> &meter) {
+		auto *channelLabel = new QLabel(label, audioFrame);
 		channelLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
-		selector = new QComboBox(frame);
+		selector = new QComboBox(audioFrame);
 		selector->setAccessibleName(QStringLiteral("%1 reactive audio source").arg(label));
-		selector->addItem(QStringLiteral("WAITING FOR OBS AUDIO SOURCES"), QString());
-		sensitivity = new QDoubleSpinBox(frame);
-		sensitivity->setRange(0.0, 2.5);
-		sensitivity->setSingleStep(0.1);
-		sensitivity->setDecimals(1);
-		sensitivity->setPrefix(QStringLiteral("SENSITIVITY  "));
-		meter = new QProgressBar(frame);
+		selector->addItem(QStringLiteral("Waiting for audio sources..."), QString());
+		meter = new QProgressBar(audioFrame);
 		meter->setRange(0, 1000);
 		meter->setTextVisible(false);
-		channelLayout->addWidget(channelLabel);
-		channelLayout->addWidget(selector);
-		channelLayout->addWidget(sensitivity);
-		channelLayout->addWidget(meter);
-		layout->addWidget(frame);
+		audioLayout->addWidget(channelLabel);
+		audioLayout->addWidget(selector);
+		audioLayout->addWidget(meter);
 	};
-	addChannel(QStringLiteral("DESKTOP ENERGY"), desktopSource, desktopSensitivity, desktopMeter);
-	addChannel(QStringLiteral("MICROPHONE / VOICE"), microphoneSource, microphoneSensitivity, microphoneMeter);
+	addChannel(QStringLiteral("Computer / desktop audio"), desktopSource, desktopMeter);
+	addChannel(QStringLiteral("Microphone / voice"), microphoneSource, microphoneMeter);
+	auto *refresh = new QPushButton(QStringLiteral("Refresh audio sources"), audioFrame);
+	refresh->setAccessibleName(QStringLiteral("Refresh Audio Reactor sources"));
+	audioLayout->addWidget(refresh);
+	layout->addWidget(audioFrame);
 
-	auto *beatFrame = new QFrame(root);
-	beatFrame->setObjectName(QStringLiteral("reactorChannel"));
-	auto *beatLayout = new QVBoxLayout(beatFrame);
-	beatLayout->setContentsMargins(8, 8, 8, 8);
-	beatLayout->setSpacing(6);
-	auto *beatLabel = new QLabel(QStringLiteral("MUSIC TRANSIENT / BEAT"), beatFrame);
-	beatLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
-	beatSensitivity = new QDoubleSpinBox(beatFrame);
+	auto *styleFrame = new QFrame(root);
+	styleFrame->setObjectName(QStringLiteral("reactorChannel"));
+	styleFrame->setAccessibleName(QStringLiteral("Global overlay reaction style"));
+	auto *styleLayout = new QVBoxLayout(styleFrame);
+	styleLayout->setContentsMargins(10, 10, 10, 10);
+	styleLayout->setSpacing(7);
+	auto *styleTitle = new QLabel(QStringLiteral("2. Choose how it reacts"), styleFrame);
+	styleTitle->setObjectName(QStringLiteral("reactorSectionTitle"));
+	auto *styleHint = new QLabel(QStringLiteral("Start with a preset. You can fine-tune it below if needed."), styleFrame);
+	styleHint->setObjectName(QStringLiteral("reactorSubtitle"));
+	styleHint->setWordWrap(true);
+	reactionProfile = new QComboBox(styleFrame);
+	reactionProfile->addItem(QStringLiteral("Calm"), QStringLiteral("calm"));
+	reactionProfile->addItem(QStringLiteral("Standard"), QStringLiteral("mainframe"));
+	reactionProfile->addItem(QStringLiteral("High energy"), QStringLiteral("storm"));
+	reactionProfile->addItem(QStringLiteral("Alert dance"), QStringLiteral("dance"));
+	reactionProfile->addItem(QStringLiteral("Alert warning"), QStringLiteral("alert"));
+	reactionProfile->setAccessibleName(QStringLiteral("Reaction style preset"));
+	reactionPalette = new QComboBox(styleFrame);
+	reactionPalette->addItem(QStringLiteral("Tempest — cyan to magenta"), QStringLiteral("tempest"));
+	reactionPalette->addItem(QStringLiteral("Ultraviolet"), QStringLiteral("ultraviolet"));
+	reactionPalette->addItem(QStringLiteral("Ember warning"), QStringLiteral("ember"));
+	reactionPalette->addItem(QStringLiteral("Verdant"), QStringLiteral("verdant"));
+	reactionPalette->addItem(QStringLiteral("Full spectrum"), QStringLiteral("spectrum"));
+	reactionPalette->setAccessibleName(QStringLiteral("Reactive color palette"));
+	auto *styleForm = new QFormLayout();
+	styleForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	styleForm->addRow(QStringLiteral("Reaction style"), reactionProfile);
+	styleForm->addRow(QStringLiteral("Colors"), reactionPalette);
+	auto *styleButtons = new QHBoxLayout();
+	auto *applyProfile = new QPushButton(QStringLiteral("Apply style"), styleFrame);
+	applyProfile->setObjectName(QStringLiteral("reactorPrimaryButton"));
+	auto *testProfile = new QPushButton(QStringLiteral("Preview reaction"), styleFrame);
+	applyProfile->setAccessibleName(QStringLiteral("Apply selected reaction style preset"));
+	testProfile->setAccessibleName(QStringLiteral("Preview current reaction settings"));
+	styleButtons->addWidget(applyProfile);
+	styleButtons->addWidget(testProfile);
+	styleLayout->addWidget(styleTitle);
+	styleLayout->addWidget(styleHint);
+	styleLayout->addLayout(styleForm);
+	styleLayout->addLayout(styleButtons);
+	auto *masterLabel = new QLabel(QStringLiteral("Live reaction level"), styleFrame);
+	masterLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	masterMeter = new QProgressBar(styleFrame);
+	masterMeter->setRange(0, 1000);
+	masterMeter->setTextVisible(false);
+	styleLayout->addWidget(masterLabel);
+	styleLayout->addWidget(masterMeter);
+	layout->addWidget(styleFrame);
+
+	auto addDisclosure = [this, root, layout](const QString &text, QWidget *content, bool expanded = false) {
+		auto *button = new QToolButton(root);
+		button->setObjectName(QStringLiteral("reactorDisclosure"));
+		button->setText(text);
+		button->setCheckable(true);
+		button->setChecked(expanded);
+		button->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+		button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+		content->setVisible(expanded);
+		connect(button, &QToolButton::toggled, this, [button, content](bool checked) {
+			button->setArrowType(checked ? Qt::DownArrow : Qt::RightArrow);
+			content->setVisible(checked);
+		});
+		layout->addWidget(button);
+		layout->addWidget(content);
+	};
+
+	auto *tuningFrame = new QFrame(root);
+	tuningFrame->setObjectName(QStringLiteral("reactorChannel"));
+	auto *tuningLayout = new QVBoxLayout(tuningFrame);
+	tuningLayout->setContentsMargins(10, 10, 10, 10);
+	tuningLayout->setSpacing(7);
+	auto *tuningHint = new QLabel(
+		QStringLiteral("Adjust these only when a preset needs more or less sensitivity, speed, motion, or glow."),
+		tuningFrame);
+	tuningHint->setObjectName(QStringLiteral("reactorSubtitle"));
+	tuningHint->setWordWrap(true);
+	desktopSensitivity = new QDoubleSpinBox(tuningFrame);
+	desktopSensitivity->setRange(0.0, 2.5);
+	desktopSensitivity->setSingleStep(0.1);
+	desktopSensitivity->setDecimals(1);
+	desktopSensitivity->setSuffix(QStringLiteral(" x"));
+	desktopSensitivity->setAccessibleName(QStringLiteral("Computer audio sensitivity"));
+	microphoneSensitivity = new QDoubleSpinBox(tuningFrame);
+	microphoneSensitivity->setRange(0.0, 2.5);
+	microphoneSensitivity->setSingleStep(0.1);
+	microphoneSensitivity->setDecimals(1);
+	microphoneSensitivity->setSuffix(QStringLiteral(" x"));
+	microphoneSensitivity->setAccessibleName(QStringLiteral("Microphone sensitivity"));
+	beatSensitivity = new QDoubleSpinBox(tuningFrame);
 	beatSensitivity->setRange(0.50, 4.00);
 	beatSensitivity->setSingleStep(0.10);
 	beatSensitivity->setDecimals(1);
-	beatSensitivity->setPrefix(QStringLiteral("BEAT SENSITIVITY  "));
-	beatSensitivity->setAccessibleName(QStringLiteral("Music transient beat sensitivity"));
-	beatMeter = new QProgressBar(beatFrame);
+	beatSensitivity->setSuffix(QStringLiteral(" x"));
+	beatSensitivity->setAccessibleName(QStringLiteral("Music beat sensitivity"));
+	beatMeter = new QProgressBar(tuningFrame);
 	beatMeter->setRange(0, 1000);
 	beatMeter->setTextVisible(false);
-	beatMeter->setAccessibleName(QStringLiteral("Music transient beat meter"));
-	beatLayout->addWidget(beatLabel);
-	beatLayout->addWidget(beatSensitivity);
-	beatLayout->addWidget(beatMeter);
-	layout->addWidget(beatFrame);
-
-	auto *masterLabel = new QLabel(QStringLiteral("MASTER REACTION BUS"), root);
-	masterLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
-	masterMeter = new QProgressBar(root);
-	masterMeter->setRange(0, 1000);
-	masterMeter->setTextVisible(false);
-	layout->addWidget(masterLabel);
-	layout->addWidget(masterMeter);
-
-	auto *directorFrame = new QFrame(root);
-	directorFrame->setObjectName(QStringLiteral("reactorChannel"));
-	directorFrame->setAccessibleName(QStringLiteral("Global overlay Reactivity Director"));
-	auto *directorLayout = new QVBoxLayout(directorFrame);
-	directorLayout->setContentsMargins(8, 8, 8, 8);
-	directorLayout->setSpacing(6);
-	auto *directorLabel = new QLabel(QStringLiteral("REACTIVITY DIRECTOR // GLOBAL OVERLAY BUS"), directorFrame);
-	directorLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
-	auto *directorHint =
-		new QLabel(QStringLiteral("One persistent response profile drives every generated stream overlay."),
-			   directorFrame);
-	directorHint->setObjectName(QStringLiteral("reactorHint"));
-	directorHint->setWordWrap(true);
-	reactionProfile = new QComboBox(directorFrame);
-	reactionProfile->addItem(QStringLiteral("CALM"), QStringLiteral("calm"));
-	reactionProfile->addItem(QStringLiteral("STANDARD"), QStringLiteral("mainframe"));
-	reactionProfile->addItem(QStringLiteral("HIGH ENERGY"), QStringLiteral("storm"));
-	reactionProfile->addItem(QStringLiteral("ALERT DANCE"), QStringLiteral("dance"));
-	reactionProfile->addItem(QStringLiteral("ALERT WARNING"), QStringLiteral("alert"));
-	reactionProfile->setAccessibleName(QStringLiteral("Reactivity Director profile"));
-	reactionPalette = new QComboBox(directorFrame);
-	reactionPalette->addItem(QStringLiteral("TEMPEST // CYAN TO MAGENTA"), QStringLiteral("tempest"));
-	reactionPalette->addItem(QStringLiteral("ULTRAVIOLET"), QStringLiteral("ultraviolet"));
-	reactionPalette->addItem(QStringLiteral("EMBER WARNING"), QStringLiteral("ember"));
-	reactionPalette->addItem(QStringLiteral("VERDANT"), QStringLiteral("verdant"));
-	reactionPalette->addItem(QStringLiteral("FULL SPECTRUM"), QStringLiteral("spectrum"));
-	reactionPalette->setAccessibleName(QStringLiteral("Global reactive color palette"));
-	reactionThreshold = new QDoubleSpinBox(directorFrame);
+	beatMeter->setAccessibleName(QStringLiteral("Music beat activity meter"));
+	reactionThreshold = new QDoubleSpinBox(tuningFrame);
 	reactionThreshold->setRange(0.0, 0.80);
 	reactionThreshold->setSingleStep(0.01);
 	reactionThreshold->setDecimals(2);
-	reactionThreshold->setAccessibleName(QStringLiteral("Global reaction noise threshold"));
-	reactionAttack = new QDoubleSpinBox(directorFrame);
+	reactionThreshold->setAccessibleName(QStringLiteral("Ignore quiet audio below this level"));
+	reactionAttack = new QDoubleSpinBox(tuningFrame);
 	reactionAttack->setRange(0.05, 1.0);
 	reactionAttack->setSingleStep(0.05);
 	reactionAttack->setDecimals(2);
-	reactionAttack->setAccessibleName(QStringLiteral("Global reaction attack speed"));
-	smoothing = new QDoubleSpinBox(directorFrame);
+	reactionAttack->setAccessibleName(QStringLiteral("Reaction rise speed"));
+	smoothing = new QDoubleSpinBox(tuningFrame);
 	smoothing->setRange(0.50, 0.98);
 	smoothing->setSingleStep(0.02);
 	smoothing->setDecimals(2);
-	smoothing->setAccessibleName(QStringLiteral("Global reaction release smoothing"));
-	reactionMotion = new QDoubleSpinBox(directorFrame);
+	smoothing->setAccessibleName(QStringLiteral("Reaction fade smoothing"));
+	reactionMotion = new QDoubleSpinBox(tuningFrame);
 	reactionMotion->setRange(0.0, 200.0);
 	reactionMotion->setSingleStep(5.0);
 	reactionMotion->setDecimals(0);
 	reactionMotion->setSuffix(QStringLiteral(" %"));
-	reactionMotion->setAccessibleName(QStringLiteral("Global overlay motion intensity"));
-	reactionGlow = new QDoubleSpinBox(directorFrame);
+	reactionMotion->setAccessibleName(QStringLiteral("Overlay movement amount"));
+	reactionGlow = new QDoubleSpinBox(tuningFrame);
 	reactionGlow->setRange(0.0, 200.0);
 	reactionGlow->setSingleStep(5.0);
 	reactionGlow->setDecimals(0);
 	reactionGlow->setSuffix(QStringLiteral(" %"));
-	reactionGlow->setAccessibleName(QStringLiteral("Global overlay glow intensity"));
-	reactionTestStrength = new QDoubleSpinBox(directorFrame);
+	reactionGlow->setAccessibleName(QStringLiteral("Overlay glow amount"));
+	reactionTestStrength = new QDoubleSpinBox(tuningFrame);
 	reactionTestStrength->setRange(5.0, 150.0);
 	reactionTestStrength->setSingleStep(5.0);
 	reactionTestStrength->setDecimals(0);
 	reactionTestStrength->setSuffix(QStringLiteral(" %"));
-	reactionTestStrength->setAccessibleName(QStringLiteral("Reactivity Director test signal strength"));
-	reducedMotion = new QCheckBox(QStringLiteral("REDUCED MOTION // KEEP COLOR + GLOW"), directorFrame);
+	reactionTestStrength->setAccessibleName(QStringLiteral("Preview reaction strength"));
+	reducedMotion = new QCheckBox(QStringLiteral("Reduce movement (keep color and glow)"), tuningFrame);
 	reducedMotion->setAccessibleName(QStringLiteral("Reduce overlay reaction motion"));
-	auto *directorForm = new QFormLayout();
-	directorForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-	directorForm->addRow(QStringLiteral("Response profile"), reactionProfile);
-	directorForm->addRow(QStringLiteral("Color palette"), reactionPalette);
-	directorForm->addRow(QStringLiteral("Noise threshold"), reactionThreshold);
-	directorForm->addRow(QStringLiteral("Attack"), reactionAttack);
-	directorForm->addRow(QStringLiteral("Release"), smoothing);
-	directorForm->addRow(QStringLiteral("Motion"), reactionMotion);
-	directorForm->addRow(QStringLiteral("Glow"), reactionGlow);
-	directorForm->addRow(QStringLiteral("Test strength"), reactionTestStrength);
-	auto *directorButtons = new QHBoxLayout();
-	auto *applyProfile = new QPushButton(QStringLiteral("APPLY PRESET"), directorFrame);
-	auto *testProfile = new QPushButton(QStringLiteral("TEST PROFILE"), directorFrame);
-	applyProfile->setAccessibleName(QStringLiteral("Apply selected Reactivity Director preset"));
-	testProfile->setAccessibleName(QStringLiteral("Test current Reactivity Director settings"));
-	directorButtons->addWidget(applyProfile);
-	directorButtons->addWidget(testProfile);
-	directorLayout->addWidget(directorLabel);
-	directorLayout->addWidget(directorHint);
-	directorLayout->addLayout(directorForm);
-	directorLayout->addWidget(reducedMotion);
-	directorLayout->addLayout(directorButtons);
-	layout->addWidget(directorFrame);
+	auto *tuningForm = new QFormLayout();
+	tuningForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	tuningForm->addRow(QStringLiteral("Computer sensitivity"), desktopSensitivity);
+	tuningForm->addRow(QStringLiteral("Microphone sensitivity"), microphoneSensitivity);
+	tuningForm->addRow(QStringLiteral("Beat sensitivity"), beatSensitivity);
+	tuningForm->addRow(QStringLiteral("Ignore quiet audio"), reactionThreshold);
+	tuningForm->addRow(QStringLiteral("Reaction speed"), reactionAttack);
+	tuningForm->addRow(QStringLiteral("Fade smoothness"), smoothing);
+	tuningForm->addRow(QStringLiteral("Movement"), reactionMotion);
+	tuningForm->addRow(QStringLiteral("Glow"), reactionGlow);
+	tuningForm->addRow(QStringLiteral("Preview strength"), reactionTestStrength);
+	auto *beatLabel = new QLabel(QStringLiteral("Detected beat activity"), tuningFrame);
+	beatLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	auto *pulseRow = new QHBoxLayout();
+	pulseButton = new QPushButton(QStringLiteral("Test pulse"), tuningFrame);
+	peakButton = new QPushButton(QStringLiteral("Test peak"), tuningFrame);
+	pulseButton->setAccessibleName(QStringLiteral("Trigger reaction pulse"));
+	peakButton->setAccessibleName(QStringLiteral("Trigger reaction peak"));
+	pulseRow->addWidget(pulseButton);
+	pulseRow->addWidget(peakButton);
+	tuningLayout->addWidget(tuningHint);
+	tuningLayout->addLayout(tuningForm);
+	tuningLayout->addWidget(beatLabel);
+	tuningLayout->addWidget(beatMeter);
+	tuningLayout->addWidget(reducedMotion);
+	tuningLayout->addLayout(pulseRow);
+	addDisclosure(QStringLiteral("Fine-tune reaction"), tuningFrame);
 
 	auto *networkFrame = new QFrame(root);
 	networkFrame->setObjectName(QStringLiteral("reactorChannel"));
@@ -317,24 +380,27 @@ void TempestSignalReactor::BuildInterface()
 	auto *networkLayout = new QVBoxLayout(networkFrame);
 	networkLayout->setContentsMargins(8, 8, 8, 8);
 	networkLayout->setSpacing(6);
-	auto *networkLabel = new QLabel(QStringLiteral("REACTIVE SOURCE CONTROLS"), networkFrame);
-	networkLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	auto *networkHint = new QLabel(
+		QStringLiteral("For Tempest sources that support separate core, frame, chat, plate, and alert reactions."),
+		networkFrame);
+	networkHint->setObjectName(QStringLiteral("reactorSubtitle"));
+	networkHint->setWordWrap(true);
 	sourceNetworkStatus = new QLabel(QStringLiteral("NETWORK // NO SOURCE RIGS BOUND"), networkFrame);
 	sourceNetworkStatus->setObjectName(QStringLiteral("reactorStatus"));
 	sourceNetworkStatus->setAccessibleName(QStringLiteral("Source reaction network binding status"));
-	sourceNetworkArmed = new QCheckBox(QStringLiteral("ARM SOURCE REACTIONS"), networkFrame);
+	sourceNetworkArmed = new QCheckBox(QStringLiteral("Enable reactions for compatible scene sources"), networkFrame);
 	sourceNetworkArmed->setAccessibleName(QStringLiteral("Arm source reaction network"));
-	sourceNetworkActiveSceneOnly = new QCheckBox(QStringLiteral("ACTIVE SCENE RIGS ONLY"), networkFrame);
+	sourceNetworkActiveSceneOnly = new QCheckBox(QStringLiteral("Only affect sources in the active scene"), networkFrame);
 	sourceNetworkActiveSceneOnly->setAccessibleName(QStringLiteral("Limit source reactions to active scene"));
 	sourceNetworkCircuitProfile = new QComboBox(networkFrame);
-	sourceNetworkCircuitProfile->addItem(QStringLiteral("ALL CIRCUITS"), QStringLiteral("all"));
-	sourceNetworkCircuitProfile->addItem(QStringLiteral("AMBIENT // CORE + FRAME + PLATES"),
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("All parts"), QStringLiteral("all"));
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("Ambient — core, frame, and plates"),
 					     QStringLiteral("ambient"));
-	sourceNetworkCircuitProfile->addItem(QStringLiteral("CONVERSATION // CORE + FRAME + CHAT + PLATES"),
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("Conversation — includes chat"),
 					     QStringLiteral("conversation"));
-	sourceNetworkCircuitProfile->addItem(QStringLiteral("ALERT FOCUS // CORE + FRAME + ALERTS"),
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("Alert focus — core, frame, and alerts"),
 					     QStringLiteral("alert"));
-	sourceNetworkCircuitProfile->addItem(QStringLiteral("CORE ONLY"), QStringLiteral("core"));
+	sourceNetworkCircuitProfile->addItem(QStringLiteral("Core only"), QStringLiteral("core"));
 	sourceNetworkCircuitProfile->setAccessibleName(QStringLiteral("Source reaction circuit profile"));
 	auto *circuitMixer = new QGridLayout();
 	circuitMixer->setHorizontalSpacing(6);
@@ -344,7 +410,7 @@ void TempestSignalReactor::BuildInterface()
 		const char *label;
 	};
 	constexpr CircuitControl circuitControls[] = {
-		{"core", "CORE"}, {"frame", "FRAME"}, {"chat", "CHAT"}, {"plates", "PLATES"}, {"alerts", "ALERTS"},
+		{"core", "Core"}, {"frame", "Frame"}, {"chat", "Chat"}, {"plates", "Plates"}, {"alerts", "Alerts"},
 	};
 	for (int index = 0; index < 5; ++index) {
 		const CircuitControl &control = circuitControls[index];
@@ -368,14 +434,14 @@ void TempestSignalReactor::BuildInterface()
 		meter->setRange(0, 2000);
 		meter->setTextVisible(false);
 		meter->setAccessibleName(QStringLiteral("%1 reaction circuit activity").arg(label));
-		auto *state = new QLabel(QStringLiteral("UNBOUND"), circuitFrame);
+		auto *state = new QLabel(QStringLiteral("Not connected"), circuitFrame);
 		state->setObjectName(QStringLiteral("reactorCircuitState"));
 		state->setAccessibleName(QStringLiteral("%1 reaction circuit state // UNBOUND").arg(label));
 		auto *circuitControls = new QHBoxLayout();
 		circuitControls->setSpacing(3);
-		auto *mute = new QPushButton(QStringLiteral("MUTE"), circuitFrame);
-		auto *solo = new QPushButton(QStringLiteral("SOLO"), circuitFrame);
-		auto *test = new QPushButton(QStringLiteral("TEST"), circuitFrame);
+		auto *mute = new QPushButton(QStringLiteral("Mute"), circuitFrame);
+		auto *solo = new QPushButton(QStringLiteral("Solo"), circuitFrame);
+		auto *test = new QPushButton(QStringLiteral("Test"), circuitFrame);
 		for (QPushButton *button : {mute, solo, test})
 			button->setObjectName(QStringLiteral("reactorCircuitButton"));
 		mute->setCheckable(true);
@@ -413,24 +479,27 @@ void TempestSignalReactor::BuildInterface()
 	sourceNetworkIntensity->setSuffix(QStringLiteral(" %"));
 	sourceNetworkIntensity->setAccessibleName(QStringLiteral("Source reaction network intensity"));
 	auto *networkButtons = new QHBoxLayout();
-	auto *testNetwork = new QPushButton(QStringLiteral("TEST NETWORK"), networkFrame);
-	auto *restoreNetwork = new QPushButton(QStringLiteral("DISARM + RESTORE"), networkFrame);
-	auto *resetMixer = new QPushButton(QStringLiteral("RESET CIRCUIT MIXER"), networkFrame);
+	auto *testNetwork = new QPushButton(QStringLiteral("Test all sources"), networkFrame);
+	auto *restoreNetwork = new QPushButton(QStringLiteral("Disable and restore"), networkFrame);
+	auto *resetMixer = new QPushButton(QStringLiteral("Reset part levels"), networkFrame);
 	testNetwork->setAccessibleName(QStringLiteral("Test all source reaction rigs"));
 	restoreNetwork->setAccessibleName(QStringLiteral("Disarm source reactions and restore all bases"));
 	resetMixer->setAccessibleName(QStringLiteral("Reset source reaction circuit mixer"));
 	networkButtons->addWidget(testNetwork);
 	networkButtons->addWidget(restoreNetwork);
-	networkLayout->addWidget(networkLabel);
+	networkLayout->addWidget(networkHint);
 	networkLayout->addWidget(sourceNetworkStatus);
 	networkLayout->addWidget(sourceNetworkArmed);
 	networkLayout->addWidget(sourceNetworkActiveSceneOnly);
-	networkLayout->addWidget(sourceNetworkCircuitProfile);
+	auto *networkForm = new QFormLayout();
+	networkForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	networkForm->addRow(QStringLiteral("Parts to react"), sourceNetworkCircuitProfile);
+	networkForm->addRow(QStringLiteral("Overall strength"), sourceNetworkIntensity);
+	networkLayout->addLayout(networkForm);
 	networkLayout->addLayout(circuitMixer);
 	networkLayout->addWidget(resetMixer);
-	networkLayout->addWidget(sourceNetworkIntensity);
 	networkLayout->addLayout(networkButtons);
-	layout->addWidget(networkFrame);
+	addDisclosure(QStringLiteral("Source reactions (advanced)"), networkFrame);
 
 	auto *externalFrame = new QFrame(root);
 	externalFrame->setObjectName(QStringLiteral("reactorChannel"));
@@ -438,20 +507,22 @@ void TempestSignalReactor::BuildInterface()
 	auto *externalLayout = new QVBoxLayout(externalFrame);
 	externalLayout->setContentsMargins(8, 8, 8, 8);
 	externalLayout->setSpacing(6);
-	auto *externalLabel = new QLabel(QStringLiteral("EXTERNAL EVENT BRIDGE // WARUDO + TWITCH"), externalFrame);
-	externalLabel->setObjectName(QStringLiteral("reactorChannelLabel"));
+	auto *externalHint = new QLabel(
+		QStringLiteral("Let Warudo or Twitch events trigger a reaction without waiting for an audio peak."), externalFrame);
+	externalHint->setObjectName(QStringLiteral("reactorSubtitle"));
+	externalHint->setWordWrap(true);
 	externalEventStatus = new QLabel(QStringLiteral("EVENT BUS // STANDBY"), externalFrame);
 	externalEventStatus->setObjectName(QStringLiteral("reactorStatus"));
 	externalEventStatus->setWordWrap(true);
-	externalEventBridgeArmed = new QCheckBox(QStringLiteral("ACCEPT EXTERNAL REACTION EVENTS"), externalFrame);
+	externalEventBridgeArmed = new QCheckBox(QStringLiteral("Allow reactions from connected apps"), externalFrame);
 	externalEventBridgeArmed->setAccessibleName(QStringLiteral("Accept Warudo and Twitch reaction events"));
 	auto populateCircuitSelector = [](QComboBox *selector) {
-		selector->addItem(QStringLiteral("ALL HUD CIRCUITS"), QStringLiteral("all"));
-		selector->addItem(QStringLiteral("FRAME"), QStringLiteral("frame"));
-		selector->addItem(QStringLiteral("ALERTS"), QStringLiteral("alerts"));
-		selector->addItem(QStringLiteral("PLATES"), QStringLiteral("plates"));
-		selector->addItem(QStringLiteral("CHAT"), QStringLiteral("chat"));
-		selector->addItem(QStringLiteral("CORE"), QStringLiteral("core"));
+		selector->addItem(QStringLiteral("All overlay parts"), QStringLiteral("all"));
+		selector->addItem(QStringLiteral("Frame"), QStringLiteral("frame"));
+		selector->addItem(QStringLiteral("Alerts"), QStringLiteral("alerts"));
+		selector->addItem(QStringLiteral("Plates"), QStringLiteral("plates"));
+		selector->addItem(QStringLiteral("Chat"), QStringLiteral("chat"));
+		selector->addItem(QStringLiteral("Core"), QStringLiteral("core"));
 	};
 	externalDanceCircuit = new QComboBox(externalFrame);
 	externalTwitchCircuit = new QComboBox(externalFrame);
@@ -470,46 +541,34 @@ void TempestSignalReactor::BuildInterface()
 	externalForm->addRow(QStringLiteral("Twitch target"), externalTwitchCircuit);
 	externalForm->addRow(QStringLiteral("Duplicate cooldown"), externalEventCooldown);
 	auto *externalButtons = new QHBoxLayout();
-	auto *testDance = new QPushButton(QStringLiteral("TEST DANCE"), externalFrame);
-	auto *testTwitch = new QPushButton(QStringLiteral("TEST TWITCH"), externalFrame);
-	auto *clearExternal = new QPushButton(QStringLiteral("CLEAR"), externalFrame);
+	auto *testDance = new QPushButton(QStringLiteral("Test dance"), externalFrame);
+	auto *testTwitch = new QPushButton(QStringLiteral("Test Twitch"), externalFrame);
+	auto *clearExternal = new QPushButton(QStringLiteral("Clear event"), externalFrame);
 	testDance->setAccessibleName(QStringLiteral("Test Warudo sound alert dance reaction"));
 	testTwitch->setAccessibleName(QStringLiteral("Test Twitch interaction reaction"));
 	clearExternal->setAccessibleName(QStringLiteral("Clear current external reaction event"));
 	externalButtons->addWidget(testDance);
 	externalButtons->addWidget(testTwitch);
 	externalButtons->addWidget(clearExternal);
-	externalLayout->addWidget(externalLabel);
+	externalLayout->addWidget(externalHint);
 	externalLayout->addWidget(externalEventStatus);
 	externalLayout->addWidget(externalEventBridgeArmed);
 	externalLayout->addLayout(externalForm);
 	externalLayout->addLayout(externalButtons);
-	layout->addWidget(externalFrame);
-
-	auto *pulseRow = new QHBoxLayout();
-	pulseButton = new QPushButton(QStringLiteral("TEST PULSE"), root);
-	peakButton = new QPushButton(QStringLiteral("TEST PEAK"), root);
-	pulseButton->setAccessibleName(QStringLiteral("Trigger reaction pulse"));
-	peakButton->setAccessibleName(QStringLiteral("Trigger reaction peak"));
-	auto *refresh = new QPushButton(QStringLiteral("REFRESH SOURCES"), root);
-	refresh->setAccessibleName(QStringLiteral("Refresh Audio Reactor sources"));
-	pulseRow->addWidget(pulseButton);
-	pulseRow->addWidget(peakButton);
-	pulseRow->addWidget(refresh);
-	layout->addLayout(pulseRow);
-	controlLabel = new QLabel(QStringLiteral("CONTROL BRIDGE // INITIALIZING"), root);
+	controlLabel = new QLabel(QStringLiteral("Connected app controls are starting..."), externalFrame);
 	controlLabel->setObjectName(QStringLiteral("reactorControl"));
 	controlLabel->setAccessibleName(QStringLiteral("Audio Reactor external control status"));
-	layout->addWidget(controlLabel);
-
+	externalLayout->addWidget(controlLabel);
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Desktop and microphone energy feed the master bus. The Beat bus extracts fast music transients from Desktop Energy. Warudo can trigger the named Sound Alert Dance and Twitch Interaction hotkeys; richer clients can call tempest-mainframe / TriggerReactionEvent."),
-		root);
+			"Warudo can use the Sound Alert Dance and Twitch Interaction hotkeys. Connected clients can also send named reaction events."),
+		externalFrame);
 	hint->setObjectName(QStringLiteral("reactorHint"));
 	hint->setWordWrap(true);
-	layout->addWidget(hint);
-	statusLabel = new QLabel(QStringLiteral("REACTOR INITIALIZING"), root);
+	externalLayout->addWidget(hint);
+	addDisclosure(QStringLiteral("Connected apps (advanced)"), externalFrame);
+
+	statusLabel = new QLabel(QStringLiteral("Audio Reactor is starting..."), root);
 	statusLabel->setObjectName(QStringLiteral("reactorStatus"));
 	statusLabel->setWordWrap(true);
 	layout->addWidget(statusLabel);

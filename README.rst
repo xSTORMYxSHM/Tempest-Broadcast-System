@@ -7,7 +7,7 @@ encoder, recording, and streaming engine while adding the Tempest Broadcast
 production interface, reactive overlay design, asset management, audio-driven
 effects, automation, and an optional connection to Tempest Studio.
 
-The current Tempest product version is **1.0.1**. The upstream OBS engine
+The current Tempest product version is **1.0.5**. The upstream OBS engine
 version remains visible separately in the application title and logs so plugin
 and encoder compatibility can be diagnosed accurately.
 

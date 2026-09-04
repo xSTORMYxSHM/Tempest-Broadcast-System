@@ -35,7 +35,6 @@ Unicode true
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "${OUTPUT_FILE}"
 InstallDir "$LOCALAPPDATA\Programs\Tempest Broadcast System"
-InstallDirRegKey HKCU "${PRODUCT_REGISTRY_KEY}" "InstallLocation"
 RequestExecutionLevel user
 ManifestDPIAware true
 CRCCheck force
@@ -69,7 +68,6 @@ Var UpdateMode
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PROJECT_ROOT}\COPYING"
-!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_STARTMENU Application $StartMenuFolder
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -103,6 +101,10 @@ Function .onInit
   ${EndIf}
   SetShellVarContext current
   SetRegView 64
+  ; Keep application files in one fixed, per-user location. User configuration
+  ; lives separately in $APPDATA\tempest-broadcast-system and is never an
+  ; installer payload or installation target.
+  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Tempest Broadcast System"
 
   ${GetParameters} $R0
   ClearErrors
@@ -122,6 +124,11 @@ FunctionEnd
 Function un.onInit
   SetShellVarContext current
   SetRegView 64
+  StrCpy $R0 "$LOCALAPPDATA\Programs\Tempest Broadcast System"
+  ${If} $INSTDIR != $R0
+    MessageBox MB_ICONSTOP|MB_OK "For safety, ${PRODUCT_NAME} can only uninstall its dedicated application folder. User settings were not changed."
+    Abort
+  ${EndIf}
 FunctionEnd
 
 Section "${PRODUCT_NAME}" SectionMain
@@ -171,5 +178,17 @@ Section "Uninstall"
   DeleteRegKey HKCU "${UNINSTALL_REGISTRY_KEY}"
   DeleteRegKey HKCU "${PRODUCT_REGISTRY_KEY}"
 
-  RMDir /r "$INSTDIR"
+  ; Remove only known application payload. Deliberately leave an unexpected
+  ; config folder or any other user-created content untouched.
+  RMDir /r "$INSTDIR\bin"
+  RMDir /r "$INSTDIR\data"
+  RMDir /r "$INSTDIR\licenses"
+  RMDir /r "$INSTDIR\obs-plugins"
+  Delete "$INSTDIR\AUTHORS"
+  Delete "$INSTDIR\COPYING"
+  Delete "$INSTDIR\NOTICE.txt"
+  Delete "$INSTDIR\PUBLIC_RELEASE.md"
+  Delete "$INSTDIR\RELEASE_NOTES_*.md"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR"
 SectionEnd

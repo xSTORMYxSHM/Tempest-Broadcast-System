@@ -362,6 +362,22 @@ function New-PublicInstaller {
 
     try {
         Expand-Archive -LiteralPath $SourceArchive -DestinationPath $installerStage
+
+        # Application packages must never carry user configuration. Besides
+        # keeping installed updates isolated from %APPDATA%, this also prevents
+        # a package from silently enabling portable mode and redirecting future
+        # settings into the replaceable application directory.
+        foreach ($forbiddenRoot in @('config', 'tempest-broadcast-system', 'obs-studio')) {
+            if (Test-Path -LiteralPath (Join-Path $installerStage $forbiddenRoot)) {
+                throw "The installer payload contains the forbidden user-data root '${forbiddenRoot}'."
+            }
+        }
+        foreach ($forbiddenMarker in @('portable_mode', 'portable_mode.txt', 'obs_portable_mode', 'obs_portable_mode.txt')) {
+            if (Test-Path -LiteralPath (Join-Path $installerStage $forbiddenMarker)) {
+                throw "The installer payload contains the forbidden portable-mode marker '${forbiddenMarker}'."
+            }
+        }
+
         $mainExecutable = Join-Path $installerStage 'bin\64bit\tempest-broadcast-system.exe'
         if (-not (Test-Path -LiteralPath $mainExecutable)) {
             throw 'The signed installer payload is missing the main executable.'

@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -48,6 +49,7 @@ private:
 	struct Asset {
 		QString path;
 		QString name;
+		QString displayName;
 		QString bank;
 		qint64 bytes = 0;
 	};
@@ -83,6 +85,7 @@ private:
 	QTimer watcherDebounce;
 	QStringList roots;
 	QHash<QString, QString> banks;
+	QSet<QString> scannedPaths;
 	QVector<Asset> assets;
 	std::unique_ptr<QDirIterator> iterator;
 	int scanRootIndex = 0;

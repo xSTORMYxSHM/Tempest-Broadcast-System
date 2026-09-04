@@ -2,7 +2,7 @@
 
 Tempest Broadcast System is an open-source, Tempest-branded Windows live production workstation. It is built from OBS Studio and retains the upstream OBS license, authorship, and plugin compatibility.
 
-Current Tempest product version: **1.0.1**. The separate OBS engine version remains visible in the title bar so upstream compatibility can still be diagnosed accurately.
+Current Tempest product version: **1.0.5**. The separate OBS engine version remains visible in the title bar so upstream compatibility can still be diagnosed accurately.
 
 ## Identity and isolation
 
