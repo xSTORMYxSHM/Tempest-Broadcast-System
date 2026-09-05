@@ -592,8 +592,10 @@ QString TempestAssetVault::EnsureBrowserAsset(const QString &filePath)
 	QFile file(filePath);
 	int width = 1920;
 	int height = 1080;
+	bool containsAudio = false;
 	if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		const QString html = QString::fromUtf8(file.read(16384));
+		const QString html = QString::fromUtf8(file.read(262144));
+		containsAudio = html.contains(QStringLiteral("<audio"), Qt::CaseInsensitive);
 		const QRegularExpressionMatch size =
 			QRegularExpression(
 				QStringLiteral(
@@ -617,6 +619,10 @@ QString TempestAssetVault::EnsureBrowserAsset(const QString &filePath)
 	obs_data_set_int(settings, "fps", 30);
 	obs_data_set_bool(settings, "shutdown", true);
 	obs_data_set_bool(settings, "restart_when_active", false);
+	// Audio-bearing Vault elements (including the internal SHR radio) belong in
+	// the OBS mixer.  This makes them available to Audio Reactor and keeps their
+	// volume/mute state under Broadcast control.
+	obs_data_set_bool(settings, "reroute_audio", containsAudio);
 	obs_data_set_string(settings, "css", "body { background-color: rgba(0, 0, 0, 0); overflow: hidden; }");
 	if (source) {
 		if (strcmp(obs_source_get_unversioned_id(source), "browser_source") != 0) {

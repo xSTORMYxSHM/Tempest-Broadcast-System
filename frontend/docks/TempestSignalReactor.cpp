@@ -12,6 +12,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
@@ -43,7 +44,7 @@ struct AudioEntry {
 	QString uuid;
 };
 
-int SuggestedSourceIndex(QComboBox *selector, const QStringList &terms)
+int SuggestedSourceIndex(QComboBox *selector, const QStringList &terms, bool fallbackToFirst = true)
 {
 	for (const QString &term : terms) {
 		for (int index = 1; index < selector->count(); ++index) {
@@ -51,7 +52,7 @@ int SuggestedSourceIndex(QComboBox *selector, const QStringList &terms)
 				return index;
 		}
 	}
-	return selector->count() > 1 ? 1 : 0;
+	return fallbackToFirst && selector->count() > 1 ? 1 : 0;
 }
 
 bool IsTempestBrowserSource(obs_source_t *source)
@@ -67,11 +68,22 @@ bool EnableTempestBrowserLifecycle(void *, obs_source_t *source)
 	if (!IsTempestBrowserSource(source))
 		return true;
 	OBSDataAutoRelease settings = obs_source_get_settings(source);
+	bool containsAudio = false;
+	if (obs_data_get_bool(settings, "is_local_file")) {
+		const char *localFile = obs_data_get_string(settings, "local_file");
+		QFile file(QString::fromUtf8(localFile ? localFile : ""));
+		if (file.open(QIODevice::ReadOnly | QIODevice::Text))
+			containsAudio = QString::fromUtf8(file.read(262144))
+						.contains(QStringLiteral("<audio"), Qt::CaseInsensitive);
+	}
 	if (!obs_data_get_bool(settings, "shutdown") || !obs_data_get_bool(settings, "fps_custom") ||
-	    obs_data_get_int(settings, "fps") != 30) {
+	    obs_data_get_int(settings, "fps") != 30 ||
+	    (containsAudio && !obs_data_get_bool(settings, "reroute_audio"))) {
 		obs_data_set_bool(settings, "shutdown", true);
 		obs_data_set_bool(settings, "fps_custom", true);
 		obs_data_set_int(settings, "fps", 30);
+		if (containsAudio)
+			obs_data_set_bool(settings, "reroute_audio", true);
 		obs_source_update(source, settings);
 	}
 	return true;
@@ -101,6 +113,7 @@ TempestSignalReactor::TempestSignalReactor(OBSBasic *main, QWidget *parent) : OB
 	EnableContentScaling(objectName());
 	EnsureOutputDirectory();
 	CreateMeter(desktopChannel);
+	CreateMeter(mediaChannel);
 	CreateMeter(microphoneChannel);
 	LoadState();
 
@@ -111,6 +124,10 @@ TempestSignalReactor::TempestSignalReactor(OBSBasic *main, QWidget *parent) : OB
 
 	RefreshAudioSources();
 	QTimer::singleShot(3500, this, &TempestSignalReactor::RefreshAudioSources);
+	auto *audioSourceRefreshTimer = new QTimer(this);
+	audioSourceRefreshTimer->setInterval(2000);
+	connect(audioSourceRefreshTimer, &QTimer::timeout, this, &TempestSignalReactor::RefreshAudioSources);
+	audioSourceRefreshTimer->start();
 	// Scene collections finish loading after the docks are constructed.  Delay the
 	// one-time browser-source migration so it sees the restored scene sources.
 	QTimer::singleShot(6000, this, [this]() {
@@ -126,6 +143,7 @@ TempestSignalReactor::~TempestSignalReactor()
 	if (telemetryTimer)
 		telemetryTimer->stop();
 	DestroyMeter(desktopChannel);
+	DestroyMeter(mediaChannel);
 	DestroyMeter(microphoneChannel);
 }
 
@@ -185,7 +203,7 @@ void TempestSignalReactor::BuildInterface()
 	auto *audioTitle = new QLabel(QStringLiteral("1. Choose what to listen to"), audioFrame);
 	audioTitle->setObjectName(QStringLiteral("reactorSectionTitle"));
 	auto *audioHint = new QLabel(
-		QStringLiteral("Choose your computer audio and microphone. The meters confirm that Broadcast can hear them."),
+		QStringLiteral("Choose any Broadcast audio source, including an internal radio or media source, and an optional microphone. The meters confirm what reactive elements can hear."),
 		audioFrame);
 	audioHint->setObjectName(QStringLiteral("reactorSubtitle"));
 	audioHint->setWordWrap(true);
@@ -206,6 +224,7 @@ void TempestSignalReactor::BuildInterface()
 		audioLayout->addWidget(meter);
 	};
 	addChannel(QStringLiteral("Computer / desktop audio"), desktopSource, desktopMeter);
+	addChannel(QStringLiteral("Internal radio / media"), mediaSource, mediaMeter);
 	addChannel(QStringLiteral("Microphone / voice"), microphoneSource, microphoneMeter);
 	auto *refresh = new QPushButton(QStringLiteral("Refresh audio sources"), audioFrame);
 	refresh->setAccessibleName(QStringLiteral("Refresh Audio Reactor sources"));
@@ -295,6 +314,12 @@ void TempestSignalReactor::BuildInterface()
 	desktopSensitivity->setDecimals(1);
 	desktopSensitivity->setSuffix(QStringLiteral(" x"));
 	desktopSensitivity->setAccessibleName(QStringLiteral("Computer audio sensitivity"));
+	mediaSensitivity = new QDoubleSpinBox(tuningFrame);
+	mediaSensitivity->setRange(0.0, 2.5);
+	mediaSensitivity->setSingleStep(0.1);
+	mediaSensitivity->setDecimals(1);
+	mediaSensitivity->setSuffix(QStringLiteral(" x"));
+	mediaSensitivity->setAccessibleName(QStringLiteral("Internal radio and media sensitivity"));
 	microphoneSensitivity = new QDoubleSpinBox(tuningFrame);
 	microphoneSensitivity->setRange(0.0, 2.5);
 	microphoneSensitivity->setSingleStep(0.1);
@@ -349,6 +374,7 @@ void TempestSignalReactor::BuildInterface()
 	auto *tuningForm = new QFormLayout();
 	tuningForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 	tuningForm->addRow(QStringLiteral("Computer sensitivity"), desktopSensitivity);
+	tuningForm->addRow(QStringLiteral("Radio / media sensitivity"), mediaSensitivity);
 	tuningForm->addRow(QStringLiteral("Microphone sensitivity"), microphoneSensitivity);
 	tuningForm->addRow(QStringLiteral("Beat sensitivity"), beatSensitivity);
 	tuningForm->addRow(QStringLiteral("Ignore quiet audio"), reactionThreshold);
@@ -577,12 +603,14 @@ void TempestSignalReactor::BuildInterface()
 
 	connect(refresh, &QPushButton::clicked, this, &TempestSignalReactor::RefreshAudioSources);
 	connect(desktopSource, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::AttachDesktopSource);
+	connect(mediaSource, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::AttachMediaSource);
 	connect(microphoneSource, &QComboBox::currentIndexChanged, this, &TempestSignalReactor::AttachMicrophoneSource);
 	connect(reactorEnabled, &QCheckBox::toggled, this, [this]() {
 		SaveState();
 		RefreshSourceNetworkCircuitMonitors();
 	});
 	connect(desktopSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
+	connect(mediaSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(microphoneSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(beatSensitivity, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
 	connect(smoothing, &QDoubleSpinBox::valueChanged, this, &TempestSignalReactor::SaveState);
@@ -849,10 +877,12 @@ void TempestSignalReactor::LoadState()
 	reactorEnabled->setChecked(!config_has_user_value(config, ConfigSection, "Enabled") ||
 				   config_get_bool(config, ConfigSection, "Enabled"));
 	const double desktopGain = config_get_double(config, ConfigSection, "DesktopSensitivity");
+	const double mediaGain = config_get_double(config, ConfigSection, "MediaSensitivity");
 	const double microphoneGain = config_get_double(config, ConfigSection, "MicrophoneSensitivity");
 	const double savedBeatSensitivity = config_get_double(config, ConfigSection, "BeatSensitivity");
 	const double savedSmoothing = config_get_double(config, ConfigSection, "Smoothing");
 	desktopSensitivity->setValue(desktopGain > 0.0 ? desktopGain : 1.0);
+	mediaSensitivity->setValue(mediaGain > 0.0 ? mediaGain : 1.0);
 	microphoneSensitivity->setValue(microphoneGain > 0.0 ? microphoneGain : 1.2);
 	beatSensitivity->setValue(savedBeatSensitivity > 0.0 ? savedBeatSensitivity : 1.8);
 	smoothing->setValue(savedSmoothing >= 0.50 ? savedSmoothing : 0.82);
@@ -925,8 +955,10 @@ void TempestSignalReactor::LoadState()
 						? std::clamp(savedExternalCooldown, 0.0, 10.0)
 						: 0.8);
 	const char *desktopUuid = config_get_string(config, ConfigSection, "DesktopSourceUuid");
+	const char *mediaUuid = config_get_string(config, ConfigSection, "MediaSourceUuid");
 	const char *microphoneUuid = config_get_string(config, ConfigSection, "MicrophoneSourceUuid");
 	configuredDesktopUuid = QString::fromUtf8(desktopUuid ? desktopUuid : "");
+	configuredMediaUuid = QString::fromUtf8(mediaUuid ? mediaUuid : "");
 	configuredMicrophoneUuid = QString::fromUtf8(microphoneUuid ? microphoneUuid : "");
 	if (configuredDesktopUuid.isEmpty()) {
 		const char *legacyUuid = config_get_string(config, "TempestControlDeck", "AudioSourceUuid");
@@ -942,6 +974,7 @@ void TempestSignalReactor::SaveState()
 	config_t *config = App()->GetUserConfig();
 	config_set_bool(config, ConfigSection, "Enabled", reactorEnabled->isChecked());
 	config_set_double(config, ConfigSection, "DesktopSensitivity", desktopSensitivity->value());
+	config_set_double(config, ConfigSection, "MediaSensitivity", mediaSensitivity->value());
 	config_set_double(config, ConfigSection, "MicrophoneSensitivity", microphoneSensitivity->value());
 	config_set_double(config, ConfigSection, "BeatSensitivity", beatSensitivity->value());
 	config_set_double(config, ConfigSection, "Smoothing", smoothing->value());
@@ -973,8 +1006,10 @@ void TempestSignalReactor::SaveState()
 	config_set_double(config, ConfigSection, "ExternalEventCooldown", externalEventCooldown->value());
 	if (audioSourcesLoaded) {
 		configuredDesktopUuid = desktopSource->currentData().toString();
+		configuredMediaUuid = mediaSource->currentData().toString();
 		configuredMicrophoneUuid = microphoneSource->currentData().toString();
 		config_set_string(config, ConfigSection, "DesktopSourceUuid", QT_TO_UTF8(configuredDesktopUuid));
+		config_set_string(config, ConfigSection, "MediaSourceUuid", QT_TO_UTF8(configuredMediaUuid));
 		config_set_string(config, ConfigSection, "MicrophoneSourceUuid", QT_TO_UTF8(configuredMicrophoneUuid));
 	}
 	config_save_safe(config, "tmp", nullptr);
@@ -1045,8 +1080,19 @@ void TempestSignalReactor::RefreshAudioSources()
 	std::sort(entries.begin(), entries.end(), [](const AudioEntry &left, const AudioEntry &right) {
 		return left.name.compare(right.name, Qt::CaseInsensitive) < 0;
 	});
+	QString fingerprint;
+	for (const AudioEntry &entry : entries) {
+		fingerprint += entry.uuid;
+		fingerprint += QLatin1Char('\x1f');
+		fingerprint += entry.name;
+		fingerprint += QLatin1Char('\n');
+	}
+	if (audioSourcesLoaded && fingerprint == audioSourceFingerprint)
+		return;
+	audioSourceFingerprint = fingerprint;
 
-	auto populate = [&entries](QComboBox *selector, const QString &wanted, const QStringList &suggestions) {
+	auto populate = [&entries](QComboBox *selector, const QString &wanted, const QStringList &suggestions,
+				 bool fallbackToFirst = true) {
 		QSignalBlocker blocker(selector);
 		selector->clear();
 		selector->addItem(QStringLiteral("OFF // NO SOURCE"), QString());
@@ -1054,15 +1100,20 @@ void TempestSignalReactor::RefreshAudioSources()
 			selector->addItem(entry.name, entry.uuid);
 		int selected = wanted.isEmpty() ? -1 : selector->findData(wanted);
 		if (selected < 0)
-			selected = SuggestedSourceIndex(selector, suggestions);
+			selected = SuggestedSourceIndex(selector, suggestions, fallbackToFirst);
 		selector->setCurrentIndex(std::max(0, selected));
 	};
 	populate(desktopSource, configuredDesktopUuid,
 		 {QStringLiteral("Desktop Audio"), QStringLiteral("Application Audio"), QStringLiteral("Output")});
+	populate(mediaSource, configuredMediaUuid,
+		 {QStringLiteral("Tempest Vault // radio"), QStringLiteral("Radio"), QStringLiteral("VLC"),
+		  QStringLiteral("Media"), QStringLiteral("Music"), QStringLiteral("Player")},
+		 false);
 	populate(microphoneSource, configuredMicrophoneUuid,
 		 {QStringLiteral("Mic/Aux"), QStringLiteral("Microphone"), QStringLiteral("Mic")});
 	audioSourcesLoaded = true;
 	AttachDesktopSource();
+	AttachMediaSource();
 	AttachMicrophoneSource();
 	SaveState();
 	SetStatus(entries.empty() ? QStringLiteral("NO AUDIO SOURCES DETECTED // REFRESH AFTER SCENE LOAD")
@@ -1088,6 +1139,12 @@ void TempestSignalReactor::AttachChannel(SignalChannel &channel, QComboBox *sele
 void TempestSignalReactor::AttachDesktopSource()
 {
 	AttachChannel(desktopChannel, desktopSource, QStringLiteral("DESKTOP ENERGY"));
+	SaveState();
+}
+
+void TempestSignalReactor::AttachMediaSource()
+{
+	AttachChannel(mediaChannel, mediaSource, QStringLiteral("RADIO / MEDIA"));
 	SaveState();
 }
 
@@ -1520,18 +1577,24 @@ void TempestSignalReactor::PublishTelemetry()
 	const float desktopInput =
 		std::clamp(desktopChannel.rawLevel.load(std::memory_order_relaxed) * (float)desktopSensitivity->value(),
 			   0.0f, 1.5f);
+	const float mediaInput =
+		std::clamp(mediaChannel.rawLevel.load(std::memory_order_relaxed) * (float)mediaSensitivity->value(),
+			   0.0f, 1.5f);
 	const float microphoneInput = std::clamp(microphoneChannel.rawLevel.load(std::memory_order_relaxed) *
 							 (float)microphoneSensitivity->value(),
 						 0.0f, 1.5f);
 	float desktop = processChannel(desktopChannel, desktopInput);
+	float media = processChannel(mediaChannel, mediaInput);
 	float microphone = processChannel(microphoneChannel, microphoneInput);
-	beatBaseline += (desktopInput - beatBaseline) * (1.0f - std::pow(1.0f - 0.055f, 2.0f));
-	const float transient = std::max(0.0f, desktopInput - beatBaseline);
+	const float musicInput = std::max(desktopInput, mediaInput);
+	beatBaseline += (musicInput - beatBaseline) * (1.0f - std::pow(1.0f - 0.055f, 2.0f));
+	const float transient = std::max(0.0f, musicInput - beatBaseline);
 	beatLevel = std::max(transient * (float)beatSensitivity->value() * 2.6f, beatLevel * std::pow(0.68f, 2.0f));
 	float beat = std::clamp(beatLevel, 0.0f, 1.5f);
 	manualPulse *= decay;
 	if (!reactorEnabled->isChecked()) {
 		desktop = 0.0f;
+		media = 0.0f;
 		microphone = 0.0f;
 		beat = 0.0f;
 		beatBaseline = 0.0f;
@@ -1545,19 +1608,22 @@ void TempestSignalReactor::PublishTelemetry()
 		return std::clamp((level - threshold) / std::max(0.01f, 1.0f - threshold), 0.0f, 1.5f);
 	};
 	desktop = applyThreshold(desktop);
+	media = applyThreshold(media);
 	microphone = applyThreshold(microphone);
 	beat = applyThreshold(beat);
 	const float pulse = applyThreshold(manualPulse);
-	const float master = std::clamp(std::max({desktop, microphone, pulse}), 0.0f, 1.5f);
+	const float master = std::clamp(std::max({desktop, media, microphone, pulse}), 0.0f, 1.5f);
 	emit LevelsUpdated(master, desktop, microphone, beat);
 	if (isVisible()) {
 		desktopMeter->setValue((int)(std::min(desktop, 1.0f) * 1000.0f));
+		mediaMeter->setValue((int)(std::min(media, 1.0f) * 1000.0f));
 		microphoneMeter->setValue((int)(std::min(microphone, 1.0f) * 1000.0f));
 		beatMeter->setValue((int)(std::min(beat, 1.0f) * 1000.0f));
 		masterMeter->setValue((int)(std::min(master, 1.0f) * 1000.0f));
-		const QString status = QStringLiteral("MASTER %1% // DESKTOP %2% // VOICE %3% // BEAT %4%")
+		const QString status = QStringLiteral("MASTER %1% // DESKTOP %2% // MEDIA %3% // VOICE %4% // BEAT %5%")
 					       .arg(qRound(master * 100.0f), 3)
 					       .arg(qRound(desktop * 100.0f), 3)
+					       .arg(qRound(media * 100.0f), 3)
 					       .arg(qRound(microphone * 100.0f), 3)
 					       .arg(qRound(beat * 100.0f), 3);
 		if (statusLabel->text() != status)
@@ -1570,6 +1636,7 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("level"), master);
 	telemetry.insert(QStringLiteral("master"), master);
 	telemetry.insert(QStringLiteral("desktop"), desktop);
+	telemetry.insert(QStringLiteral("media"), media);
 	telemetry.insert(QStringLiteral("microphone"), microphone);
 	telemetry.insert(QStringLiteral("beat"), beat);
 	telemetry.insert(QStringLiteral("pulse"), pulse);

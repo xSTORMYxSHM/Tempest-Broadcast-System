@@ -75,6 +75,7 @@ signals:
 private slots:
 	void RefreshAudioSources();
 	void AttachDesktopSource();
+	void AttachMediaSource();
 	void AttachMicrophoneSource();
 	void PublishTelemetry();
 	void SaveState();
@@ -109,8 +110,10 @@ private:
 	QPointer<OBSBasic> main;
 	QPointer<QCheckBox> reactorEnabled;
 	QPointer<QComboBox> desktopSource;
+	QPointer<QComboBox> mediaSource;
 	QPointer<QComboBox> microphoneSource;
 	QPointer<QDoubleSpinBox> desktopSensitivity;
+	QPointer<QDoubleSpinBox> mediaSensitivity;
 	QPointer<QDoubleSpinBox> microphoneSensitivity;
 	QPointer<QDoubleSpinBox> beatSensitivity;
 	QPointer<QDoubleSpinBox> smoothing;
@@ -123,6 +126,7 @@ private:
 	QPointer<QDoubleSpinBox> reactionTestStrength;
 	QPointer<QCheckBox> reducedMotion;
 	QPointer<QProgressBar> desktopMeter;
+	QPointer<QProgressBar> mediaMeter;
 	QPointer<QProgressBar> microphoneMeter;
 	QPointer<QProgressBar> beatMeter;
 	QPointer<QProgressBar> masterMeter;
@@ -154,12 +158,14 @@ private:
 	QPointer<QTimer> telemetryTimer;
 
 	SignalChannel desktopChannel;
+	SignalChannel mediaChannel;
 	SignalChannel microphoneChannel;
 	QHash<obs_hotkey_id, float> pulseHotkeys;
 	QHash<obs_hotkey_id, QString> networkHotkeys;
 	QHash<obs_hotkey_id, QString> externalEventHotkeys;
 	QHash<QString, qint64> externalEventLastTrigger;
 	QString configuredDesktopUuid;
+	QString configuredMediaUuid;
 	QString configuredMicrophoneUuid;
 	QString telemetryPath;
 	float manualPulse = 0.0f;
@@ -175,6 +181,7 @@ private:
 	qint64 activeExternalEventUntil = 0;
 	quint64 externalEventSequence = 0;
 	float activeExternalEventStrength = 0.0f;
+	QString audioSourceFingerprint;
 	bool audioSourcesLoaded = false;
 	bool loadingState = false;
 	bool webSocketReady = false;

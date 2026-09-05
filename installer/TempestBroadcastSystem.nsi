@@ -59,7 +59,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (C) Tempest Mainframe con
 !define MUI_WELCOMEPAGE_TITLE "Install ${PRODUCT_NAME} ${PRODUCT_VERSION}"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
 !define MUI_FINISHPAGE_RUN_TEXT "Start ${PRODUCT_NAME}"
-!define MUI_DIRECTORYPAGE_TEXT_TOP "Choose the installation folder. For safe updates and removal, the folder name must end with '${PRODUCT_NAME}'. Existing custom installations are also supported."
+!define MUI_DIRECTORYPAGE_TEXT_TOP "Choose an empty folder or an existing ${PRODUCT_NAME} installation. This location will be remembered for future updates and removal."
 !define MUI_STARTMENUPAGE_REGISTRY_ROOT HKCU
 !define MUI_STARTMENUPAGE_REGISTRY_KEY "${PRODUCT_REGISTRY_KEY}"
 !define MUI_STARTMENUPAGE_REGISTRY_VALUENAME "StartMenuFolder"
@@ -70,6 +70,7 @@ Var UpdateMode
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PROJECT_ROOT}\COPYING"
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirectoryPageLeave
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_STARTMENU Application $StartMenuFolder
 !insertmacro MUI_PAGE_INSTFILES
@@ -81,30 +82,49 @@ Var UpdateMode
 
 !insertmacro MUI_LANGUAGE "English"
 
-!macro ValidateInstallDirectory SafeLabel UnsafeLabel
+!macro ValidateInstallDirectory SafeLabel UnsafeLabel LabelPrefix
   GetFullPathName $R0 "$INSTDIR"
   ${GetRoot} "$R0" $R1
   ${If} $R0 == $R1
     Goto ${UnsafeLabel}
   ${EndIf}
 
-  ${GetFileName} "$R0" $R1
-  ${If} $R1 == "${PRODUCT_NAME}"
-    Goto ${SafeLabel}
+  ; Never place application files in the settings directory or one of its
+  ; children. Settings must remain independent from install/update cleanup.
+  GetFullPathName $R1 "$APPDATA\tempest-broadcast-system"
+  StrLen $R2 "$R1"
+  StrCpy $R3 "$R0" $R2
+  ${If} $R3 == $R1
+    StrCpy $R3 "$R0" 1 $R2
+    ${If} $R3 == ""
+      Goto ${UnsafeLabel}
+    ${ElseIf} $R3 == "\"
+      Goto ${UnsafeLabel}
+    ${EndIf}
   ${EndIf}
 
-  ; Preserve upgrades from older releases that were installed in a custom
-  ; folder name, but only when the registered path and product executable both
-  ; prove that this is an existing Tempest installation.
-  ReadRegStr $R2 HKCU "${PRODUCT_REGISTRY_KEY}" "InstallLocation"
-  ${If} $R2 == ""
-    Goto ${UnsafeLabel}
-  ${EndIf}
-  GetFullPathName $R2 "$R2"
-  ${If} $R0 != $R2
-    Goto ${UnsafeLabel}
-  ${EndIf}
-  IfFileExists "$R0\${PRODUCT_EXECUTABLE}" ${SafeLabel} ${UnsafeLabel}
+  ; An existing Tempest application folder is a valid update target regardless
+  ; of its final folder name.
+  IfFileExists "$R0\${PRODUCT_EXECUTABLE}" ${SafeLabel} 0
+
+  ; A new custom folder can use any name, but it must not already contain
+  ; unrelated content. This keeps uninstall cleanup away from shared folders.
+  ClearErrors
+  FindFirst $R2 $R3 "$R0\*"
+  IfErrors ${SafeLabel} 0
+${LabelPrefix}_scan_entry:
+  StrCmp $R3 "." ${LabelPrefix}_next_entry
+  StrCmp $R3 ".." ${LabelPrefix}_next_entry
+  FindClose $R2
+  Goto ${UnsafeLabel}
+${LabelPrefix}_next_entry:
+  ClearErrors
+  FindNext $R2 $R3
+  IfErrors ${LabelPrefix}_empty_directory 0
+  Goto ${LabelPrefix}_scan_entry
+${LabelPrefix}_empty_directory:
+  FindClose $R2
+  Goto ${SafeLabel}
 !macroend
 
 !ifdef SIGN_SCRIPT
@@ -139,12 +159,13 @@ Function .onInit
   ${EndIf}
 FunctionEnd
 
-Function .onVerifyInstDir
-  !insertmacro ValidateInstallDirectory valid_install_directory invalid_install_directory
+Function DirectoryPageLeave
+  !insertmacro ValidateInstallDirectory valid_install_directory invalid_install_directory directory_page
+invalid_install_directory:
+  MessageBox MB_ICONEXCLAMATION|MB_OK "Choose an empty folder or an existing ${PRODUCT_NAME} installation. Drive roots, the settings folder, and non-empty shared folders are not supported."
+  Abort
 valid_install_directory:
   Return
-invalid_install_directory:
-  Abort
 FunctionEnd
 
 Function .onInstSuccess
@@ -178,9 +199,9 @@ FunctionEnd
 
 Section "${PRODUCT_NAME}" SectionMain
   SectionIn RO
-  !insertmacro ValidateInstallDirectory valid_section_install_directory invalid_section_install_directory
+  !insertmacro ValidateInstallDirectory valid_section_install_directory invalid_section_install_directory section_install
 invalid_section_install_directory:
-  MessageBox MB_ICONSTOP|MB_OK "Choose a dedicated folder ending with '${PRODUCT_NAME}'. User settings cannot be used as the installation folder." /SD IDOK
+  MessageBox MB_ICONSTOP|MB_OK "Choose an empty folder or an existing ${PRODUCT_NAME} installation. Drive roots, the settings folder, and non-empty shared folders are not supported." /SD IDOK
   SetErrorLevel 2
   Abort
 valid_section_install_directory:

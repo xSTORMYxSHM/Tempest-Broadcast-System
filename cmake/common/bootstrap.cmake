@@ -46,7 +46,7 @@ set(OBS_PRODUCT_NAME "Tempest Broadcast System")
 set(OBS_WEBSITE "https://www.obsproject.com")
 set(OBS_COMMENTS "Open-source Tempest Mainframe broadcast workstation, built on OBS Studio")
 set(OBS_LEGAL_COPYRIGHT "(C) Tempest Mainframe contributors")
-set(TEMPEST_PRODUCT_VERSION "1.0.6" CACHE STRING "Tempest Broadcast product version")
+set(TEMPEST_PRODUCT_VERSION "1.1.0" CACHE STRING "Tempest Broadcast product version")
 
 if(NOT TEMPEST_PRODUCT_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
   message(FATAL_ERROR "TEMPEST_PRODUCT_VERSION must begin with a numeric major.minor.patch version")

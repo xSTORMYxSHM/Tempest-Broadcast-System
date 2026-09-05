@@ -178,6 +178,7 @@ private:
 			if (file.open(QIODevice::ReadOnly)) {
 				const QJsonObject data = QJsonDocument::fromJson(file.readAll()).object();
 				const QString key = signal == QStringLiteral("desktop") ? QStringLiteral("desktop")
+						    : signal == QStringLiteral("media") ? QStringLiteral("media")
 						    : signal == QStringLiteral("microphone")
 							    ? QStringLiteral("microphone")
 						    : signal == QStringLiteral("beat") ? QStringLiteral("beat")
@@ -416,6 +417,7 @@ void TempestHUDComposer::BuildInterface()
 	signalSelector = new QComboBox(root);
 	signalSelector->addItem(QStringLiteral("MASTER MIX"), QStringLiteral("master"));
 	signalSelector->addItem(QStringLiteral("DESKTOP ENERGY"), QStringLiteral("desktop"));
+	signalSelector->addItem(QStringLiteral("RADIO / MEDIA"), QStringLiteral("media"));
 	signalSelector->addItem(QStringLiteral("MICROPHONE / VOICE"), QStringLiteral("microphone"));
 	signalSelector->addItem(QStringLiteral("MUSIC TRANSIENT / BEAT"), QStringLiteral("beat"));
 	strengthField = new QDoubleSpinBox(root);
@@ -558,7 +560,7 @@ void TempestHUDComposer::SeedStarterElements()
 	radio.secondary = QStringLiteral("●  LIVE");
 	radio.browserUrl.clear();
 	radio.reaction = QStringLiteral("glow");
-	radio.signal = QStringLiteral("desktop");
+	radio.signal = QStringLiteral("media");
 	radio.strength = 0.8;
 	radio.starting = false;
 	radio.brb = false;
@@ -636,7 +638,7 @@ void TempestHUDComposer::LoadElements()
 			radio.secondary = QStringLiteral("●  LIVE");
 			radio.browserUrl.clear();
 			radio.reaction = QStringLiteral("glow");
-			radio.signal = QStringLiteral("desktop");
+			radio.signal = QStringLiteral("media");
 			radio.strength = 0.8;
 			radio.starting = false;
 			radio.brb = false;
@@ -994,7 +996,7 @@ function updateRadioClock(){if(s.type!=='radio')return;const elapsed=Math.max(0,
 function updateRadioButton(){radioToggle.textContent=radioAudio.paused?'▶':'Ⅱ';radioToggle.setAttribute('aria-label',radioAudio.paused?'Play radio':'Pause radio')}
 async function refreshRadio(){if(s.type!=='radio')return;const endpoint=radioEndpoint(s.browserUrl);if(!endpoint){radioState.textContent='STATION URL REQUIRED';return}try{const response=await fetch(endpoint.api+'?t='+Date.now(),{cache:'no-store'});if(!response.ok)throw new Error('radio api '+response.status);const data=await response.json(),song=data.now_playing?.song||{},station=data.station||{};radioTrack.textContent=song.title||song.text||'TRACK DATA UNAVAILABLE';radioArtist.textContent=song.artist||'AUTOMATED ROTATION';radioStation.textContent=station.name||s.primary||'RADIO PLAYER';radioState.textContent=data.live?.is_live?'● LIVE DJ':'● LIVE // AUTO DJ';radioListeners.textContent=String(data.listeners?.current??0).padStart(2,'0')+' LIVE';radioElapsed=Number(data.now_playing?.elapsed)||0;radioDuration=Number(data.now_playing?.duration)||0;radioSynced=Date.now();radioArt.src=song.art||station.art||'';const stream=station.listen_url||'';if(stream&&radioAudio.src!==stream){radioAudio.src=stream;radioAudio.load();radioAudio.play().catch(()=>{});}updateRadioClock();updateRadioButton()}catch(_){radioState.textContent='● DATA RETRY'}}
 radioToggle.addEventListener('click',()=>{if(radioAudio.paused)radioAudio.play().catch(()=>{});else radioAudio.pause()});radioAudio.addEventListener('play',updateRadioButton);radioAudio.addEventListener('pause',updateRadioButton);refreshRadio();setInterval(refreshRadio,15000);setInterval(updateRadioClock,1000);let level=0,phase=0;
-async function telemetry(){let raw=0,eventActive=false,eventEffect='';try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='microphone'?d.microphone:channel==='beat'?d.beat:(d.master??d.level),eventCircuit=String(d.externalEventCircuit||'all');eventActive=!!d.externalEventActive&&(eventCircuit==='all'||eventCircuit===elementCircuit);eventEffect=eventActive?String(d.externalEventEffect||'surge'):'';raw=Math.max(Number(routed)||0,Number(d.pulse)||0,eventActive?Number(d.externalEventStrength)||0:0);const eventAccent=eventActive&&/^#[0-9A-Fa-f]{6}$/.test(String(d.externalEventAccent||''))?String(d.externalEventAccent):'';root.style.setProperty('--accent',eventAccent||baseAccent)}}catch(_){}for(const cls of eventClasses)body.classList.remove(cls);body.classList.add(eventActive&&eventEffect?eventEffect:baseReaction);const threshold=Math.min(.95,Math.max(0,Number(s.threshold)||0)),target=Math.min(1.5,Math.max(0,(raw-threshold)/Math.max(.001,1-threshold))),baseAttack=Math.min(1,Math.max(.05,Number(s.attack)||.55)),baseDecay=Math.min(.98,Math.max(.5,Number(s.decay)||.82)),attack=1-Math.pow(1-baseAttack,100/60),decay=Math.pow(baseDecay,100/60);if(target>level)level+=(target-level)*attack;else level*=decay;phase+=.2;let react=level*Math.max(0,Number(s.strength)||0),idle=Math.min(.5,Math.max(0,Number(s.idle)||0)),activeReaction=eventActive?eventEffect:baseReaction;if(activeReaction==='pulse')react=Math.max(react,idle+idle*.45*Math.sin(phase));if(activeReaction==='glow')react*=.68;if(activeReaction==='surge')react*=1.28;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=activeReaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,100);
+async function telemetry(){let raw=0,eventActive=false,eventEffect='';try{const r=await fetch('./telemetry.json?t='+Date.now(),{cache:'no-store'});if(r.ok){const d=await r.json(),channel=s.signal||'master',routed=channel==='desktop'?d.desktop:channel==='media'?d.media:channel==='microphone'?d.microphone:channel==='beat'?d.beat:(d.master??d.level),eventCircuit=String(d.externalEventCircuit||'all');eventActive=!!d.externalEventActive&&(eventCircuit==='all'||eventCircuit===elementCircuit);eventEffect=eventActive?String(d.externalEventEffect||'surge'):'';raw=Math.max(Number(routed)||0,Number(d.pulse)||0,eventActive?Number(d.externalEventStrength)||0:0);const eventAccent=eventActive&&/^#[0-9A-Fa-f]{6}$/.test(String(d.externalEventAccent||''))?String(d.externalEventAccent):'';root.style.setProperty('--accent',eventAccent||baseAccent)}}catch(_){}for(const cls of eventClasses)body.classList.remove(cls);body.classList.add(eventActive&&eventEffect?eventEffect:baseReaction);const threshold=Math.min(.95,Math.max(0,Number(s.threshold)||0)),target=Math.min(1.5,Math.max(0,(raw-threshold)/Math.max(.001,1-threshold))),baseAttack=Math.min(1,Math.max(.05,Number(s.attack)||.55)),baseDecay=Math.min(.98,Math.max(.5,Number(s.decay)||.82)),attack=1-Math.pow(1-baseAttack,100/60),decay=Math.pow(baseDecay,100/60);if(target>level)level+=(target-level)*attack;else level*=decay;phase+=.2;let react=level*Math.max(0,Number(s.strength)||0),idle=Math.min(.5,Math.max(0,Number(s.idle)||0)),activeReaction=eventActive?eventEffect:baseReaction;if(activeReaction==='pulse')react=Math.max(react,idle+idle*.45*Math.sin(phase));if(activeReaction==='glow')react*=.68;if(activeReaction==='surge')react*=1.28;react=Math.min(1.8,Math.max(0,react));root.style.setProperty('--react',react.toFixed(3));root.style.setProperty('--glow',(8+react*42)+'px');const glitch=activeReaction==='glitch'&&react>.62?(Math.random()-.5)*react*9:0;root.style.setProperty('--shift',glitch.toFixed(2)+'px')}telemetry();setInterval(telemetry,100);
 </script></body></html>)TEMPEST");
 	html.replace(QStringLiteral("{{STATE_JSON}}"), json);
 	html.replace(
@@ -1034,7 +1036,10 @@ bool TempestHUDComposer::ApplySourceSettings(obs_source_t *source, const Element
 	obs_data_set_int(settings, "fps", 30);
 	obs_data_set_bool(settings, "shutdown", true);
 	obs_data_set_bool(settings, "restart_when_active", false);
-	obs_data_set_bool(settings, "reroute_audio", false);
+	// Radio elements must feed OBS' mixer so Audio Reactor can meter them and
+	// drive other reactive elements.  Silent visual elements keep the browser
+	// source's direct-audio path disabled.
+	obs_data_set_bool(settings, "reroute_audio", element.type == QStringLiteral("radio"));
 	obs_data_set_string(settings, "css", css.constData());
 	obs_source_update(source, settings);
 	return true;
