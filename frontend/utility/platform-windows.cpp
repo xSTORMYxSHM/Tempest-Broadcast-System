@@ -54,7 +54,21 @@ bool GetDataFilePath(const char *data, string &output)
 		return true;
 	}
 
-	return check_path(data, OBS_DATA_PATH "/obs-studio/", output);
+	if (check_path(data, OBS_DATA_PATH "/obs-studio/", output)) {
+		return true;
+	}
+
+	/* Installer, shortcut, shell, and updater launches can use different
+	 * working directories. Always fall back to the data directory relative to
+	 * the executable in bin/64bit so packaged resources remain discoverable. */
+	char *executableDataPath = os_get_executable_path_ptr(OBS_DATA_PATH "/obs-studio/");
+	if (!executableDataPath) {
+		return false;
+	}
+
+	const bool found = check_path(data, executableDataPath, output);
+	bfree(executableDataPath);
+	return found;
 }
 
 string GetDefaultVideoSavePath()

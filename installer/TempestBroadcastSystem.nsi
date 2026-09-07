@@ -84,11 +84,40 @@ Var InstallDirectoryError
 
 !insertmacro MUI_LANGUAGE "English"
 
+!macro ProbeWritableDirectory Directory NotWritableLabel LabelPrefix
+  ClearErrors
+  CreateDirectory "${Directory}"
+  IfErrors ${NotWritableLabel} 0
+  ClearErrors
+  FileOpen $R4 "${Directory}\.tempest-install-write-test.tmp" w
+  IfErrors ${NotWritableLabel} 0
+  FileWrite $R4 "Tempest Broadcast System install write test"
+  IfErrors ${LabelPrefix}_write_failed 0
+  FileClose $R4
+  ClearErrors
+  Delete "${Directory}\.tempest-install-write-test.tmp"
+  IfErrors ${NotWritableLabel} 0
+  Goto ${LabelPrefix}_complete
+${LabelPrefix}_write_failed:
+  FileClose $R4
+  Delete "${Directory}\.tempest-install-write-test.tmp"
+  Goto ${NotWritableLabel}
+${LabelPrefix}_complete:
+!macroend
+
 !macro ValidateInstallDirectory SafeLabel UnsafeLabel LabelPrefix
   StrCpy $InstallDirectoryError ""
-  GetFullPathName $R0 "$INSTDIR"
+  ; $INSTDIR is already absolute. GetFullPathName returns an empty string when
+  ; its target does not exist, which made a fresh folder compare equal to an
+  ; empty root and caused the 1.1.1 installer to reject every new destination.
+  StrCpy $R0 "$INSTDIR"
   ${GetRoot} "$R0" $R1
   ${If} $R0 == $R1
+    StrCpy $InstallDirectoryError "Drive roots cannot be used as the application folder."
+    Goto ${UnsafeLabel}
+  ${EndIf}
+  StrCpy $R3 "$R1\"
+  ${If} $R0 == $R3
     StrCpy $InstallDirectoryError "Drive roots cannot be used as the application folder."
     Goto ${UnsafeLabel}
   ${EndIf}
@@ -109,16 +138,21 @@ Var InstallDirectoryError
     ${EndIf}
   ${EndIf}
 
-  ; An existing Tempest application folder is a valid update target regardless
-  ; of its final folder name, but it must still be writable.
+  ; An existing Tempest application folder is a valid update or repair target
+  ; regardless of its final folder name. Probe its critical child directories
+  ; before overwriting any files so inherited ACL problems fail safely.
   IfFileExists "$R0\${PRODUCT_EXECUTABLE}" ${LabelPrefix}_existing_install 0
+
+  ; Create and write-test a new destination before checking its contents so a
+  ; path that does not exist yet is handled as a normal fresh installation.
+  StrCpy $FreshInstall "1"
+  !insertmacro ProbeWritableDirectory "$R0" ${LabelPrefix}_not_writable ${LabelPrefix}_new_root_probe
 
   ; A new custom folder can use any name, but it must not already contain
   ; unrelated content. This keeps uninstall cleanup away from shared folders.
-  StrCpy $FreshInstall "1"
   ClearErrors
   FindFirst $R2 $R3 "$R0\*"
-  IfErrors ${LabelPrefix}_write_probe 0
+  IfErrors ${SafeLabel} 0
 ${LabelPrefix}_scan_entry:
   StrCmp $R3 "." ${LabelPrefix}_next_entry
   StrCmp $R3 ".." ${LabelPrefix}_next_entry
@@ -132,31 +166,15 @@ ${LabelPrefix}_next_entry:
   Goto ${LabelPrefix}_scan_entry
 ${LabelPrefix}_empty_directory:
   FindClose $R2
-  Goto ${LabelPrefix}_write_probe
+  Goto ${SafeLabel}
 
 ${LabelPrefix}_existing_install:
   StrCpy $FreshInstall "0"
-
-  ; Confirm Windows can create and write the chosen location before any payload
-  ; is extracted. This prevents a protected folder from leaving a launchable
-  ; executable without its required data and themes.
-${LabelPrefix}_write_probe:
-  ClearErrors
-  CreateDirectory "$R0"
-  IfErrors ${LabelPrefix}_not_writable 0
-  ClearErrors
-  FileOpen $R2 "$R0\.tempest-install-write-test.tmp" w
-  IfErrors ${LabelPrefix}_not_writable 0
-  FileWrite $R2 "Tempest Broadcast System install write test"
-  IfErrors ${LabelPrefix}_write_failed 0
-  FileClose $R2
-  ClearErrors
-  Delete "$R0\.tempest-install-write-test.tmp"
-  IfErrors ${LabelPrefix}_not_writable 0
+  !insertmacro ProbeWritableDirectory "$R0" ${LabelPrefix}_not_writable ${LabelPrefix}_existing_root_probe
+  !insertmacro ProbeWritableDirectory "$R0\bin\64bit" ${LabelPrefix}_not_writable ${LabelPrefix}_bin_probe
+  !insertmacro ProbeWritableDirectory "$R0\data\obs-studio\themes" ${LabelPrefix}_not_writable ${LabelPrefix}_theme_probe
+  !insertmacro ProbeWritableDirectory "$R0\obs-plugins\64bit" ${LabelPrefix}_not_writable ${LabelPrefix}_plugin_probe
   Goto ${SafeLabel}
-${LabelPrefix}_write_failed:
-  FileClose $R2
-  Delete "$R0\.tempest-install-write-test.tmp"
 ${LabelPrefix}_not_writable:
   StrCpy $InstallDirectoryError "Windows cannot create or write this folder. Choose a location owned by your account, such as the default folder under Local AppData. Program Files normally requires an administrator installer."
   Goto ${UnsafeLabel}
@@ -199,6 +217,7 @@ Function .onInit
   ${EndIf}
   SetShellVarContext current
   SetRegView 64
+  Delete "$TEMP\TempestBroadcastSystem-Installer.log"
 
   ${GetParameters} $R0
   ClearErrors
@@ -211,10 +230,24 @@ FunctionEnd
 Function DirectoryPageLeave
   !insertmacro ValidateInstallDirectory valid_install_directory invalid_install_directory directory_page
 invalid_install_directory:
+  Call WriteInstallerFailureLog
   MessageBox MB_ICONEXCLAMATION|MB_OK "$InstallDirectoryError"
   Abort
 valid_install_directory:
   Return
+FunctionEnd
+
+Function WriteInstallerFailureLog
+  ClearErrors
+  FileOpen $R9 "$TEMP\TempestBroadcastSystem-Installer.log" w
+  IfErrors failure_log_complete 0
+  FileWrite $R9 "Tempest Broadcast System ${PRODUCT_VERSION}$\r$\n"
+  FileWrite $R9 "Destination: $INSTDIR$\r$\n"
+  FileWrite $R9 "Validated destination: $R0$\r$\n"
+  FileWrite $R9 "Validation root: $R1$\r$\n"
+  FileWrite $R9 "Error: $InstallDirectoryError$\r$\n"
+  FileClose $R9
+failure_log_complete:
 FunctionEnd
 
 Function .onInstFailed
@@ -259,25 +292,30 @@ Section "${PRODUCT_NAME}" SectionMain
   SectionIn RO
   !insertmacro ValidateInstallDirectory valid_section_install_directory invalid_section_install_directory section_install
 invalid_section_install_directory:
+  Call WriteInstallerFailureLog
   MessageBox MB_ICONSTOP|MB_OK "$InstallDirectoryError" /SD IDOK
-  SetErrorLevel 2
+  SetErrorLevel 20
   Abort
 valid_section_install_directory:
   ClearErrors
   SetOutPath "$INSTDIR"
+  IfErrors install_output_directory_failed 0
+  ClearErrors
   File /r "${PAYLOAD_DIR}\*"
-  IfErrors install_payload_failed 0
+  IfErrors install_extraction_failed 0
 
   ; Do not register a partial installation. The application, updater, and both
   ; fallback themes are required for a valid first launch and recovery path.
-  IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 install_payload_failed
-  IfFileExists "$INSTDIR\${PRODUCT_UPDATER}" 0 install_payload_failed
-  IfFileExists "$INSTDIR\data\obs-studio\themes\Yami.obt" 0 install_payload_failed
-  IfFileExists "$INSTDIR\data\obs-studio\themes\System.obt" 0 install_payload_failed
+  IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 install_application_missing
+  IfFileExists "$INSTDIR\${PRODUCT_UPDATER}" 0 install_updater_missing
+  IfFileExists "$INSTDIR\data\obs-studio\themes\Yami.obt" 0 install_yami_theme_missing
+  IfFileExists "$INSTDIR\data\obs-studio\themes\System.obt" 0 install_system_theme_missing
+  IfFileExists "$INSTDIR\data\obs-studio\themes\Tempest.ovt" 0 install_tempest_theme_missing
+  IfFileExists "$INSTDIR\data\obs-studio\locale\en-US.ini" 0 install_locale_missing
 
   ClearErrors
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  IfErrors install_payload_failed 0
+  IfErrors install_uninstaller_failed 0
 
   WriteRegStr HKCU "${PRODUCT_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${PRODUCT_REGISTRY_KEY}" "Version" "${PRODUCT_VERSION}"
@@ -303,9 +341,45 @@ valid_section_install_directory:
   !insertmacro MUI_STARTMENU_WRITE_END
   Goto install_payload_ready
 
+install_output_directory_failed:
+  StrCpy $InstallDirectoryError "Windows could not open the selected installation folder."
+  SetErrorLevel 21
+  Goto install_payload_failed
+install_extraction_failed:
+  StrCpy $InstallDirectoryError "Windows could not extract every application file into the selected folder."
+  SetErrorLevel 22
+  Goto install_payload_failed
+install_application_missing:
+  StrCpy $InstallDirectoryError "The application executable is missing after extraction."
+  SetErrorLevel 23
+  Goto install_payload_failed
+install_updater_missing:
+  StrCpy $InstallDirectoryError "The manual updater is missing after extraction."
+  SetErrorLevel 24
+  Goto install_payload_failed
+install_yami_theme_missing:
+  StrCpy $InstallDirectoryError "The Yami fallback theme is missing after extraction."
+  SetErrorLevel 25
+  Goto install_payload_failed
+install_system_theme_missing:
+  StrCpy $InstallDirectoryError "The System fallback theme is missing after extraction."
+  SetErrorLevel 26
+  Goto install_payload_failed
+install_tempest_theme_missing:
+  StrCpy $InstallDirectoryError "The Tempest theme is missing after extraction."
+  SetErrorLevel 27
+  Goto install_payload_failed
+install_locale_missing:
+  StrCpy $InstallDirectoryError "The default locale file is missing after extraction."
+  SetErrorLevel 28
+  Goto install_payload_failed
+install_uninstaller_failed:
+  StrCpy $InstallDirectoryError "Windows could not create the application uninstaller."
+  SetErrorLevel 29
+  Goto install_payload_failed
 install_payload_failed:
-  MessageBox MB_ICONSTOP|MB_OK "Installation could not be completed. No shortcuts were created. If this was a new installation, the partial application files will be removed. Choose a writable folder and try again." /SD IDOK
-  SetErrorLevel 2
+  Call WriteInstallerFailureLog
+  MessageBox MB_ICONSTOP|MB_OK "Installation could not be completed. $InstallDirectoryError No shortcuts were created. If this was a new installation, the partial application files will be removed. Choose a writable folder and try again." /SD IDOK
   Abort
 install_payload_ready:
 SectionEnd
