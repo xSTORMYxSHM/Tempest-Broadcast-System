@@ -67,6 +67,8 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (C) Tempest Mainframe con
 
 Var StartMenuFolder
 Var UpdateMode
+Var FreshInstall
+Var InstallDirectoryError
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PROJECT_ROOT}\COPYING"
@@ -83,9 +85,11 @@ Var UpdateMode
 !insertmacro MUI_LANGUAGE "English"
 
 !macro ValidateInstallDirectory SafeLabel UnsafeLabel LabelPrefix
+  StrCpy $InstallDirectoryError ""
   GetFullPathName $R0 "$INSTDIR"
   ${GetRoot} "$R0" $R1
   ${If} $R0 == $R1
+    StrCpy $InstallDirectoryError "Drive roots cannot be used as the application folder."
     Goto ${UnsafeLabel}
   ${EndIf}
 
@@ -97,25 +101,29 @@ Var UpdateMode
   ${If} $R3 == $R1
     StrCpy $R3 "$R0" 1 $R2
     ${If} $R3 == ""
+      StrCpy $InstallDirectoryError "The Broadcast settings folder cannot be used as the application folder."
       Goto ${UnsafeLabel}
     ${ElseIf} $R3 == "\"
+      StrCpy $InstallDirectoryError "A folder inside the Broadcast settings folder cannot be used as the application folder."
       Goto ${UnsafeLabel}
     ${EndIf}
   ${EndIf}
 
   ; An existing Tempest application folder is a valid update target regardless
-  ; of its final folder name.
-  IfFileExists "$R0\${PRODUCT_EXECUTABLE}" ${SafeLabel} 0
+  ; of its final folder name, but it must still be writable.
+  IfFileExists "$R0\${PRODUCT_EXECUTABLE}" ${LabelPrefix}_existing_install 0
 
   ; A new custom folder can use any name, but it must not already contain
   ; unrelated content. This keeps uninstall cleanup away from shared folders.
+  StrCpy $FreshInstall "1"
   ClearErrors
   FindFirst $R2 $R3 "$R0\*"
-  IfErrors ${SafeLabel} 0
+  IfErrors ${LabelPrefix}_write_probe 0
 ${LabelPrefix}_scan_entry:
   StrCmp $R3 "." ${LabelPrefix}_next_entry
   StrCmp $R3 ".." ${LabelPrefix}_next_entry
   FindClose $R2
+  StrCpy $InstallDirectoryError "The selected folder contains files that do not belong to an existing ${PRODUCT_NAME} installation."
   Goto ${UnsafeLabel}
 ${LabelPrefix}_next_entry:
   ClearErrors
@@ -124,7 +132,48 @@ ${LabelPrefix}_next_entry:
   Goto ${LabelPrefix}_scan_entry
 ${LabelPrefix}_empty_directory:
   FindClose $R2
+  Goto ${LabelPrefix}_write_probe
+
+${LabelPrefix}_existing_install:
+  StrCpy $FreshInstall "0"
+
+  ; Confirm Windows can create and write the chosen location before any payload
+  ; is extracted. This prevents a protected folder from leaving a launchable
+  ; executable without its required data and themes.
+${LabelPrefix}_write_probe:
+  ClearErrors
+  CreateDirectory "$R0"
+  IfErrors ${LabelPrefix}_not_writable 0
+  ClearErrors
+  FileOpen $R2 "$R0\.tempest-install-write-test.tmp" w
+  IfErrors ${LabelPrefix}_not_writable 0
+  FileWrite $R2 "Tempest Broadcast System install write test"
+  IfErrors ${LabelPrefix}_write_failed 0
+  FileClose $R2
+  ClearErrors
+  Delete "$R0\.tempest-install-write-test.tmp"
+  IfErrors ${LabelPrefix}_not_writable 0
   Goto ${SafeLabel}
+${LabelPrefix}_write_failed:
+  FileClose $R2
+  Delete "$R0\.tempest-install-write-test.tmp"
+${LabelPrefix}_not_writable:
+  StrCpy $InstallDirectoryError "Windows cannot create or write this folder. Choose a location owned by your account, such as the default folder under Local AppData. Program Files normally requires an administrator installer."
+  Goto ${UnsafeLabel}
+!macroend
+
+!macro RemoveApplicationPayload
+  RMDir /r "$INSTDIR\bin"
+  RMDir /r "$INSTDIR\data"
+  RMDir /r "$INSTDIR\licenses"
+  RMDir /r "$INSTDIR\obs-plugins"
+  Delete "$INSTDIR\AUTHORS"
+  Delete "$INSTDIR\COPYING"
+  Delete "$INSTDIR\NOTICE.txt"
+  Delete "$INSTDIR\PUBLIC_RELEASE.md"
+  Delete "$INSTDIR\RELEASE_NOTES_*.md"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR"
 !macroend
 
 !ifdef SIGN_SCRIPT
@@ -162,10 +211,19 @@ FunctionEnd
 Function DirectoryPageLeave
   !insertmacro ValidateInstallDirectory valid_install_directory invalid_install_directory directory_page
 invalid_install_directory:
-  MessageBox MB_ICONEXCLAMATION|MB_OK "Choose an empty folder or an existing ${PRODUCT_NAME} installation. Drive roots, the settings folder, and non-empty shared folders are not supported."
+  MessageBox MB_ICONEXCLAMATION|MB_OK "$InstallDirectoryError"
   Abort
 valid_install_directory:
   Return
+FunctionEnd
+
+Function .onInstFailed
+  ; Never remove an existing installation after a failed update. For a fresh
+  ; install, remove only the known application payload that this installer may
+  ; have copied. User configuration lives outside $INSTDIR and is untouched.
+  ${If} $FreshInstall == "1"
+    !insertmacro RemoveApplicationPayload
+  ${EndIf}
 FunctionEnd
 
 Function .onInstSuccess
@@ -201,14 +259,25 @@ Section "${PRODUCT_NAME}" SectionMain
   SectionIn RO
   !insertmacro ValidateInstallDirectory valid_section_install_directory invalid_section_install_directory section_install
 invalid_section_install_directory:
-  MessageBox MB_ICONSTOP|MB_OK "Choose an empty folder or an existing ${PRODUCT_NAME} installation. Drive roots, the settings folder, and non-empty shared folders are not supported." /SD IDOK
+  MessageBox MB_ICONSTOP|MB_OK "$InstallDirectoryError" /SD IDOK
   SetErrorLevel 2
   Abort
 valid_section_install_directory:
+  ClearErrors
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD_DIR}\*"
+  IfErrors install_payload_failed 0
 
+  ; Do not register a partial installation. The application, updater, and both
+  ; fallback themes are required for a valid first launch and recovery path.
+  IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 install_payload_failed
+  IfFileExists "$INSTDIR\${PRODUCT_UPDATER}" 0 install_payload_failed
+  IfFileExists "$INSTDIR\data\obs-studio\themes\Yami.obt" 0 install_payload_failed
+  IfFileExists "$INSTDIR\data\obs-studio\themes\System.obt" 0 install_payload_failed
+
+  ClearErrors
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  IfErrors install_payload_failed 0
 
   WriteRegStr HKCU "${PRODUCT_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${PRODUCT_REGISTRY_KEY}" "Version" "${PRODUCT_VERSION}"
@@ -232,6 +301,13 @@ valid_section_install_directory:
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Check for Updates.lnk" "$INSTDIR\${PRODUCT_UPDATER}" "" "$INSTDIR\${PRODUCT_UPDATER}" 0
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Uninstall ${PRODUCT_NAME}.lnk" "$INSTDIR\Uninstall.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
+  Goto install_payload_ready
+
+install_payload_failed:
+  MessageBox MB_ICONSTOP|MB_OK "Installation could not be completed. No shortcuts were created. If this was a new installation, the partial application files will be removed. Choose a writable folder and try again." /SD IDOK
+  SetErrorLevel 2
+  Abort
+install_payload_ready:
 SectionEnd
 
 Section /o "Desktop shortcut" SectionDesktop
@@ -252,15 +328,5 @@ Section "Uninstall"
 
   ; Remove only known application payload. Deliberately leave an unexpected
   ; config folder or any other user-created content untouched.
-  RMDir /r "$INSTDIR\bin"
-  RMDir /r "$INSTDIR\data"
-  RMDir /r "$INSTDIR\licenses"
-  RMDir /r "$INSTDIR\obs-plugins"
-  Delete "$INSTDIR\AUTHORS"
-  Delete "$INSTDIR\COPYING"
-  Delete "$INSTDIR\NOTICE.txt"
-  Delete "$INSTDIR\PUBLIC_RELEASE.md"
-  Delete "$INSTDIR\RELEASE_NOTES_*.md"
-  Delete "$INSTDIR\Uninstall.exe"
-  RMDir "$INSTDIR"
+  !insertmacro RemoveApplicationPayload
 SectionEnd

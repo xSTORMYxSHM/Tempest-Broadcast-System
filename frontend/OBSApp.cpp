@@ -1092,7 +1092,7 @@ void OBSApp::AppInit()
 		throw "Failed to load locale";
 	}
 	if (!InitTheme()) {
-		throw "Failed to load theme";
+		throw "Failed to load required theme files. The application installation may be incomplete or unreadable. Reinstall Tempest Broadcast System to a writable folder.";
 	}
 
 	config_set_default_string(userConfig, "Basic", "Profile", Str("Untitled"));
