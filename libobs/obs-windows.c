@@ -45,9 +45,26 @@ void add_default_module_paths(void)
 	for (int i = 0; i < module_patterns_size; i++) {
 		char *module_bin_path = os_get_executable_path_ptr(module_bin[i]);
 		char *module_data_path = os_get_executable_path_ptr(module_data[i]);
+		bool add_working_directory_path = true;
 
-		if (module_bin_path && module_data_path)
+		if (module_bin_path && module_data_path) {
 			obs_add_module_path(module_bin_path, module_data_path);
+
+			char *executable_bin_path = os_get_abs_path_ptr(module_bin_path);
+			char *executable_data_path = os_get_abs_path_ptr(module_data_path);
+			char *working_bin_path = os_get_abs_path_ptr(module_bin[i]);
+			char *working_data_path = os_get_abs_path_ptr(module_data[i]);
+
+			if (executable_bin_path && executable_data_path && working_bin_path && working_data_path &&
+			    astrcmpi(executable_bin_path, working_bin_path) == 0 &&
+			    astrcmpi(executable_data_path, working_data_path) == 0)
+				add_working_directory_path = false;
+
+			bfree(executable_bin_path);
+			bfree(executable_data_path);
+			bfree(working_bin_path);
+			bfree(working_data_path);
+		}
 
 		bfree(module_bin_path);
 		bfree(module_data_path);
@@ -55,7 +72,8 @@ void add_default_module_paths(void)
 		/* Keep the working-directory path for development layouts. Installed
 		 * builds use the executable-relative path above so shortcuts and other
 		 * launchers cannot break plugin discovery. */
-		obs_add_module_path(module_bin[i], module_data[i]);
+		if (add_working_directory_path)
+			obs_add_module_path(module_bin[i], module_data[i]);
 	}
 }
 
