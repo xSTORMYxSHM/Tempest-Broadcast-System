@@ -42,8 +42,21 @@ static const int module_patterns_size = sizeof(module_bin) / sizeof(module_bin[0
 
 void add_default_module_paths(void)
 {
-	for (int i = 0; i < module_patterns_size; i++)
+	for (int i = 0; i < module_patterns_size; i++) {
+		char *module_bin_path = os_get_executable_path_ptr(module_bin[i]);
+		char *module_data_path = os_get_executable_path_ptr(module_data[i]);
+
+		if (module_bin_path && module_data_path)
+			obs_add_module_path(module_bin_path, module_data_path);
+
+		bfree(module_bin_path);
+		bfree(module_data_path);
+
+		/* Keep the working-directory path for development layouts. Installed
+		 * builds use the executable-relative path above so shortcuts and other
+		 * launchers cannot break plugin discovery. */
 		obs_add_module_path(module_bin[i], module_data[i]);
+	}
 }
 
 /* on windows, points to [base directory]/data/libobs */
@@ -52,6 +65,16 @@ char *find_libobs_data_file(const char *file)
 	struct dstr path;
 	dstr_init(&path);
 
+	char *executable_data_path = os_get_executable_path_ptr("../../data/libobs/");
+	if (executable_data_path) {
+		bool found = check_path(file, executable_data_path, &path);
+		bfree(executable_data_path);
+
+		if (found)
+			return path.array;
+	}
+
+	/* Preserve the source-tree/development fallback. */
 	if (check_path(file, "../../data/libobs/", &path))
 		return path.array;
 

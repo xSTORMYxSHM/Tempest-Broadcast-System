@@ -335,10 +335,13 @@ valid_section_install_directory:
 
   !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
     CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
+    SetOutPath "$INSTDIR\bin\64bit"
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Check for Updates.lnk" "$INSTDIR\${PRODUCT_UPDATER}" "" "$INSTDIR\${PRODUCT_UPDATER}" 0
+    SetOutPath "$INSTDIR"
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Uninstall ${PRODUCT_NAME}.lnk" "$INSTDIR\Uninstall.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
+  SetOutPath "$INSTDIR\bin\64bit"
   Goto install_payload_ready
 
 install_output_directory_failed:
@@ -385,6 +388,7 @@ install_payload_ready:
 SectionEnd
 
 Section /o "Desktop shortcut" SectionDesktop
+  SetOutPath "$INSTDIR\bin\64bit"
   CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
 SectionEnd
 

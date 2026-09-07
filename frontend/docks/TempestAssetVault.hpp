@@ -62,6 +62,8 @@ private:
 	void RefreshWatchPaths();
 	const Asset *SelectedAsset() const;
 	QString EnsureAssetBus(const QString &filePath, bool playNow);
+	QString EnsureImageAsset(const QString &filePath);
+	QString EnsureMediaAsset(const QString &filePath);
 	QString EnsureBrowserAsset(const QString &filePath);
 	void SetStatus(const QString &message, bool error = false);
 	static QString NormalizePath(const QString &path);
