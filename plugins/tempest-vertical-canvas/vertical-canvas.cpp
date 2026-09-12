@@ -710,6 +710,13 @@ bool version_info_downloaded(void *param, struct file_download_data *file)
 	return true;
 }
 
+static void open_portrait_workspace(void *, calldata_t *)
+{
+	for (const auto &dock : canvas_docks) {
+		QMetaObject::invokeMethod(dock, [dock] { dock->OpenWorkspace(); }, Qt::QueuedConnection);
+	}
+}
+
 bool obs_module_load(void)
 {
 	if (obs_get_module("aitum-stream-suite")) {
@@ -740,6 +747,7 @@ bool obs_module_load(void)
 	proc_handler_add(ph, "void tempest_vertical_get_scene(in int width, in int height, out string scene)", get_scene, nullptr);
 	proc_handler_add(ph, "void tempest_vertical_switch_scene(in int width, in int height, in string scene)", switch_scene,
 			 nullptr);
+	proc_handler_add(ph, "void tempest_vertical_open_workspace()", open_portrait_workspace, nullptr);
 
 	return true;
 }
@@ -770,20 +778,25 @@ void obs_module_post_load(void)
 		const auto name = "VerticalCanvasDock";
 		obs_frontend_add_dock_by_id(name, title.toUtf8().constData(), canvasDock);
 		canvas_docks.push_back(canvasDock);
-		obs_data_array_release(canvas);
 		blog(LOG_INFO, "[Vertical Canvas] New Canvas created");
-		return;
-	}
-	for (size_t i = 0; i < count; i++) {
-		const auto item = obs_data_array_item(canvas, i);
-		const auto canvasDock = new CanvasDock(item, main_window);
-		const QString title = QString::fromUtf8(obs_module_text("Vertical"));
-		const auto name = "VerticalCanvasDock";
-		obs_frontend_add_dock_by_id(name, title.toUtf8().constData(), canvasDock);
-		obs_data_release(item);
-		canvas_docks.push_back(canvasDock);
+	} else {
+		for (size_t i = 0; i < count; i++) {
+			const auto item = obs_data_array_item(canvas, i);
+			const auto canvasDock = new CanvasDock(item, main_window);
+			const QString title = QString::fromUtf8(obs_module_text("Vertical"));
+			const auto name = "VerticalCanvasDock";
+			obs_frontend_add_dock_by_id(name, title.toUtf8().constData(), canvasDock);
+			obs_data_release(item);
+			canvas_docks.push_back(canvasDock);
+		}
 	}
 	obs_data_array_release(canvas);
+
+	auto workspaceAction =
+		static_cast<QAction *>(obs_frontend_add_tools_menu_qaction(obs_module_text("OpenPortraitWorkspace")));
+	if (workspaceAction) {
+		QObject::connect(workspaceAction, &QAction::triggered, [] { open_portrait_workspace(nullptr, nullptr); });
+	}
 
 	if (!vendor) {
 		vendor = obs_websocket_register_vendor("tempest-broadcast-vertical");
@@ -938,6 +951,7 @@ void CanvasDock::AddScene(QString duplicate, bool ask_name)
 		SwitchScene(sn);
 		obs_source_release(new_scene);
 	} while (ask_name && s);
+	RefreshWorkspaceStatus();
 }
 
 void CanvasDock::RemoveScene(const QString &sceneName)
@@ -961,6 +975,7 @@ void CanvasDock::RemoveScene(const QString &sceneName)
 	}
 
 	obs_source_release(s);
+	RefreshWorkspaceStatus();
 }
 
 void CanvasDock::SetLinkedScene(obs_source_t *scene_, const QString &linkedScene)
@@ -1000,6 +1015,125 @@ void CanvasDock::SetLinkedScene(obs_source_t *scene_, const QString &linkedScene
 	obs_data_release(ss);
 	obs_data_release(found);
 	obs_data_array_release(c);
+}
+
+QString CanvasDock::GetLinkedScene(obs_source_t *scene_) const
+{
+	if (!scene_) {
+		return {};
+	}
+
+	auto settings = obs_source_get_settings(scene_);
+	auto links = obs_data_get_array(settings, "canvas");
+	obs_data_release(settings);
+	if (!links) {
+		return {};
+	}
+
+	QString linkedScene;
+	const auto count = obs_data_array_count(links);
+	for (size_t i = 0; i < count; i++) {
+		auto item = obs_data_array_item(links, i);
+		if (!item) {
+			continue;
+		}
+		if (obs_data_get_int(item, "width") == canvas_width && obs_data_get_int(item, "height") == canvas_height) {
+			linkedScene = QString::fromUtf8(obs_data_get_string(item, "scene"));
+			obs_data_release(item);
+			break;
+		}
+		obs_data_release(item);
+	}
+	obs_data_array_release(links);
+	return linkedScene;
+}
+
+void CanvasDock::RefreshWorkspaceStatus()
+{
+	if (!workspaceStatusLabel || !createLinkedSceneButton || !linkCurrentSceneButton) {
+		return;
+	}
+
+	auto mainScene = obs_frontend_get_current_scene();
+	if (!mainScene) {
+		workspaceStatusLabel->setText(QString::fromUtf8(obs_module_text("PortraitWorkspaceNoMainScene")));
+		workspaceStatusLabel->setStyleSheet(QStringLiteral("color: #edb74a;"));
+		createLinkedSceneButton->setEnabled(false);
+		linkCurrentSceneButton->setEnabled(false);
+		return;
+	}
+
+	const QString mainSceneName = QString::fromUtf8(obs_source_get_name(mainScene));
+	const QString linkedScene = GetLinkedScene(mainScene);
+	const bool hasActivePortraitScene = !currentSceneName.isEmpty() && HasScene(currentSceneName);
+	const bool hasLinkedScene = !linkedScene.isEmpty() && HasScene(linkedScene);
+
+	createLinkedSceneButton->setEnabled(true);
+	linkCurrentSceneButton->setEnabled(hasActivePortraitScene);
+	if (hasLinkedScene) {
+		workspaceStatusLabel->setText(
+			QString::fromUtf8(obs_module_text("PortraitWorkspaceReady")).arg(mainSceneName, linkedScene));
+		workspaceStatusLabel->setStyleSheet(QStringLiteral("color: #65e6b4;"));
+	} else if (!linkedScene.isEmpty()) {
+		workspaceStatusLabel->setText(
+			QString::fromUtf8(obs_module_text("PortraitWorkspaceMissingLink")).arg(mainSceneName, linkedScene));
+		workspaceStatusLabel->setStyleSheet(QStringLiteral("color: #ff799c;"));
+	} else {
+		workspaceStatusLabel->setText(QString::fromUtf8(obs_module_text("PortraitWorkspaceUnlinked")).arg(mainSceneName));
+		workspaceStatusLabel->setStyleSheet(QStringLiteral("color: #edb74a;"));
+	}
+
+	if (hasLinkedScene && linkedScene == currentSceneName) {
+		linkCurrentSceneButton->setText(QString::fromUtf8(obs_module_text("UnlinkCurrentScene")));
+		linkCurrentSceneButton->setToolTip(QString::fromUtf8(obs_module_text("UnlinkCurrentSceneTooltip")));
+	} else if (hasLinkedScene) {
+		linkCurrentSceneButton->setText(QString::fromUtf8(obs_module_text("UseCurrentPortraitScene")));
+		linkCurrentSceneButton->setToolTip(
+			QString::fromUtf8(obs_module_text("UseCurrentPortraitSceneTooltip")).arg(currentSceneName));
+	} else {
+		linkCurrentSceneButton->setText(QString::fromUtf8(obs_module_text("LinkCurrentScene")));
+		linkCurrentSceneButton->setToolTip(
+			QString::fromUtf8(obs_module_text("LinkCurrentSceneTooltip")).arg(currentSceneName));
+	}
+
+	obs_source_release(mainScene);
+}
+
+void CanvasDock::CreateLinkedSceneForCurrentMain()
+{
+	auto mainScene = obs_frontend_get_current_scene();
+	if (!mainScene || !canvas) {
+		obs_source_release(mainScene);
+		return;
+	}
+
+	const QString mainSceneName = QString::fromUtf8(obs_source_get_name(mainScene));
+	const QString baseName = QString::fromUtf8(obs_module_text("PortraitSceneName")).arg(mainSceneName);
+	QString sceneName = baseName;
+	for (int suffix = 2; HasScene(sceneName); suffix++) {
+		sceneName = QStringLiteral("%1 %2").arg(baseName).arg(suffix);
+	}
+
+	AddScene(sceneName, false);
+	SetLinkedScene(mainScene, currentSceneName);
+	obs_frontend_save();
+	obs_source_release(mainScene);
+	RefreshWorkspaceStatus();
+}
+
+void CanvasDock::LinkCurrentMainScene()
+{
+	auto mainScene = obs_frontend_get_current_scene();
+	if (!mainScene || currentSceneName.isEmpty()) {
+		obs_source_release(mainScene);
+		return;
+	}
+
+	const QString linkedScene = GetLinkedScene(mainScene);
+	SetLinkedScene(mainScene, linkedScene == currentSceneName ? QString() : currentSceneName);
+	obs_frontend_save();
+	obs_source_release(mainScene);
+	MainSceneChanged();
 }
 
 bool CanvasDock::HasScene(QString sceneName) const
@@ -1255,6 +1389,66 @@ CanvasDock::CanvasDock(obs_data_t *settings, QWidget *parent)
 	const auto transitionsName = "VerticalCanvasDockTransitions";
 	const auto transitionsTitle = title + " " + QString::fromUtf8(obs_frontend_get_locale_string("Basic.SceneTransitions"));
 	obs_frontend_add_dock_by_id(transitionsName, transitionsTitle.toUtf8().constData(), transitionsDock);
+
+	auto workspacePanel = new QFrame(this);
+	workspacePanel->setObjectName(QStringLiteral("tempestPortraitWorkspace"));
+	auto workspaceLayout = new QVBoxLayout(workspacePanel);
+	workspaceLayout->setContentsMargins(10, 8, 10, 8);
+	workspaceLayout->setSpacing(6);
+
+	auto workspaceHeadingRow = new QHBoxLayout;
+	auto workspaceHeading = new QLabel(QString::fromUtf8(obs_module_text("PortraitWorkspaceTitle")), workspacePanel);
+	workspaceHeading->setObjectName(QStringLiteral("tempestPortraitWorkspaceTitle"));
+	auto workspaceResolution = new QLabel(QStringLiteral("%1 × %2").arg(canvas_width).arg(canvas_height), workspacePanel);
+	workspaceResolution->setObjectName(QStringLiteral("tempestPortraitWorkspaceResolution"));
+	workspaceHeadingRow->addWidget(workspaceHeading);
+	workspaceHeadingRow->addStretch(1);
+	workspaceHeadingRow->addWidget(workspaceResolution);
+	workspaceLayout->addLayout(workspaceHeadingRow);
+
+	workspaceStatusLabel = new QLabel(QString::fromUtf8(obs_module_text("PortraitWorkspaceLoading")), workspacePanel);
+	workspaceStatusLabel->setObjectName(QStringLiteral("tempestPortraitWorkspaceStatus"));
+	workspaceStatusLabel->setWordWrap(true);
+	workspaceLayout->addWidget(workspaceStatusLabel);
+
+	auto workspaceActions = new QHBoxLayout;
+	createLinkedSceneButton = new QPushButton(QString::fromUtf8(obs_module_text("CreateLinkedPortraitScene")), workspacePanel);
+	createLinkedSceneButton->setToolTip(QString::fromUtf8(obs_module_text("CreateLinkedPortraitSceneTooltip")));
+	createLinkedSceneButton->setEnabled(false);
+	linkCurrentSceneButton = new QPushButton(QString::fromUtf8(obs_module_text("LinkCurrentScene")), workspacePanel);
+	linkCurrentSceneButton->setEnabled(false);
+	workspaceActions->addWidget(createLinkedSceneButton);
+	workspaceActions->addWidget(linkCurrentSceneButton);
+	workspaceActions->addStretch(1);
+	workspaceLayout->addLayout(workspaceActions);
+
+	connect(createLinkedSceneButton, &QPushButton::clicked, this, &CanvasDock::CreateLinkedSceneForCurrentMain);
+	connect(linkCurrentSceneButton, &QPushButton::clicked, this, &CanvasDock::LinkCurrentMainScene);
+
+	workspacePanel->setStyleSheet(QStringLiteral(R"(
+		QFrame#tempestPortraitWorkspace {
+			background: #071722;
+			border: 1px solid #1f506d;
+			border-radius: 3px;
+		}
+		QLabel#tempestPortraitWorkspaceTitle {
+			color: #bdf6ff;
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 1px;
+		}
+		QLabel#tempestPortraitWorkspaceResolution {
+			color: #45d9ff;
+			font-family: Consolas;
+			font-size: 10px;
+		}
+		QLabel#tempestPortraitWorkspaceStatus {
+			color: #91aabd;
+			font-size: 10px;
+		}
+	)"));
+	mainLayout->addWidget(workspacePanel);
+
 	preview->setObjectName(QStringLiteral("preview"));
 	preview->setMinimumSize(QSize(24, 24));
 	QSizePolicy sizePolicy1(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -7313,6 +7507,7 @@ void CanvasDock::LoadScenes()
 	if (scenesDock && scenesDock->sceneList->currentRow() < 0) {
 		scenesDock->sceneList->setCurrentRow(0);
 	}
+	RefreshWorkspaceStatus();
 }
 
 void CanvasDock::SwitchScene(const QString &scene_name, bool transition)
@@ -7427,6 +7622,7 @@ void CanvasDock::SwitchScene(const QString &scene_name, bool transition)
 		obs_websocket_vendor_emit_event(vendor, "switch_scene", d);
 		obs_data_release(d);
 	}
+	RefreshWorkspaceStatus();
 }
 
 void CanvasDock::transition_override_stop(void *data, calldata_t *)
@@ -7705,6 +7901,26 @@ void CanvasDock::FinishLoading()
 	save_canvas();
 }
 
+void CanvasDock::OpenWorkspace()
+{
+	auto showDock = [](QWidget *content) {
+		if (!content) {
+			return;
+		}
+		auto dock = qobject_cast<QDockWidget *>(content->parentWidget());
+		if (!dock) {
+			return;
+		}
+		dock->show();
+		dock->raise();
+	};
+
+	showDock(this);
+	showDock(scenesDock);
+	showDock(sourcesDock);
+	RefreshWorkspaceStatus();
+}
+
 void CanvasDock::OnRecordStart()
 {
 	recordButton->setChecked(true);
@@ -7953,6 +8169,7 @@ void CanvasDock::MainSceneChanged()
 		if (linkedButton) {
 			linkedButton->setChecked(false);
 		}
+		RefreshWorkspaceStatus();
 		return;
 	}
 
@@ -7964,6 +8181,7 @@ void CanvasDock::MainSceneChanged()
 		if (linkedButton) {
 			linkedButton->setChecked(false);
 		}
+		RefreshWorkspaceStatus();
 		return;
 	}
 	const auto count = obs_data_array_count(c);
@@ -7990,6 +8208,7 @@ void CanvasDock::MainSceneChanged()
 	}
 	obs_data_release(found);
 	obs_data_array_release(c);
+	RefreshWorkspaceStatus();
 }
 
 bool CanvasDock::start_virtual_cam_hotkey(void *data, obs_hotkey_pair_id id, obs_hotkey_t *hotkey, bool pressed)

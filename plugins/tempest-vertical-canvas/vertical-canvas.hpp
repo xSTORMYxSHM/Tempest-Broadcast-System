@@ -94,6 +94,9 @@ private:
 	QString newer_version_available;
 	QVBoxLayout *mainLayout;
 	OBSQTDisplay *preview;
+	QLabel *workspaceStatusLabel = nullptr;
+	QPushButton *createLinkedSceneButton = nullptr;
+	QPushButton *linkCurrentSceneButton = nullptr;
 	bool preview_disabled = false;
 	QFrame *previewDisabledWidget;
 	QPushButton *configButton;
@@ -319,6 +322,10 @@ private:
 	void AddScene(QString duplicate = "", bool ask_name = true);
 	void RemoveScene(const QString &sceneName);
 	void SetLinkedScene(obs_source_t *scene, const QString &linkedScene);
+	QString GetLinkedScene(obs_source_t *scene) const;
+	void RefreshWorkspaceStatus();
+	void CreateLinkedSceneForCurrentMain();
+	void LinkCurrentMainScene();
 	bool HasScene(QString scene) const;
 	void CheckReplayBuffer(bool start = false);
 	void SendVendorEvent(const char *e);
@@ -443,6 +450,7 @@ public:
 	void LoadScenes();
 	void LogScenes();
 	void FinishLoading();
+	void OpenWorkspace();
 	void setAction(QAction *action);
 	CanvasScenesDock *GetScenesDock();
 	inline uint32_t GetCanvasWidth() const { return canvas_width; }

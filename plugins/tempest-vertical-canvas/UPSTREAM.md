@@ -11,5 +11,7 @@ Tempest-specific changes keep the component under the Broadcast release and
 update lifecycle, namespace its module and integration identifiers, and disable
 the standalone Aitum update check. The managed build also adopts existing Aitum
 configuration, safely coordinates the OBS Additional Canvas selection, and
-prevents portrait resolution resets while an output is active. Keep those
-changes when refreshing from a future upstream tag.
+prevents portrait resolution resets while an output is active. Broadcast adds
+its own Portrait workspace entry points and guided main-scene linking on top of
+the compatible upstream scene model. Keep those changes when refreshing from a
+future upstream tag.

@@ -34,6 +34,7 @@ private slots:
 	void ToggleArm(bool armed);
 	void TriggerStream();
 	void TriggerRecord();
+	void OpenPortraitWorkspace();
 	void EmergencyCut();
 	void RefreshTelemetry();
 
@@ -55,6 +56,7 @@ private:
 	QPointer<QPushButton> commandWorkspaceButton;
 	QPointer<QPushButton> engineeringWorkspaceButton;
 	QPointer<QPushButton> dockManagerButton;
+	QPointer<QPushButton> portraitWorkspaceButton;
 	QPointer<QPushButton> uiScaleResetButton;
 	QPointer<QPushButton> canvasButton;
 	QPointer<QPushButton> armButton;

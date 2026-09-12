@@ -24,8 +24,9 @@
 namespace {
 int ScaledMetric(int value, qreal scale)
 {
-	if (value <= 0)
+	if (value <= 0) {
 		return value;
+	}
 	return std::max(1, qRound(value * scale));
 }
 
@@ -35,8 +36,9 @@ QString ScaledStyleSheet(const QString &source, qreal scale)
 	const QRegularExpression pixels(QStringLiteral("(\\d+(?:\\.\\d+)?)px"));
 	QList<QRegularExpressionMatch> matches;
 	auto matchIterator = pixels.globalMatch(source);
-	while (matchIterator.hasNext())
+	while (matchIterator.hasNext()) {
 		matches.push_back(matchIterator.next());
+	}
 	for (auto it = matches.crbegin(); it != matches.crend(); ++it) {
 		const QRegularExpressionMatch &match = *it;
 		const qreal value = match.captured(1).toDouble();
@@ -147,6 +149,7 @@ void TempestMainframeBar::BuildInterface()
 		QPushButton:disabled { color: #41596c; border-color: #1f3242; background: #09141d; }
 		QPushButton#tempestArm:checked { border-color: #edb74a; color: #ffd777; background: #4a3510; }
 		QPushButton#tempestDockManager { min-width: 82px; }
+		QPushButton#tempestPortrait { min-width: 82px; }
 		QPushButton#tempestUiScaleStep { min-width: 24px; padding: 0 5px; }
 		QPushButton#tempestUiScaleReset { min-width: 48px; padding: 0 5px; }
 		QPushButton#tempestCanvas { min-width: 78px; padding: 0 8px; }
@@ -187,6 +190,11 @@ void TempestMainframeBar::BuildInterface()
 	dockManagerButton->setObjectName(QStringLiteral("tempestDockManager"));
 	dockManagerButton->setToolTip(QStringLiteral("Open workspace layout settings"));
 	workspaceLayout->addWidget(dockManagerButton);
+	portraitWorkspaceButton = new QPushButton(QStringLiteral("PORTRAIT"), this);
+	portraitWorkspaceButton->setObjectName(QStringLiteral("tempestPortrait"));
+	portraitWorkspaceButton->setToolTip(QStringLiteral("Open the portrait canvas and scene-linking workspace"));
+	portraitWorkspaceButton->setEnabled(false);
+	workspaceLayout->addWidget(portraitWorkspaceButton);
 	root->addLayout(workspaceLayout);
 
 	auto *uiScaleLayout = new QHBoxLayout();
@@ -218,6 +226,7 @@ void TempestMainframeBar::BuildInterface()
 	connect(commandWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(true); });
 	connect(engineeringWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(false); });
 	connect(dockManagerButton, &QPushButton::clicked, this, [this]() { emit DockManagerRequested(); });
+	connect(portraitWorkspaceButton, &QPushButton::clicked, this, &TempestMainframeBar::OpenPortraitWorkspace);
 	connect(uiScaleDown, &QPushButton::clicked, this, [this]() { emit UiScaleRequested(uiScalePercent - 10); });
 	connect(uiScaleResetButton, &QPushButton::clicked, this, [this]() { emit UiScaleRequested(100); });
 	connect(uiScaleUp, &QPushButton::clicked, this, [this]() { emit UiScaleRequested(uiScalePercent + 10); });
@@ -287,33 +296,39 @@ void TempestMainframeBar::SetUiScalePercent(int percent)
 	TempestAppearance::SetManagedStyleSheet(this, ScaledStyleSheet(baseStyleSheet, scale));
 	setMinimumHeight(ScaledMetric(baseMinimumHeight, scale));
 	setMaximumHeight(ScaledMetric(baseMaximumHeight, scale));
-	if (uiScaleResetButton)
+	if (uiScaleResetButton) {
 		uiScaleResetButton->setText(QStringLiteral("%1%").arg(uiScalePercent));
+	}
 
 	QList<QLayout *> layouts = findChildren<QLayout *>();
-	if (layout())
+	if (layout()) {
 		layouts.prepend(layout());
+	}
 	for (QLayout *childLayout : std::as_const(layouts)) {
-		if (!childLayout->property("tempestScaleBaseMargins").isValid())
+		if (!childLayout->property("tempestScaleBaseMargins").isValid()) {
 			childLayout->setProperty("tempestScaleBaseMargins",
 						 QVariant::fromValue(childLayout->contentsMargins()));
-		if (!childLayout->property("tempestScaleBaseSpacing").isValid())
+		}
+		if (!childLayout->property("tempestScaleBaseSpacing").isValid()) {
 			childLayout->setProperty("tempestScaleBaseSpacing", childLayout->spacing());
+		}
 		const QMargins margins = childLayout->property("tempestScaleBaseMargins").value<QMargins>();
 		childLayout->setContentsMargins(ScaledMetric(margins.left(), scale), ScaledMetric(margins.top(), scale),
 						ScaledMetric(margins.right(), scale),
 						ScaledMetric(margins.bottom(), scale));
 		const int spacing = childLayout->property("tempestScaleBaseSpacing").toInt();
-		if (spacing >= 0)
+		if (spacing >= 0) {
 			childLayout->setSpacing(ScaledMetric(spacing, scale));
+		}
 	}
 	ApplyAdaptiveVisibility();
 }
 
 void TempestMainframeBar::SetResponsiveProfile(const QString &profileLabel, bool automatic)
 {
-	if (!identitySublineLabel)
+	if (!identitySublineLabel) {
 		return;
+	}
 	identitySublineLabel->setText(QStringLiteral("LIVE PRODUCTION WORKSTATION // %1%2")
 					      .arg(profileLabel, automatic ? QStringLiteral(" AUTO") : QString()));
 	identitySublineLabel->setToolTip(
@@ -323,8 +338,9 @@ void TempestMainframeBar::SetResponsiveProfile(const QString &profileLabel, bool
 
 void TempestMainframeBar::SetCanvasVisible(bool visible)
 {
-	if (!canvasButton)
+	if (!canvasButton) {
 		return;
+	}
 	canvasButton->setChecked(visible);
 	canvasButton->setText(visible ? QStringLiteral("CANVAS ON") : QStringLiteral("CANVAS OFF"));
 	canvasButton->setToolTip(
@@ -336,12 +352,14 @@ void TempestMainframeBar::SetCanvasVisible(bool visible)
 
 void TempestMainframeBar::SetCanvasControlEnabled(bool enabled)
 {
-	if (!canvasButton)
+	if (!canvasButton) {
 		return;
+	}
 	canvasButton->setEnabled(enabled);
-	if (!enabled)
+	if (!enabled) {
 		canvasButton->setToolTip(QStringLiteral(
 			"The local canvas is required while Studio Mode is active. Exit Studio Mode to suspend it."));
+	}
 }
 
 void TempestMainframeBar::resizeEvent(QResizeEvent *event)
@@ -355,14 +373,18 @@ void TempestMainframeBar::ApplyAdaptiveVisibility()
 	const int logicalWidth = qRound(width() * 100.0 / std::max(60, uiScalePercent));
 	const bool showTelemetry = logicalWidth >= 1580;
 	const bool showSecondary = logicalWidth >= 1320;
-	if (sceneLabel)
+	if (sceneLabel) {
 		sceneLabel->setVisible(showTelemetry);
-	if (telemetryLabel)
+	}
+	if (telemetryLabel) {
 		telemetryLabel->setVisible(showTelemetry);
-	if (identitySublineLabel)
+	}
+	if (identitySublineLabel) {
 		identitySublineLabel->setVisible(showSecondary);
-	if (detailLabel)
+	}
+	if (detailLabel) {
 		detailLabel->setVisible(showSecondary);
+	}
 }
 
 void TempestMainframeBar::SetCommandWorkspace(bool commandMode)
@@ -373,8 +395,9 @@ void TempestMainframeBar::SetCommandWorkspace(bool commandMode)
 
 void TempestMainframeBar::ToggleArm(bool armed)
 {
-	if (!main || main->StreamingActive())
+	if (!main || main->StreamingActive()) {
 		return;
+	}
 
 	SetTransmissionState(armed ? QStringLiteral("STREAM ARMED") : QStringLiteral("OFFLINE"),
 			     armed ? QStringLiteral("READY TO START STREAM") : QStringLiteral("BROADCAST STANDBY"),
@@ -384,8 +407,9 @@ void TempestMainframeBar::ToggleArm(bool armed)
 
 void TempestMainframeBar::TriggerStream()
 {
-	if (!main || streamStarting || streamStopping)
+	if (!main || streamStarting || streamStopping) {
 		return;
+	}
 
 	if (main->StreamingActive()) {
 		main->StopStreaming();
@@ -396,32 +420,53 @@ void TempestMainframeBar::TriggerStream()
 
 void TempestMainframeBar::TriggerRecord()
 {
-	if (!main)
+	if (!main) {
 		return;
+	}
 
-	if (main->RecordingActive())
+	if (main->RecordingActive()) {
 		main->StopRecording();
-	else
+	} else {
 		main->StartRecording();
+	}
+}
+
+void TempestMainframeBar::OpenPortraitWorkspace()
+{
+	if (!proc_handler_call(obs_get_proc_handler(), "tempest_vertical_open_workspace", nullptr)) {
+		QMessageBox::information(this, QStringLiteral("Portrait Workspace"),
+					 QStringLiteral("The Portrait workspace is not available in this build."));
+	}
 }
 
 void TempestMainframeBar::EmergencyCut()
 {
-	if (!main || !main->StreamingActive())
+	if (!main || !main->StreamingActive()) {
 		return;
+	}
 
 	auto result = QMessageBox::warning(this, QStringLiteral("Force Stop Stream"),
 					   QStringLiteral("Immediately stop the active stream?\n\n"
 							  "Local recording will continue."),
 					   QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-	if (result == QMessageBox::Yes)
+	if (result == QMessageBox::Yes) {
 		main->ForceStopStreaming();
+	}
 }
 
 void TempestMainframeBar::RefreshTelemetry()
 {
-	if (!main)
+	if (!main) {
 		return;
+	}
+
+	const bool portraitAvailable = obs_get_module("tempest-vertical-canvas") != nullptr;
+	if (portraitWorkspaceButton) {
+		portraitWorkspaceButton->setEnabled(portraitAvailable);
+		portraitWorkspaceButton->setToolTip(
+			portraitAvailable ? QStringLiteral("Open the portrait canvas and scene-linking workspace")
+					  : QStringLiteral("Portrait Canvas is not enabled in this build"));
+	}
 
 	OBSSource scene = main->GetCurrentSceneSource();
 	const char *sceneName = scene ? obs_source_get_name(scene) : nullptr;
@@ -440,9 +485,10 @@ void TempestMainframeBar::RefreshTelemetry()
 
 	if (main->StreamingActive()) {
 		clockLabel->setText(ElapsedText());
-		if (!streamStopping)
+		if (!streamStopping) {
 			SetTransmissionState(QStringLiteral("LIVE"), QStringLiteral("STREAM CONNECTION STABLE"),
 					     QStringLiteral("#45d9ff"));
+		}
 	} else if (!streamStarting && !streamStopping) {
 		clockLabel->setText(QStringLiteral("00:00:00"));
 	}
@@ -460,8 +506,9 @@ void TempestMainframeBar::SetTransmissionState(const QString &state, const QStri
 
 void TempestMainframeBar::UpdateActionButtons()
 {
-	if (!main)
+	if (!main) {
 		return;
+	}
 
 	const bool live = main->StreamingActive();
 	const bool busy = streamStarting || streamStopping;
@@ -478,8 +525,9 @@ void TempestMainframeBar::UpdateActionButtons()
 
 QString TempestMainframeBar::ElapsedText() const
 {
-	if (!streamElapsed.isValid())
+	if (!streamElapsed.isValid()) {
 		return QStringLiteral("00:00:00");
+	}
 
 	const qint64 totalSeconds = streamElapsed.elapsed() / 1000;
 	const qint64 hours = totalSeconds / 3600;
