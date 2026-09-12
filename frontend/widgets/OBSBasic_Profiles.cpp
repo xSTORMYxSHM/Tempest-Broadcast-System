@@ -17,6 +17,8 @@
 
 #include "OBSBasic.hpp"
 
+#include <docks/TempestDestinationCoordinator.hpp>
+
 #ifdef YOUTUBE_ENABLED
 #include <docks/YouTubeAppDock.hpp>
 #endif
@@ -717,6 +719,8 @@ void OBSBasic::ActivateProfile(const OBSProfile &profile, bool reset)
 #endif
 
 	OnEvent(OBS_FRONTEND_EVENT_PROFILE_CHANGED);
+	if (tempestDestinationCoordinator)
+		tempestDestinationCoordinator->ReloadProfile();
 
 	if (!restartRequirements.empty()) {
 		std::string requirements = std::accumulate(

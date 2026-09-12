@@ -20,6 +20,7 @@
 #include "OBSBasic.hpp"
 
 #include <components/UIValidation.hpp>
+#include <docks/TempestDestinationCoordinator.hpp>
 #ifdef YOUTUBE_ENABLED
 #include <docks/YouTubeAppDock.hpp>
 #include <utility/YoutubeApiWrappers.hpp>
@@ -70,6 +71,16 @@ void OBSBasic::StartStreaming()
 			if (no_broadcast.clickedButton() == SetupBroadcast) {
 				QMetaObject::invokeMethod(this, "SetupBroadcast");
 			}
+			return;
+		}
+	}
+
+	if (tempestDestinationCoordinator) {
+		QString destinationError;
+		if (!tempestDestinationCoordinator->PrepareForMainStream(destinationError)) {
+			QMessageBox::warning(this, QStringLiteral("Stream Destinations"),
+					     destinationError +
+						     QStringLiteral("\n\nOpen Docks > Destinations to update this profile."));
 			return;
 		}
 	}

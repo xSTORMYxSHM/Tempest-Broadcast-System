@@ -25,6 +25,7 @@
 #include "OBSBasicStats.hpp"
 #include "plugin-manager/PluginManager.hpp"
 #include <docks/TempestControlDeck.hpp>
+#include <docks/TempestDestinationCoordinator.hpp>
 #include <docks/TempestSignalReactor.hpp>
 #include <docks/TempestStudioBridge.hpp>
 #include <docks/TempestCommandMatrix.hpp>
@@ -433,6 +434,9 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	tempestHUDComposer = new TempestHUDComposer(this, this);
 	addDockWidget(Qt::RightDockWidgetArea, tempestHUDComposer);
 	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
+	tempestDestinationCoordinator = new TempestDestinationCoordinator(this, this);
+	addDockWidget(Qt::RightDockWidgetArea, tempestDestinationCoordinator);
+	tabifyDockWidget(tempestHUDComposer, tempestDestinationCoordinator);
 	tempestCommandMatrix->SetHUDComposer(tempestHUDComposer);
 	tempestControlDeck->raise();
 	InitializeTempestUiScaling();
@@ -610,6 +614,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	SETUP_DOCK(controlsDock);
 	SETUP_DOCK(statsDock);
 	SETUP_DOCK(tempestControlDeck);
+	SETUP_DOCK(tempestDestinationCoordinator);
 	SETUP_DOCK(tempestSignalReactor);
 	SETUP_DOCK(tempestStudioBridge);
 	SETUP_DOCK(tempestCommandMatrix);
@@ -1161,6 +1166,8 @@ void OBSBasic::OBSInit()
 	}
 
 	ResetOutputs();
+	if (tempestDestinationCoordinator)
+		tempestDestinationCoordinator->ReloadProfile();
 	CreateHotkeys();
 
 	InitPrimitives();

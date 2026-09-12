@@ -23,6 +23,7 @@
 #include "OBSQTDisplay.hpp"
 
 #include <docks/TempestControlDeck.hpp>
+#include <docks/TempestDestinationCoordinator.hpp>
 #include <docks/TempestSignalReactor.hpp>
 #include <docks/TempestCommandMatrix.hpp>
 #include <docks/TempestMediaBay.hpp>
@@ -216,7 +217,8 @@ void OBSBasic::InitializeTempestUiScaling()
 	const QList<OBSDock *> docks = {tempestCommandMatrix, tempestSourceInspectorDock,
 					tempestControlDeck,   tempestSignalReactor,
 					tempestMediaBay,      tempestSequenceDirector,
-					tempestAssetVault,    tempestHUDComposer};
+					tempestAssetVault,    tempestHUDComposer,
+					tempestDestinationCoordinator};
 	for (OBSDock *dock : docks)
 		RegisterTempestScaleDock(dock);
 
@@ -784,6 +786,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestSequenceDirector->setFloating(false);
 	tempestAssetVault->setFloating(false);
 	tempestHUDComposer->setFloating(false);
+	tempestDestinationCoordinator->setFloating(false);
 	if (tempestStreamInfoDock)
 		tempestStreamInfoDock->setFloating(false);
 
@@ -796,8 +799,9 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tabifyDockWidget(tempestSignalReactor, tempestSequenceDirector);
 	tabifyDockWidget(tempestSequenceDirector, tempestAssetVault);
 	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
+	tabifyDockWidget(tempestHUDComposer, tempestDestinationCoordinator);
 	if (tempestStreamInfoDock)
-		tabifyDockWidget(tempestHUDComposer, tempestStreamInfoDock);
+		tabifyDockWidget(tempestDestinationCoordinator, tempestStreamInfoDock);
 	addDockWidget(Qt::BottomDockWidgetArea, ui->mixerDock);
 	splitDockWidget(ui->mixerDock, tempestMediaBay, Qt::Horizontal);
 
@@ -812,6 +816,7 @@ void OBSBasic::ConfigureTempestCommandLayout()
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
 	tempestHUDComposer->setVisible(true);
+	tempestDestinationCoordinator->setVisible(true);
 	if (tempestStreamInfoDock)
 		tempestStreamInfoDock->setVisible(true);
 	tempestCommandMatrix->raise();
@@ -845,6 +850,7 @@ void OBSBasic::OpenTempestDockManager()
 		{QStringLiteral("Sequence Director"), tempestSequenceDirector},
 		{QStringLiteral("Asset Library"), tempestAssetVault},
 		{QStringLiteral("Overlay Designer"), tempestHUDComposer},
+		{QStringLiteral("Destinations"), tempestDestinationCoordinator},
 		{QStringLiteral("Stream Information"), tempestStreamInfoDock},
 	};
 
@@ -1131,7 +1137,9 @@ void OBSBasic::IntegrateTempestStreamInfoDock(QDockWidget *dock, bool reveal)
 	const bool visible = reveal || dock->isVisible();
 	dock->setFloating(false);
 	addDockWidget(Qt::RightDockWidgetArea, dock);
-	if (tempestHUDComposer)
+	if (tempestDestinationCoordinator)
+		tabifyDockWidget(tempestDestinationCoordinator, dock);
+	else if (tempestHUDComposer)
 		tabifyDockWidget(tempestHUDComposer, dock);
 	dock->setVisible(visible);
 	if (reveal)
@@ -1262,6 +1270,7 @@ void OBSBasic::on_resetDocks_triggered(bool force)
 	tempestSequenceDirector->setVisible(true);
 	tempestAssetVault->setVisible(true);
 	tempestHUDComposer->setVisible(true);
+	tempestDestinationCoordinator->setVisible(true);
 	if (tempestStreamInfoDock)
 		IntegrateTempestStreamInfoDock(tempestStreamInfoDock, true);
 	tempestControlDeck->raise();
@@ -1306,6 +1315,7 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 	tempestSequenceDirector->setFeatures(features);
 	tempestAssetVault->setFeatures(features);
 	tempestHUDComposer->setFeatures(features);
+	tempestDestinationCoordinator->setFeatures(features);
 
 	for (int i = extraDocks.size() - 1; i >= 0; i--) {
 		extraDocks[i]->setFeatures(features);
