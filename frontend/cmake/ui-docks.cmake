@@ -7,6 +7,8 @@ target_sources(
     docks/TempestControlDeck.hpp
     docks/TempestDestinationCoordinator.cpp
     docks/TempestDestinationCoordinator.hpp
+    docks/TempestGuestLayouts.cpp
+    docks/TempestGuestLayouts.hpp
     docks/TempestSignalReactor.cpp
     docks/TempestSignalReactor.hpp
     docks/TempestStudioBridge.cpp
