@@ -164,7 +164,7 @@ bool ImporterModel::setData(const QModelIndex &index, const QVariant &value, int
 			entry.selected = role != ImporterEntryRole::AutoPath;
 			entry.empty = false;
 
-			beginInsertRows(QModelIndex(), options.length() + 1, options.length() + 1);
+			beginInsertRows(QModelIndex(), options.length(), options.length());
 			options.append(entry);
 			endInsertRows();
 

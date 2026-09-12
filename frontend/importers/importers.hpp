@@ -66,6 +66,7 @@ public:
 	int ImportScenes(const std::string &path, std::string &name, json11::Json &res);
 	bool Check(const std::string &path);
 	std::string Name(const std::string &path);
+	OBSImporterFiles FindFiles();
 };
 
 class SLImporter : public Importer {

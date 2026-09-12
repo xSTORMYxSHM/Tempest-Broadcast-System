@@ -34,6 +34,7 @@ public:
 	explicit OBSImporter(QWidget *parent = nullptr);
 
 	void addImportOption(QString path, bool automatic);
+	bool ProfilesImported() const { return profilesImported; }
 
 protected:
 	virtual void dropEvent(QDropEvent *ev) override;
@@ -41,6 +42,10 @@ protected:
 
 public slots:
 	void browseImport();
+	void browseOBSInstallation();
 	void importCollections();
 	void dataChanged();
+
+private:
+	bool profilesImported = false;
 };

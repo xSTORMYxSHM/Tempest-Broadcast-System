@@ -638,6 +638,9 @@ void OBSBasic::on_actionImportSceneCollection_triggered()
 	imp.exec();
 
 	RefreshSceneCollections(true);
+	if (imp.ProfilesImported()) {
+		RefreshProfiles(true);
+	}
 }
 
 void OBSBasic::on_actionExportSceneCollection_triggered()

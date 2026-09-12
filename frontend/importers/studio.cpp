@@ -212,6 +212,10 @@ void TranslatePaths(Json &res, const string &rootDir)
 bool StudioImporter::Check(const string &path)
 {
 	BPtr<char> file_data = os_quick_read_utf8_file(path.c_str());
+	if (!file_data) {
+		return false;
+	}
+
 	string err;
 	Json collection = Json::parse(file_data, err);
 
@@ -241,6 +245,10 @@ bool StudioImporter::Check(const string &path)
 string StudioImporter::Name(const string &path)
 {
 	BPtr<char> file_data = os_quick_read_utf8_file(path.c_str());
+	if (!file_data) {
+		return {};
+	}
+
 	string err;
 
 	Json d = Json::parse(file_data, err);
@@ -284,4 +292,27 @@ int StudioImporter::ImportScenes(const string &path, string &name, Json &res)
 	res = obj;
 
 	return IMPORTER_SUCCESS;
+}
+
+OBSImporterFiles StudioImporter::FindFiles()
+{
+	OBSImporterFiles result;
+	char path[1024];
+	const int length = os_get_config_path(path, sizeof(path), "obs-studio/basic/scenes");
+	if (length <= 0) {
+		return result;
+	}
+
+	QDir scenesDirectory(QString::fromUtf8(path));
+	if (!scenesDirectory.exists()) {
+		return result;
+	}
+
+	const QFileInfoList collections =
+		scenesDirectory.entryInfoList({QStringLiteral("*.json")}, QDir::Files | QDir::Readable, QDir::Name);
+	for (const QFileInfo &collection : collections) {
+		result.emplace_back(collection.absoluteFilePath().toUtf8().constData());
+	}
+
+	return result;
 }
