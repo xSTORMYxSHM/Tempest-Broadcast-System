@@ -9,5 +9,7 @@ This directory is a namespaced, in-tree fork of Aitum Vertical Canvas 1.6.4.
 
 Tempest-specific changes keep the component under the Broadcast release and
 update lifecycle, namespace its module and integration identifiers, and disable
-the standalone Aitum update check. Keep those changes when refreshing from a
-future upstream tag.
+the standalone Aitum update check. The managed build also adopts existing Aitum
+configuration, safely coordinates the OBS Additional Canvas selection, and
+prevents portrait resolution resets while an output is active. Keep those
+changes when refreshing from a future upstream tag.

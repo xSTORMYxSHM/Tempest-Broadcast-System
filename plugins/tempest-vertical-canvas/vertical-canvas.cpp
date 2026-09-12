@@ -56,6 +56,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("tempest-vertical-canvas", "en-US")
 #define SPACER_LABEL_MARGIN 6.0f
 
 #define CANVAS_NAME "Tempest Portrait"
+#define TEMPEST_MANAGED_CANVAS_KEY "TempestPortraitManagedCanvas"
 
 inline std::list<CanvasDock *> canvas_docks;
 
@@ -117,6 +118,53 @@ static obs_data_t *load_canvas_config(char *managed_path)
 	}
 #endif
 	return config;
+}
+
+static void sync_multitrack_extra_canvas(obs_canvas_t *canvas)
+{
+	if (!canvas) {
+		return;
+	}
+
+	config_t *profile_config = obs_frontend_get_profile_config();
+	const char *current_uuid = obs_canvas_get_uuid(canvas);
+	if (!profile_config || !current_uuid || !*current_uuid) {
+		return;
+	}
+
+	const bool has_selection = config_has_user_value(profile_config, "Stream1", "MultitrackExtraCanvas");
+	const char *selected_uuid = config_get_string(profile_config, "Stream1", "MultitrackExtraCanvas");
+	const char *managed_uuid = config_get_string(profile_config, "Stream1", TEMPEST_MANAGED_CANVAS_KEY);
+	const bool selected_current = selected_uuid && strcmp(selected_uuid, current_uuid) == 0;
+	const bool follows_managed = managed_uuid && *managed_uuid && selected_uuid && strcmp(selected_uuid, managed_uuid) == 0;
+
+	/* Select Portrait for a new profile, remember an explicit Portrait choice,
+	 * and repair only selections that Tempest previously managed. An explicit
+	 * None or another canvas remains untouched. */
+	if (has_selection && !selected_current && !follows_managed) {
+		return;
+	}
+
+	const bool selection_changed = !selected_current;
+	const bool marker_changed = !managed_uuid || strcmp(managed_uuid, current_uuid) != 0;
+	if (!selection_changed && !marker_changed) {
+		return;
+	}
+
+	if (selection_changed) {
+		config_set_string(profile_config, "Stream1", "MultitrackExtraCanvas", current_uuid);
+	}
+	config_set_string(profile_config, "Stream1", TEMPEST_MANAGED_CANVAS_KEY, current_uuid);
+	if (config_save_safe(profile_config, "tmp", "bak") != CONFIG_SUCCESS) {
+		blog(LOG_WARNING, "[Tempest Portrait] Could not save the Additional Canvas selection");
+		return;
+	}
+
+	if (!has_selection) {
+		blog(LOG_INFO, "[Tempest Portrait] Selected Portrait as the default Additional Canvas");
+	} else if (selection_changed) {
+		blog(LOG_INFO, "[Tempest Portrait] Re-linked Additional Canvas after the canvas changed");
+	}
 }
 
 static void save_canvas()
@@ -5183,6 +5231,7 @@ bool CanvasDock::StartVideo()
 		ovi.output_height = canvas_height;
 		started_video = obs_canvas_reset_video(canvas, &ovi);
 	}
+	sync_multitrack_extra_canvas(canvas);
 	return started_video;
 }
 
