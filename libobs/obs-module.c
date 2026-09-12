@@ -505,6 +505,17 @@ static void load_all_callback(void *param, const struct obs_module_info2 *info)
 		return;
 	}
 
+	/* The Tempest portrait module retains Aitum's legacy scene/source IDs so
+	 * existing Vertical projects remain loadable. Once the managed module is
+	 * present, skip a separately installed copy to prevent duplicate source,
+	 * dock, hotkey, and proc-handler registrations. */
+	if (strcmp(info->name, "vertical-canvas") == 0 && obs_get_module("tempest-vertical-canvas")) {
+		blog(LOG_WARNING,
+		     "Skipping external module '%s'; Tempest Portrait Canvas provides the compatible managed runtime",
+		     info->bin_path);
+		return;
+	}
+
 	if (!is_safe_module(info->name)) {
 		obs_create_disabled_module(&disabled_module, info->bin_path, info->data_path, OBS_MODULE_DISABLED_SAFE);
 		blog(LOG_WARNING, "Skipping module '%s', not on safe list", info->name);

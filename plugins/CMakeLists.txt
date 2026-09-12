@@ -100,6 +100,18 @@ add_obs_plugin(oss-audio PLATFORMS FREEBSD OPENBSD)
 add_obs_plugin(rtmp-services)
 add_obs_plugin(sndio PLATFORMS LINUX FREEBSD OPENBSD)
 add_obs_plugin(text-freetype2)
+
+option(
+  ENABLE_TEMPEST_VERTICAL_CANVAS
+  "Build the experimental Tempest portrait-canvas foundation"
+  OFF
+)
+if(ENABLE_TEMPEST_VERTICAL_CANVAS)
+  add_obs_plugin(tempest-vertical-canvas PLATFORMS WINDOWS MACOS LINUX WITH_MESSAGE)
+else()
+  set_property(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Tempest Portrait Canvas (experimental)")
+endif()
+
 add_obs_plugin(vlc-video WITH_MESSAGE)
 add_obs_plugin(win-capture PLATFORMS WINDOWS)
 add_obs_plugin(win-dshow PLATFORMS WINDOWS)
