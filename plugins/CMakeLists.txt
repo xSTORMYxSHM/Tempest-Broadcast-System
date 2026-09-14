@@ -103,13 +103,13 @@ add_obs_plugin(text-freetype2)
 
 option(
   ENABLE_TEMPEST_VERTICAL_CANVAS
-  "Build the experimental Tempest portrait-canvas foundation"
-  OFF
+  "Build the integrated Tempest portrait canvas"
+  ON
 )
 if(ENABLE_TEMPEST_VERTICAL_CANVAS)
   add_obs_plugin(tempest-vertical-canvas PLATFORMS WINDOWS MACOS LINUX WITH_MESSAGE)
 else()
-  set_property(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Tempest Portrait Canvas (experimental)")
+  set_property(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Tempest Portrait Canvas")
 endif()
 
 add_obs_plugin(vlc-video WITH_MESSAGE)
