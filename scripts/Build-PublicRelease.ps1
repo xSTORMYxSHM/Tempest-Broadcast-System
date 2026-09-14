@@ -14,6 +14,8 @@ param(
 
     [switch] $Sign,
 
+    [switch] $Rehearsal,
+
     [string] $TrustedSigningEndpoint = 'https://wus2.codesigning.azure.net/',
 
     [string] $TrustedSigningAccount = 'Tempest',
@@ -78,6 +80,15 @@ function Find-NSIS {
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate) {
             return $candidate
+        }
+    }
+
+    $electronBuilderCache = Join-Path $env:LOCALAPPDATA 'electron-builder\Cache'
+    if (Test-Path -LiteralPath $electronBuilderCache) {
+        $cachedNSIS = Get-ChildItem -LiteralPath $electronBuilderCache -Filter makensis.exe -Recurse -File `
+            -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($cachedNSIS) {
+            return $cachedNSIS.FullName
         }
     }
 
@@ -493,9 +504,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $requiredTag = "tempest-v${version}"
-$matchingTag = @(& $git -C $projectRoot tag --points-at HEAD --list $requiredTag)
-if ($LASTEXITCODE -ne 0 -or $matchingTag.Count -eq 0) {
-    throw "The release commit must be tagged ${requiredTag}."
+if (-not $Rehearsal) {
+    $matchingTag = @(& $git -C $projectRoot tag --points-at HEAD --list $requiredTag)
+    if ($LASTEXITCODE -ne 0 -or $matchingTag.Count -eq 0) {
+        throw "The release commit must be tagged ${requiredTag}. Use -Rehearsal to build untagged validation artifacts."
+    }
 }
 
 $submoduleStatus = @(& $git -C $projectRoot submodule status --recursive)
@@ -640,7 +653,7 @@ try {
 
     $sourceDescription = @(
         "Tempest Broadcast System ${version}",
-        "Release tag: ${requiredTag}",
+        $(if ($Rehearsal) { 'Release tag: not created (rehearsal)' } else { "Release tag: ${requiredTag}" }),
         "Source commit: ${commit}",
         '',
         'Pinned submodules:',
@@ -676,7 +689,8 @@ $manifest = [ordered]@{
     version = $version
     obs_engine_version = (& $git -C $projectRoot describe --tags --match '[0-9]*' --always).Trim()
     source_commit = $commit
-    source_tag = $requiredTag
+    source_tag = if ($Rehearsal) { $null } else { $requiredTag }
+    rehearsal = [bool] $Rehearsal
     platform = "windows-${Target}"
     configuration = $Configuration
     signed = [bool] $signatureSummary.enabled
