@@ -13,7 +13,12 @@ add_executable(tempest-broadcast-updater WIN32)
 
 target_sources(
   tempest-broadcast-updater
-  PRIVATE main.cpp tempest-updater.manifest "${CMAKE_CURRENT_BINARY_DIR}/tempest-updater.rc"
+  PRIVATE
+    main.cpp
+    ../utility/TempestSettingsBackup.cpp
+    ../utility/TempestSettingsBackup.hpp
+    tempest-updater.manifest
+    "${CMAKE_CURRENT_BINARY_DIR}/tempest-updater.rc"
 )
 
 target_compile_features(tempest-broadcast-updater PRIVATE cxx_std_17)

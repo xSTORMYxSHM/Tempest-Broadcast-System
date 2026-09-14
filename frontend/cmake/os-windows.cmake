@@ -21,6 +21,8 @@ target_sources(
     obs.rc
     utility/CrashHandler_Windows.cpp
     utility/NativeEventFilter_Windows.cpp
+    utility/TempestSettingsBackup.cpp
+    utility/TempestSettingsBackup.hpp
     utility/WhatsNewBrowserInitThread.cpp
     utility/WhatsNewBrowserInitThread.hpp
     utility/WhatsNewInfoThread.cpp

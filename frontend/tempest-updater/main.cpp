@@ -21,6 +21,8 @@
 #include <winhttp.h>
 #include <wintrust.h>
 
+#include "../utility/TempestSettingsBackup.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -427,6 +429,42 @@ std::filesystem::path DefaultDownloadDirectory()
 	return directory;
 }
 
+std::filesystem::path ApplicationDirectory()
+{
+	std::vector<wchar_t> path(1024);
+	for (;;) {
+		DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+		if (!length) {
+			throw std::runtime_error(WindowsError("Locating the updater"));
+		}
+		if (length < path.size() - 1) {
+			return std::filesystem::path(std::wstring(path.data(), length)).parent_path();
+		}
+		path.resize(path.size() * 2);
+	}
+}
+
+std::filesystem::path DefaultConfigDirectory()
+{
+	const std::filesystem::path applicationDirectory = ApplicationDirectory();
+	const std::filesystem::path installRoot = applicationDirectory.parent_path().parent_path();
+	constexpr const wchar_t *portableMarkers[] = {
+		L"portable_mode", L"obs_portable_mode", L"portable_mode.txt", L"obs_portable_mode.txt"};
+	for (const wchar_t *marker : portableMarkers) {
+		if (std::filesystem::is_regular_file(installRoot / marker)) {
+			return installRoot / L"config" / L"tempest-broadcast-system";
+		}
+	}
+
+	PWSTR roamingAppData = nullptr;
+	if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &roamingAppData))) {
+		throw std::runtime_error("Windows could not locate the Roaming AppData folder.");
+	}
+	std::filesystem::path directory(roamingAppData);
+	CoTaskMemFree(roamingAppData);
+	return directory / L"tempest-broadcast-system";
+}
+
 void DownloadInstaller(const ReleaseAsset &asset, const std::filesystem::path &destination, bool showProgress)
 {
 	std::filesystem::create_directories(destination.parent_path());
@@ -671,9 +709,11 @@ void LaunchInstaller(const std::filesystem::path &installer)
 struct Options {
 	bool quiet = false;
 	bool downloadOnly = false;
+	bool backupOnly = false;
 	Version currentVersion = Version::Parse(TEMPEST_PRODUCT_VERSION);
 	DWORD parentProcess = 0;
 	std::optional<std::filesystem::path> downloadDirectory;
+	std::optional<std::filesystem::path> configDirectory;
 };
 
 Options ParseOptions()
@@ -690,12 +730,16 @@ Options ParseOptions()
 			options.quiet = true;
 		} else if (argument == L"--download-only") {
 			options.downloadOnly = true;
+		} else if (argument == L"--backup-only") {
+			options.backupOnly = true;
 		} else if (argument == L"--current-version" && index + 1 < argc) {
 			options.currentVersion = Version::Parse(Narrow(argv[++index]));
 		} else if (argument == L"--parent-pid" && index + 1 < argc) {
 			options.parentProcess = wcstoul(argv[++index], nullptr, 10);
 		} else if (argument == L"--download-directory" && index + 1 < argc) {
 			options.downloadDirectory = std::filesystem::path(argv[++index]);
+		} else if (argument == L"--config-directory" && index + 1 < argc) {
+			options.configDirectory = std::filesystem::path(argv[++index]);
 		} else if (argument == L"--result-file" && index + 1 < argc) {
 			g_resultFile = argv[++index];
 		} else {
@@ -709,6 +753,25 @@ Options ParseOptions()
 
 int RunUpdater(const Options &options)
 {
+	const std::filesystem::path configDirectory =
+		options.configDirectory.value_or(DefaultConfigDirectory());
+	if (options.backupOnly) {
+		if (!CloseBroadcastProcesses(options.parentProcess)) {
+			WriteResult("cancelled", "Broadcast remained open.");
+			return 0;
+		}
+		const TempestRecovery::BackupSummary backup = TempestRecovery::CreateSettingsBackup(
+			configDirectory, "manual-backup", options.currentVersion.ToString(), options.currentVersion.ToString());
+		WriteResult("backup-created", Narrow(backup.directory.wstring()));
+		if (!options.quiet) {
+			const std::wstring message =
+				L"A verified settings backup was created.\n\n" + backup.directory.wstring();
+			MessageBoxW(nullptr, message.c_str(), kUpdaterTitle,
+				    MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+		}
+		return 0;
+	}
+
 	ReleaseAsset latest = GetLatestRelease();
 	if (!(options.currentVersion < latest.version)) {
 		WriteResult("current", latest.versionText);
@@ -725,7 +788,8 @@ int RunUpdater(const Options &options)
 		std::wstring message =
 			L"Tempest Broadcast System " + Widen(latest.versionText) +
 			L" is available.\n\nThe signed installer will be downloaded and verified. "
-			L"Broadcast will then close and restart on the new version.\n\nInstall this update now?";
+			L"Broadcast will then close, create a verified recovery backup of your settings, "
+			L"and restart on the new version.\n\nInstall this update now?";
 		if (MessageBoxW(nullptr, message.c_str(), kUpdaterTitle,
 				MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDYES) {
 			WriteResult("cancelled", "The user declined the update.");
@@ -747,7 +811,11 @@ int RunUpdater(const Options &options)
 		WriteResult("cancelled", "Broadcast remained open.");
 		return 0;
 	}
-	WriteResult("installer-started", Narrow(installer.wstring()));
+	const TempestRecovery::BackupSummary backup = TempestRecovery::CreateSettingsBackup(
+		configDirectory, "pre-update", options.currentVersion.ToString(), latest.versionText);
+	TempestRecovery::WritePendingUpdate(configDirectory, backup, options.currentVersion.ToString(),
+				     latest.versionText);
+	WriteResult("installer-started", Narrow(installer.wstring()) + "\nBackup: " + Narrow(backup.directory.wstring()));
 	LaunchInstaller(installer);
 	return 0;
 }

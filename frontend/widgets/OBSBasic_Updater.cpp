@@ -211,7 +211,13 @@ void OBSBasic::CheckForUpdates(bool manualUpdate)
 	const QString applicationDirectory = QCoreApplication::applicationDirPath();
 	const QString updaterPath =
 		QDir(applicationDirectory).filePath(QStringLiteral("tempest-broadcast-updater.exe"));
-	QStringList arguments{QStringLiteral("--parent-pid"), QString::number(QCoreApplication::applicationPid())};
+	char configPath[1024];
+	QStringList arguments{QStringLiteral("--parent-pid"), QString::number(QCoreApplication::applicationPid()),
+			      QStringLiteral("--current-version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)};
+	if (GetAppConfigPath(configPath, sizeof(configPath), "tempest-broadcast-system") > 0) {
+		arguments.append({QStringLiteral("--config-directory"),
+				  QFileInfo(QString::fromUtf8(configPath)).absoluteFilePath()});
+	}
 	if (!manualUpdate) {
 		arguments.prepend(QStringLiteral("--quiet"));
 	}

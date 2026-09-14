@@ -23,6 +23,9 @@
 #include <utility/CrashHandler.hpp>
 #include <utility/OBSEventFilter.hpp>
 #include <utility/OBSProxyStyle.hpp>
+#ifdef _WIN32
+#include <utility/TempestSettingsBackup.hpp>
+#endif
 #if defined(_WIN32) || defined(ENABLE_SPARKLE_UPDATER)
 #include <utility/models/branches.hpp>
 #endif
@@ -139,6 +142,84 @@ UncleanLaunchAction handleUncleanShutdown(bool enableCrashUpload)
 
 	return launchAction;
 }
+
+#ifdef _WIN32
+std::filesystem::path TempestConfigDirectory()
+{
+	char path[1024];
+	if (GetAppConfigPath(path, sizeof(path), "tempest-broadcast-system") <= 0) {
+		return {};
+	}
+	return std::filesystem::absolute(std::filesystem::u8path(path)).lexically_normal();
+}
+
+void HandlePendingUpdateRecovery()
+{
+	const std::filesystem::path configDirectory = TempestConfigDirectory();
+	if (configDirectory.empty()) {
+		return;
+	}
+
+	TempestRecovery::UpdateStartupStatus status;
+	try {
+		status = TempestRecovery::BeginUpdateStartup(configDirectory, TEMPEST_PRODUCT_VERSION);
+	} catch (const std::exception &error) {
+		blog(LOG_WARNING, "Could not read update recovery state: %s", error.what());
+		return;
+	}
+	if (status.state == TempestRecovery::UpdateStartupState::None) {
+		return;
+	}
+
+	blog(LOG_INFO, "Update recovery checkpoint: %s -> %s, startup attempt %u, backup '%s'",
+	     status.fromVersion.c_str(), status.targetVersion.c_str(), status.attempt,
+	     status.backupDirectory.u8string().c_str());
+	if (status.state != TempestRecovery::UpdateStartupState::PreviousStartFailed) {
+		return;
+	}
+
+	QMessageBox recoveryWarning;
+	recoveryWarning.setIcon(QMessageBox::Warning);
+	recoveryWarning.setWindowTitle(QStringLiteral("Tempest Update Recovery"));
+	recoveryWarning.setText(
+		QStringLiteral("Broadcast did not complete its previous first start after the update."));
+	recoveryWarning.setInformativeText(
+		QStringLiteral("Your pre-update settings backup is safe at:\n%1\n\nStarting in recovery mode "
+			       "disables third-party plugins for this launch and is recommended.")
+			.arg(QString::fromUtf8(status.backupDirectory.u8string().c_str())));
+	QPushButton *safeButton =
+		recoveryWarning.addButton(QStringLiteral("Start in Recovery Mode"), QMessageBox::AcceptRole);
+	QPushButton *normalButton =
+		recoveryWarning.addButton(QStringLiteral("Start Normally"), QMessageBox::RejectRole);
+	QPushButton *openButton =
+		recoveryWarning.addButton(QStringLiteral("Open Backup Folder"), QMessageBox::ActionRole);
+	recoveryWarning.setDefaultButton(safeButton);
+
+	for (;;) {
+		recoveryWarning.exec();
+		if (recoveryWarning.clickedButton() != openButton) {
+			break;
+		}
+		QDesktopServices::openUrl(
+			QUrl::fromLocalFile(QString::fromUtf8(status.backupDirectory.u8string().c_str())));
+	}
+	if (recoveryWarning.clickedButton() == safeButton) {
+		safe_mode = true;
+		blog(LOG_WARNING, "Update recovery mode selected; third-party plugins are disabled for this launch");
+	} else if (recoveryWarning.clickedButton() == normalButton) {
+		blog(LOG_WARNING, "Normal launch selected after an incomplete post-update startup");
+	}
+}
+
+void CompletePendingUpdateRecovery()
+{
+	const std::filesystem::path configDirectory = TempestConfigDirectory();
+	if (configDirectory.empty()) {
+		return;
+	}
+	TempestRecovery::CompleteUpdateStartup(configDirectory, TEMPEST_PRODUCT_VERSION);
+}
+#endif
 
 QAccessibleInterface *alignmentSelectorFactory(const QString &classname, QObject *object)
 {
@@ -1085,6 +1166,9 @@ void OBSApp::AppInit()
 	if (!MakeUserDirs()) {
 		throw "Failed to create required user directories";
 	}
+#ifdef _WIN32
+	HandlePendingUpdateRecovery();
+#endif
 	if (!InitGlobalConfig()) {
 		throw "Failed to initialize global config";
 	}
@@ -1325,6 +1409,10 @@ bool OBSApp::OBSInit()
 
 	connect(crashHandler_.get(), &OBS::CrashHandler::crashLogUploadFinished, this,
 		[this](const QString &fileUrl) { emit this->logUploadFinished(OBS::LogFileType::CrashLog, fileUrl); });
+
+#ifdef _WIN32
+	CompletePendingUpdateRecovery();
+#endif
 
 	return true;
 }

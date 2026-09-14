@@ -338,6 +338,7 @@ valid_section_install_directory:
     SetOutPath "$INSTDIR\bin\64bit"
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}" "" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Check for Updates.lnk" "$INSTDIR\${PRODUCT_UPDATER}" "" "$INSTDIR\${PRODUCT_UPDATER}" 0
+    CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Back Up Broadcast Settings.lnk" "$INSTDIR\${PRODUCT_UPDATER}" "--backup-only" "$INSTDIR\${PRODUCT_UPDATER}" 0
     SetOutPath "$INSTDIR"
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Uninstall ${PRODUCT_NAME}.lnk" "$INSTDIR\Uninstall.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
@@ -398,6 +399,7 @@ Section "Uninstall"
   !insertmacro MUI_STARTMENU_GETFOLDER Application $StartMenuFolder
   Delete "$SMPROGRAMS\$StartMenuFolder\${PRODUCT_NAME}.lnk"
   Delete "$SMPROGRAMS\$StartMenuFolder\Check for Updates.lnk"
+  Delete "$SMPROGRAMS\$StartMenuFolder\Back Up Broadcast Settings.lnk"
   Delete "$SMPROGRAMS\$StartMenuFolder\Uninstall ${PRODUCT_NAME}.lnk"
   RMDir "$SMPROGRAMS\$StartMenuFolder"
 
