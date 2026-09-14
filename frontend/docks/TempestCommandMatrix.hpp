@@ -10,6 +10,8 @@
 #include <QString>
 #include <QVector>
 
+#include <atomic>
+
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -136,6 +138,8 @@ private:
 	static void WebSocketTriggerSignal(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketTriggerReactionEvent(obs_data_t *request, obs_data_t *response, void *data);
 	static void WebSocketClearReactionEvent(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketGetContract(obs_data_t *request, obs_data_t *response, void *data);
+	static void WebSocketGetBroadcastState(obs_data_t *request, obs_data_t *response, void *data);
 
 	void BuildInterface();
 	QVector<SceneInfo> EnumerateScenes() const;
@@ -158,6 +162,7 @@ private:
 	void RouteExternalScene(const QString &uuid, const QString &name);
 	void EmitRouterEvent(const char *eventName, obs_data_t *eventData);
 	void SetRouterState();
+	bool ExternalControlAllowed(obs_data_t *response) const;
 	QVector<SourceInfo> EnumerateAudioSources() const;
 	QVector<SourceInfo> EnumerateMediaSources() const;
 	QVector<SourceInfo> EnumerateTransitions() const;
@@ -219,6 +224,7 @@ private:
 	QPointer<QLabel> sourceSceneLabel;
 	QPointer<QLabel> statusLabel;
 	QPointer<QLabel> routerLabel;
+	QPointer<QCheckBox> externalControlCheck;
 	QPointer<QPushButton> basicViewButton;
 	QPointer<QPushButton> protocolViewButton;
 	QPointer<QStackedWidget> viewStack;
@@ -289,6 +295,7 @@ private:
 	quint64 executionRevision = 0;
 	void *webSocketVendor = nullptr;
 	bool webSocketReady = false;
+	std::atomic_bool remoteControlEnabled{false};
 	bool layoutSyncing = false;
 	bool reactionSyncing = false;
 	double layoutAspectRatio = 1.0;

@@ -13,6 +13,7 @@
 #endif
 #include <widgets/OBSBasic.hpp>
 
+#include <obs-frontend-api.h>
 #include <obs.hpp>
 
 #include <QAction>
@@ -52,6 +53,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
+#include <QUuid>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -59,8 +61,39 @@
 #include <cmath>
 #include <cstring>
 
+#ifndef TEMPEST_PRODUCT_VERSION
+#define TEMPEST_PRODUCT_VERSION "1.1.4"
+#endif
+
 namespace {
 constexpr char ConfigSection[] = "TempestCommandMatrix";
+constexpr char BridgeVendorName[] = "tempest-mainframe";
+constexpr char BridgeContractVersion[] = "1.0";
+
+struct BridgeEndpoint {
+	const char *name;
+	const char *access;
+	const char *summary;
+};
+
+constexpr BridgeEndpoint BridgeRequests[] = {
+	{"GetContract", "read", "Discover the stable vendor contract and supported capabilities."},
+	{"GetBroadcastState", "read", "Read output, canvas, current scene, and scene inventory state."},
+	{"RunProtocol", "control", "Run a configured Starting, Live, BRB, or Ending protocol."},
+	{"RouteScene", "control", "Route by stable scene UUID or case-insensitive scene name."},
+	{"SetOverlayState", "control", "Update the Tempest overlay mode and presentation text."},
+	{"RunSequence", "control", "Start a configured production sequence."},
+	{"ControlSequence", "control", "Hold, resume, advance, restart, or stop a sequence."},
+	{"TriggerSignal", "control", "Send a bounded pulse to the Audio Reactor."},
+	{"TriggerReactionEvent", "control", "Start a validated external reaction event."},
+	{"ClearReactionEvent", "control", "Clear the active external reaction event."},
+};
+
+constexpr const char *BridgeEvents[] = {
+	"ProtocolExecuted",      "SceneRouted",            "OverlayStateUpdated",
+	"SignalTriggered",       "ReactionEventTriggered",
+	"ReactionEventCleared",
+};
 
 struct OverlayVisibilityContext {
 	QString selectedSourceName;
@@ -97,6 +130,17 @@ void SetRouterResponse(obs_data_t *response, bool accepted, const char *message)
 {
 	obs_data_set_bool(response, "accepted", accepted);
 	obs_data_set_string(response, "message", message);
+	obs_data_set_string(response, "contractVersion", BridgeContractVersion);
+	obs_data_set_string(response, "vendor", BridgeVendorName);
+}
+
+void AddBridgeEndpoint(obs_data_array_t *array, const BridgeEndpoint &endpoint)
+{
+	OBSDataAutoRelease item = obs_data_create();
+	obs_data_set_string(item, "name", endpoint.name);
+	obs_data_set_string(item, "access", endpoint.access);
+	obs_data_set_string(item, "summary", endpoint.summary);
+	obs_data_array_push_back(array, item);
 }
 
 void GetSceneItemBox(obs_sceneitem_t *item, vec3 &topLeft, vec3 &bottomRight)
@@ -137,6 +181,9 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 	isolateOverlay->setChecked(!config_has_user_value(config, ConfigSection, "IsolateOverlay") ||
 				   config_get_bool(config, ConfigSection, "IsolateOverlay"));
 	startCountdown->setChecked(config_get_bool(config, ConfigSection, "StartCountdown"));
+	remoteControlEnabled = config_has_user_value(config, ConfigSection, "ExternalControlEnabled") &&
+			       config_get_bool(config, ConfigSection, "ExternalControlEnabled");
+	externalControlCheck->setChecked(remoteControlEnabled.load());
 	const char *savedView = config_get_string(config, ConfigSection, "ViewMode");
 	SetViewMode(savedView && QString::fromUtf8(savedView) == QStringLiteral("protocol") ? QStringLiteral("protocol")
 											    : QStringLiteral("basic"),
@@ -146,6 +193,11 @@ TempestCommandMatrix::TempestCommandMatrix(OBSBasic *main, TempestControlDeck *c
 
 	connect(isolateOverlay, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
 	connect(startCountdown, &QCheckBox::toggled, this, &TempestCommandMatrix::SaveAssignments);
+	connect(externalControlCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+		remoteControlEnabled = enabled;
+		SaveAssignments();
+		SetRouterState();
+	});
 
 	refreshTimer = new QTimer(this);
 	refreshTimer->setInterval(1000);
@@ -160,6 +212,10 @@ TempestCommandMatrix::~TempestCommandMatrix()
 	UnregisterHotkeys();
 #ifdef TEMPEST_WEBSOCKET_AVAILABLE
 	if (webSocketVendor) {
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"GetContract");
+		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
+							"GetBroadcastState");
 		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
 							"RunProtocol");
 		obs_websocket_vendor_unregister_request(static_cast<obs_websocket_vendor>(webSocketVendor),
@@ -394,13 +450,17 @@ void TempestCommandMatrix::RegisterExternalControls()
 #ifdef TEMPEST_WEBSOCKET_AVAILABLE
 	if (webSocketVendor)
 		return;
-	webSocketVendor = obs_websocket_register_vendor("tempest-mainframe");
+	webSocketVendor = obs_websocket_register_vendor(BridgeVendorName);
 	if (!webSocketVendor) {
 		SetRouterState();
 		return;
 	}
 
 	const auto vendor = static_cast<obs_websocket_vendor>(webSocketVendor);
+	const bool contractReady =
+		obs_websocket_vendor_register_request(vendor, "GetContract", WebSocketGetContract, this);
+	const bool stateReady = obs_websocket_vendor_register_request(vendor, "GetBroadcastState",
+								      WebSocketGetBroadcastState, this);
 	const bool protocolReady =
 		obs_websocket_vendor_register_request(vendor, "RunProtocol", WebSocketRunProtocol, this);
 	const bool sceneReady = obs_websocket_vendor_register_request(vendor, "RouteScene", WebSocketRouteScene, this);
@@ -419,15 +479,88 @@ void TempestCommandMatrix::RegisterExternalControls()
 	const bool clearReactionEventReady =
 		signalReactor &&
 		obs_websocket_vendor_register_request(vendor, "ClearReactionEvent", WebSocketClearReactionEvent, this);
-	webSocketReady = protocolReady && sceneReady && overlayReady && sequenceReady && sequenceControlReady &&
-			 signalReady && reactionEventReady && clearReactionEventReady;
+	webSocketReady = contractReady && stateReady && protocolReady && sceneReady && overlayReady && sequenceReady &&
+			 sequenceControlReady && signalReady && reactionEventReady && clearReactionEventReady;
 #endif
 	SetRouterState();
+}
+
+void TempestCommandMatrix::WebSocketGetContract(obs_data_t *, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	SetRouterResponse(response, true, "Tempest Broadcast bridge contract discovered");
+	obs_data_set_string(response, "product", "Tempest Broadcast System");
+	obs_data_set_string(response, "productVersion", TEMPEST_PRODUCT_VERSION);
+	obs_data_set_bool(response, "controlEnabled", matrix->remoteControlEnabled.load());
+	obs_data_set_bool(response, "authenticationRecommended", true);
+
+	OBSDataArrayAutoRelease requests = obs_data_array_create();
+	for (const BridgeEndpoint &endpoint : BridgeRequests)
+		AddBridgeEndpoint(requests, endpoint);
+	obs_data_set_array(response, "requests", requests);
+
+	OBSDataArrayAutoRelease events = obs_data_array_create();
+	for (const char *eventName : BridgeEvents) {
+		OBSDataAutoRelease item = obs_data_create();
+		obs_data_set_string(item, "name", eventName);
+		obs_data_array_push_back(events, item);
+	}
+	obs_data_set_array(response, "events", events);
+}
+
+void TempestCommandMatrix::WebSocketGetBroadcastState(obs_data_t *, obs_data_t *response, void *data)
+{
+	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	SetRouterResponse(response, true, "Broadcast state snapshot");
+	obs_data_set_bool(response, "controlEnabled", matrix->remoteControlEnabled.load());
+	obs_data_set_bool(response, "streaming", obs_frontend_streaming_active());
+	obs_data_set_bool(response, "recording", obs_frontend_recording_active());
+	obs_data_set_bool(response, "replayBuffer", obs_frontend_replay_buffer_active());
+	obs_data_set_bool(response, "virtualCamera", obs_frontend_virtualcam_active());
+
+	OBSScene currentScene = matrix->main ? matrix->main->GetCurrentScene() : OBSScene();
+	obs_source_t *currentSource = currentScene ? obs_scene_get_source(currentScene) : nullptr;
+	if (currentSource) {
+		obs_data_set_string(response, "currentSceneUuid", obs_source_get_uuid(currentSource));
+		obs_data_set_string(response, "currentSceneName", obs_source_get_name(currentSource));
+	}
+
+	obs_video_info videoInfo{};
+	if (obs_get_video_info(&videoInfo)) {
+		OBSDataAutoRelease canvas = obs_data_create();
+		obs_data_set_int(canvas, "baseWidth", videoInfo.base_width);
+		obs_data_set_int(canvas, "baseHeight", videoInfo.base_height);
+		obs_data_set_int(canvas, "outputWidth", videoInfo.output_width);
+		obs_data_set_int(canvas, "outputHeight", videoInfo.output_height);
+		obs_data_set_int(canvas, "fpsNumerator", videoInfo.fps_num);
+		obs_data_set_int(canvas, "fpsDenominator", videoInfo.fps_den);
+		obs_data_set_obj(response, "canvas", canvas);
+	}
+
+	OBSDataArrayAutoRelease scenes = obs_data_array_create();
+	for (const SceneInfo &scene : matrix->EnumerateScenes()) {
+		OBSDataAutoRelease item = obs_data_create();
+		obs_data_set_string(item, "uuid", scene.uuid.toUtf8().constData());
+		obs_data_set_string(item, "name", scene.name.toUtf8().constData());
+		obs_data_array_push_back(scenes, item);
+	}
+	obs_data_set_array(response, "scenes", scenes);
+}
+
+bool TempestCommandMatrix::ExternalControlAllowed(obs_data_t *response) const
+{
+	if (remoteControlEnabled.load())
+		return true;
+	SetRouterResponse(response, false, "external control is locked in Scene Control");
+	obs_data_set_string(response, "errorCode", "control-disabled");
+	return false;
 }
 
 void TempestCommandMatrix::WebSocketTriggerSignal(obs_data_t *request, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	if (!matrix->signalReactor) {
 		SetRouterResponse(response, false, "signal reactor is unavailable");
 		return;
@@ -453,6 +586,8 @@ void TempestCommandMatrix::WebSocketTriggerSignal(obs_data_t *request, obs_data_
 void TempestCommandMatrix::WebSocketTriggerReactionEvent(obs_data_t *request, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	if (!matrix->signalReactor) {
 		SetRouterResponse(response, false, "signal reactor is unavailable");
 		return;
@@ -526,6 +661,8 @@ void TempestCommandMatrix::WebSocketTriggerReactionEvent(obs_data_t *request, ob
 void TempestCommandMatrix::WebSocketClearReactionEvent(obs_data_t *, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	if (!matrix->signalReactor) {
 		SetRouterResponse(response, false, "signal reactor is unavailable");
 		return;
@@ -544,6 +681,8 @@ void TempestCommandMatrix::WebSocketClearReactionEvent(obs_data_t *, obs_data_t 
 void TempestCommandMatrix::WebSocketRunProtocol(obs_data_t *request, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	const QString protocolId = QString::fromUtf8(obs_data_get_string(request, "protocol")).toLower();
 	if (!IsProtocolId(protocolId)) {
 		SetRouterResponse(response, false, "protocol must be starting, live, brb, or ending");
@@ -564,6 +703,8 @@ void TempestCommandMatrix::WebSocketRunProtocol(obs_data_t *request, obs_data_t 
 void TempestCommandMatrix::WebSocketRouteScene(obs_data_t *request, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	const QString uuid = QString::fromUtf8(obs_data_get_string(request, "sceneUuid"));
 	const QString name = QString::fromUtf8(obs_data_get_string(request, "sceneName"));
 	if (uuid.isEmpty() && name.isEmpty()) {
@@ -585,6 +726,8 @@ void TempestCommandMatrix::WebSocketRouteScene(obs_data_t *request, obs_data_t *
 void TempestCommandMatrix::WebSocketSetOverlayState(obs_data_t *request, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	const QString mode = QString::fromUtf8(obs_data_get_string(request, "mode")).toLower();
 	if (!IsProtocolId(mode)) {
 		SetRouterResponse(response, false, "mode must be starting, live, brb, or ending");
@@ -615,6 +758,8 @@ void TempestCommandMatrix::WebSocketSetOverlayState(obs_data_t *request, obs_dat
 void TempestCommandMatrix::WebSocketRunSequence(obs_data_t *request, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	const QString sequenceId = QString::fromUtf8(obs_data_get_string(request, "sequence")).toLower();
 	if (!IsProtocolId(sequenceId)) {
 		SetRouterResponse(response, false, "sequence must be starting, live, brb, or ending");
@@ -634,6 +779,8 @@ void TempestCommandMatrix::WebSocketRunSequence(obs_data_t *request, obs_data_t 
 void TempestCommandMatrix::WebSocketControlSequence(obs_data_t *request, obs_data_t *response, void *data)
 {
 	auto *matrix = static_cast<TempestCommandMatrix *>(data);
+	if (!matrix->ExternalControlAllowed(response))
+		return;
 	const QString action = QString::fromUtf8(obs_data_get_string(request, "action")).toLower();
 	static const QStringList actions = {QStringLiteral("hold"),       QStringLiteral("resume"),
 					    QStringLiteral("togglehold"), QStringLiteral("next"),
@@ -658,14 +805,16 @@ void TempestCommandMatrix::SetRouterState()
 	if (!routerLabel)
 		return;
 	const bool hotkeysReady = protocolHotkeys.size() == protocols.size();
-	if (hotkeysReady && webSocketReady)
+	if (hotkeysReady && webSocketReady && remoteControlEnabled.load())
 		routerLabel->setText(QStringLiteral("CONTROL ROUTER // HOTKEYS + WEBSOCKET VENDOR API READY"));
+	else if (hotkeysReady && webSocketReady)
+		routerLabel->setText(QStringLiteral("CONTROL ROUTER // CONTRACT READY // EXTERNAL CONTROL LOCKED"));
 	else if (hotkeysReady)
 		routerLabel->setText(QStringLiteral("CONTROL ROUTER // HOTKEYS READY"));
 	else
 		routerLabel->setText(QStringLiteral("CONTROL ROUTER // INITIALIZING"));
 	if (signalReactor)
-		signalReactor->SetWebSocketReady(webSocketReady);
+		signalReactor->SetWebSocketReady(webSocketReady && remoteControlEnabled.load());
 }
 
 void TempestCommandMatrix::BuildInterface()
@@ -726,9 +875,14 @@ void TempestCommandMatrix::BuildInterface()
 	routerLabel = new QLabel(QStringLiteral("CONTROL ROUTER // INITIALIZING"), root);
 	routerLabel->setObjectName(QStringLiteral("matrixSubtitle"));
 	routerLabel->setToolTip(QStringLiteral(
-		"Assign Stream Deck keyboard buttons in OBS Settings > Hotkeys. Advanced clients can use the "
-		"tempest-mainframe OBS WebSocket vendor."));
+		"Assign Stream Deck keyboard buttons in OBS Settings > Hotkeys. Authenticated clients can discover "
+		"the versioned tempest-mainframe OBS WebSocket contract even while control is locked."));
 	layout->addWidget(routerLabel);
+	externalControlCheck = new QCheckBox(QStringLiteral("Allow Tempest vendor control through OBS WebSocket"), root);
+	externalControlCheck->setAccessibleName(QStringLiteral("Allow Tempest vendor requests to control Broadcast"));
+	externalControlCheck->setToolTip(QStringLiteral(
+		"Off by default. Read-only contract and state discovery remain available to authenticated clients."));
+	layout->addWidget(externalControlCheck);
 
 	auto *viewRow = new QHBoxLayout();
 	viewRow->setSpacing(6);
@@ -2622,6 +2776,7 @@ void TempestCommandMatrix::SaveAssignments()
 	}
 	config_set_bool(config, ConfigSection, "IsolateOverlay", isolateOverlay && isolateOverlay->isChecked());
 	config_set_bool(config, ConfigSection, "StartCountdown", startCountdown && startCountdown->isChecked());
+	config_set_bool(config, ConfigSection, "ExternalControlEnabled", remoteControlEnabled.load());
 	config_save_safe(config, "tmp", nullptr);
 }
 
@@ -2819,9 +2974,20 @@ void TempestCommandMatrix::RouteExternalScene(const QString &uuid, const QString
 void TempestCommandMatrix::EmitRouterEvent(const char *eventName, obs_data_t *eventData)
 {
 #ifdef TEMPEST_WEBSOCKET_AVAILABLE
-	if (webSocketReady && webSocketVendor)
+	if (webSocketReady && webSocketVendor) {
+		OBSDataAutoRelease ownedData;
+		if (!eventData) {
+			ownedData = obs_data_create();
+			eventData = ownedData;
+		}
+		obs_data_set_string(eventData, "contractVersion", BridgeContractVersion);
+		obs_data_set_string(eventData, "vendor", BridgeVendorName);
+		obs_data_set_string(eventData, "eventId", QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8().constData());
+		obs_data_set_string(eventData, "emittedAt",
+				    QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs).toUtf8().constData());
 		obs_websocket_vendor_emit_event(static_cast<obs_websocket_vendor>(webSocketVendor), eventName,
 						eventData);
+	}
 #else
 	UNUSED_PARAMETER(eventName);
 	UNUSED_PARAMETER(eventData);
