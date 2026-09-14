@@ -33,6 +33,24 @@ constexpr char kVerifiedUpdatePath[] = "updates/last-verified-update.json";
 
 const std::set<std::string> kExcludedRootEntries = {".sentinel",          "crashes", "logs", "profiler_data",
 						    kBackupDirectoryName, "updates"};
+const std::set<std::string> kExcludedRelativeEntries = {"plugin_config/obs-browser/debug.log"};
+
+std::filesystem::path IoPath(const std::filesystem::path &path)
+{
+#ifdef _WIN32
+	const std::filesystem::path absolute = std::filesystem::absolute(path).lexically_normal();
+	const std::wstring native = absolute.native();
+	if (native.rfind(LR"(\\?\)", 0) == 0) {
+		return absolute;
+	}
+	if (native.rfind(LR"(\\)", 0) == 0) {
+		return std::filesystem::path(std::wstring(LR"(\\?\UNC\)") + native.substr(2));
+	}
+	return std::filesystem::path(std::wstring(LR"(\\?\)") + native);
+#else
+	return path;
+#endif
+}
 
 std::string Timestamp(bool filenameSafe)
 {
@@ -68,6 +86,12 @@ bool IsExcluded(const std::filesystem::path &relative)
 	if (relative.empty()) {
 		return false;
 	}
+	std::string normalized = relative.generic_u8string();
+	std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+		       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+	if (kExcludedRelativeEntries.count(normalized) != 0) {
+		return true;
+	}
 	std::string root = relative.begin()->u8string();
 	std::transform(root.begin(), root.end(), root.begin(),
 		       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
@@ -88,7 +112,7 @@ bool IsSceneCollection(const std::filesystem::path &relative)
 
 nlohmann::json ReadJson(const std::filesystem::path &path)
 {
-	std::ifstream input(path, std::ios::binary);
+	std::ifstream input(IoPath(path), std::ios::binary);
 	if (!input) {
 		throw std::runtime_error("Could not read " + path.u8string() + ".");
 	}
@@ -99,8 +123,9 @@ nlohmann::json ReadJson(const std::filesystem::path &path)
 
 void WriteJsonAtomic(const std::filesystem::path &path, const nlohmann::json &value)
 {
-	std::filesystem::create_directories(path.parent_path());
-	std::filesystem::path temporary = path;
+	const std::filesystem::path outputPath = IoPath(path);
+	std::filesystem::create_directories(outputPath.parent_path());
+	std::filesystem::path temporary = outputPath;
 	temporary += ".tmp";
 	{
 		std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
@@ -113,14 +138,14 @@ void WriteJsonAtomic(const std::filesystem::path &path, const nlohmann::json &va
 		}
 	}
 	std::error_code ignored;
-	std::filesystem::remove(path, ignored);
-	std::filesystem::rename(temporary, path);
+	std::filesystem::remove(outputPath, ignored);
+	std::filesystem::rename(temporary, outputPath);
 }
 
 std::filesystem::path UniqueBackupPath(const std::filesystem::path &root, const std::string &name)
 {
 	std::filesystem::path candidate = root / name;
-	for (unsigned int suffix = 2; std::filesystem::exists(candidate); ++suffix) {
+	for (unsigned int suffix = 2; std::filesystem::exists(IoPath(candidate)); ++suffix) {
 		candidate = root / (name + "-" + std::to_string(suffix));
 	}
 	return candidate;
@@ -129,7 +154,7 @@ std::filesystem::path UniqueBackupPath(const std::filesystem::path &root, const 
 void PruneBackups(const std::filesystem::path &backupRoot)
 {
 	std::vector<std::filesystem::path> backups;
-	for (const auto &entry : std::filesystem::directory_iterator(backupRoot)) {
+	for (const auto &entry : std::filesystem::directory_iterator(IoPath(backupRoot))) {
 		if (entry.is_directory() && entry.path().filename().u8string().rfind(".incomplete-", 0) != 0 &&
 		    std::filesystem::is_regular_file(entry.path() / "manifest.json")) {
 			backups.push_back(entry.path());
@@ -158,22 +183,24 @@ BackupSummary CreateSettingsBackup(const std::filesystem::path &configDirectory,
 		throw std::runtime_error("The settings backup refused an unsafe configuration directory.");
 	}
 	const std::filesystem::path backupRoot = source / kBackupDirectoryName;
-	std::filesystem::create_directories(backupRoot);
+	std::filesystem::create_directories(IoPath(backupRoot));
 
 	const std::string backupName = Timestamp(true) + "-" + SanitizeName(reason) + "-" + SanitizeName(fromVersion) +
 				       "-to-" + SanitizeName(targetVersion);
 	const std::filesystem::path destination = UniqueBackupPath(backupRoot, backupName);
 	const std::filesystem::path staging = backupRoot / (".incomplete-" + destination.filename().u8string());
 	std::error_code ignored;
-	std::filesystem::remove_all(staging, ignored);
+	std::filesystem::remove_all(IoPath(staging), ignored);
 
 	BackupSummary summary;
 	summary.directory = destination;
 	std::vector<std::string> invalidScenes;
 	try {
-		std::filesystem::create_directories(staging / "settings");
-		for (std::filesystem::recursive_directory_iterator iterator(source), end; iterator != end; ++iterator) {
-			const std::filesystem::path relative = std::filesystem::relative(iterator->path(), source);
+		const std::filesystem::path sourceIo = IoPath(source);
+		std::filesystem::create_directories(IoPath(staging / "settings"));
+		for (std::filesystem::recursive_directory_iterator iterator(sourceIo), end; iterator != end;
+		     ++iterator) {
+			const std::filesystem::path relative = std::filesystem::relative(iterator->path(), sourceIo);
 			if (IsExcluded(relative)) {
 				if (iterator->is_directory()) {
 					iterator.disable_recursion_pending();
@@ -189,18 +216,18 @@ BackupSummary CreateSettingsBackup(const std::filesystem::path &configDirectory,
 
 			const std::filesystem::path target = staging / "settings" / relative;
 			if (iterator->is_directory()) {
-				std::filesystem::create_directories(target);
+				std::filesystem::create_directories(IoPath(target));
 				continue;
 			}
 			if (!iterator->is_regular_file()) {
 				continue;
 			}
 
-			std::filesystem::create_directories(target.parent_path());
-			std::filesystem::copy_file(iterator->path(), target,
+			std::filesystem::create_directories(IoPath(target.parent_path()));
+			std::filesystem::copy_file(iterator->path(), IoPath(target),
 						   std::filesystem::copy_options::overwrite_existing);
 			const uint64_t sourceSize = iterator->file_size();
-			if (std::filesystem::file_size(target) != sourceSize) {
+			if (std::filesystem::file_size(IoPath(target)) != sourceSize) {
 				throw std::runtime_error("Backup verification failed for " + relative.u8string() + ".");
 			}
 			++summary.fileCount;
@@ -231,13 +258,14 @@ BackupSummary CreateSettingsBackup(const std::filesystem::path &configDirectory,
 			{"scene_files_checked", summary.sceneFilesChecked},
 			{"invalid_scene_files", invalidScenes},
 			{"excluded_root_entries", kExcludedRootEntries},
+			{"excluded_relative_entries", kExcludedRelativeEntries},
 		};
 		WriteJsonAtomic(staging / "manifest.json", manifest);
-		std::filesystem::rename(staging, destination);
+		std::filesystem::rename(IoPath(staging), IoPath(destination));
 		PruneBackups(backupRoot);
 		return summary;
 	} catch (...) {
-		std::filesystem::remove_all(staging, ignored);
+		std::filesystem::remove_all(IoPath(staging), ignored);
 		throw;
 	}
 }
@@ -265,7 +293,7 @@ UpdateStartupStatus BeginUpdateStartup(const std::filesystem::path &configDirect
 	UpdateStartupStatus status;
 	const std::filesystem::path pendingPath = PendingUpdateFile(configDirectory);
 	std::error_code pendingError;
-	if (!std::filesystem::is_regular_file(pendingPath, pendingError)) {
+	if (!std::filesystem::is_regular_file(IoPath(pendingPath), pendingError)) {
 		return status;
 	}
 
@@ -295,7 +323,7 @@ void CompleteUpdateStartup(const std::filesystem::path &configDirectory, const s
 {
 	const std::filesystem::path pendingPath = PendingUpdateFile(configDirectory);
 	std::error_code pendingError;
-	if (!std::filesystem::is_regular_file(pendingPath, pendingError)) {
+	if (!std::filesystem::is_regular_file(IoPath(pendingPath), pendingError)) {
 		return;
 	}
 
@@ -307,7 +335,7 @@ void CompleteUpdateStartup(const std::filesystem::path &configDirectory, const s
 		pending["verified_utc"] = Timestamp(false);
 		pending["launch_state"] = "verified";
 		WriteJsonAtomic(configDirectory / std::filesystem::u8path(kVerifiedUpdatePath), pending);
-		std::filesystem::remove(pendingPath);
+		std::filesystem::remove(IoPath(pendingPath));
 	} catch (const std::exception &) {
 		// A stale diagnostic must never turn a successful application start into a failure.
 	}

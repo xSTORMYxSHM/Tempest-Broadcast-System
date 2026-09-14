@@ -11,8 +11,9 @@ keeps installed and portable configurations independent. Each backup contains:
 - a `manifest.json` recording the source and target versions, file and byte counts, and scene-collection JSON
   validation results.
 
-Logs, crash reports, profiler data, downloaded updates, the live crash sentinel, and older recovery backups are not
-copied. The five most recent completed backups are retained.
+Logs, including the embedded browser's volatile diagnostic log, crash reports, profiler data, downloaded updates,
+the live crash sentinel, and older recovery backups are not copied. The five most recent completed backups are
+retained.
 
 The updater records a pending first-start checkpoint after creating the backup. Broadcast clears that checkpoint
 only after its main window, graphics, audio, modules, profiles, and scene collection have initialized. If the first

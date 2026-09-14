@@ -49,7 +49,9 @@ horizontal-and-portrait production environment, while making migration, external
 - Creates a verified local settings snapshot before the updater launches an installer and cancels the update if the
   snapshot cannot complete.
 - Preserves profiles, scene collections, application settings, plugin settings, Control Deck data, and custom themes.
-- Retains the five newest backups while excluding logs, crash reports, profiler data, and downloaded update files.
+- Retains the five newest backups while excluding volatile logs, including the embedded browser diagnostic log,
+  crash reports, profiler data, and downloaded update files.
+- Handles deeply nested browser and plugin profile files without failing at the legacy Windows path-length limit.
 - Records file counts, byte counts, and scene-collection JSON validation in each backup manifest.
 - Detects an incomplete first startup after an update and offers recovery mode with third-party plugins disabled.
 - Adds **Back Up Broadcast Settings** to the installed Start Menu shortcuts for an on-demand verified snapshot.
