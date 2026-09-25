@@ -62,7 +62,7 @@
 #include <cstring>
 
 #ifndef TEMPEST_PRODUCT_VERSION
-#define TEMPEST_PRODUCT_VERSION "1.2.0"
+#define TEMPEST_PRODUCT_VERSION "1.2.1"
 #endif
 
 namespace {
@@ -2594,7 +2594,24 @@ void TempestCommandMatrix::ApplyReactionLevels(float master, float desktop, floa
 	reactionPhase = std::fmod(reactionPhase + 0.28, 6.283185307179586);
 	const qint64 now = QDateTime::currentMSecsSinceEpoch();
 	const bool testingNetwork = now < reactionNetworkTestUntil;
+	const bool selectedTestActive = !reactionTestKey.isEmpty() && now < reactionTestUntil;
 	const bool externalEventActive = now < reactionExternalEventUntil;
+	if (sourceReactions.isEmpty()) {
+		if (!reactionOutputsIdle) {
+			PublishReactionCircuitActivity({});
+			reactionOutputsIdle = true;
+		}
+		return;
+	}
+	if (!reactionNetworkArmed && !testingNetwork && !selectedTestActive && !externalEventActive) {
+		if (!reactionOutputsIdle) {
+			RestoreAllReactions();
+			PublishReactionCircuitActivity({});
+			reactionOutputsIdle = true;
+		}
+		return;
+	}
+	reactionOutputsIdle = false;
 	QHash<QString, float> circuitActivity;
 	bool capturedBaseline = false;
 	for (auto it = sourceReactions.begin(); it != sourceReactions.end(); ++it) {

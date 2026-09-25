@@ -80,7 +80,6 @@ TempestSequenceDirector::TempestSequenceDirector(OBSBasic *main, TempestCommandM
 
 	sequenceTimer.setInterval(100);
 	connect(&sequenceTimer, &QTimer::timeout, this, &TempestSequenceDirector::TickSequence);
-	sequenceTimer.start();
 }
 
 TempestSequenceDirector::~TempestSequenceDirector()
@@ -625,6 +624,7 @@ void TempestSequenceDirector::RunSequence(const QString &sequenceId)
 	running = true;
 	held = false;
 	sequenceClock.restart();
+	sequenceTimer.start();
 	controlDeck->ActivateMode(normalized, false);
 	SetRunningState(true, false);
 	SetStatus(QStringLiteral("%1 SEQUENCE RUNNING").arg(normalized.toUpper()));
@@ -639,12 +639,14 @@ void TempestSequenceDirector::ToggleHold()
 		elapsedBaseMs += sequenceClock.elapsed();
 		running = false;
 		held = true;
+		sequenceTimer.stop();
 		SetRunningState(false, true);
 		SetStatus(QStringLiteral("SEQUENCE HELD // NEXT CUE ARMED"));
 	} else {
 		running = true;
 		held = false;
 		sequenceClock.restart();
+		sequenceTimer.start();
 		SetRunningState(true, false);
 		SetStatus(QStringLiteral("SEQUENCE RESUMED"));
 	}
@@ -667,6 +669,7 @@ void TempestSequenceDirector::ExecuteNextCue()
 	if (nextCueIndex >= cues.size() && (running || held)) {
 		running = false;
 		held = false;
+		sequenceTimer.stop();
 		SetRunningState(false, false);
 		SetStatus(QStringLiteral("SEQUENCE COMPLETE"));
 	}
@@ -676,6 +679,7 @@ void TempestSequenceDirector::StopSequence()
 {
 	running = false;
 	held = false;
+	sequenceTimer.stop();
 	elapsedBaseMs = 0;
 	nextCueIndex = 0;
 	clockLabel->setText(QStringLiteral("00:00.0"));
@@ -725,6 +729,7 @@ void TempestSequenceDirector::TickSequence()
 	if (nextCueIndex >= cues.size()) {
 		running = false;
 		held = false;
+		sequenceTimer.stop();
 		SetRunningState(false, false);
 		SetStatus(QStringLiteral("%1 SEQUENCE COMPLETE").arg(activeSequenceId.toUpper()));
 	}

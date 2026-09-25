@@ -1681,11 +1681,17 @@ void TempestSignalReactor::PublishTelemetry()
 	telemetry.insert(QStringLiteral("timestamp"), QDateTime::currentMSecsSinceEpoch());
 	const QByteArray payload = QJsonDocument(telemetry).toJson(QJsonDocument::Compact);
 	obs_enum_sources(PublishTempestBrowserTelemetry, const_cast<QByteArray *>(&payload));
+	const bool eventStateChanged = lastTelemetryFileEventSequence != externalEventSequence;
+	if (!eventStateChanged && lastTelemetryFileWriteMs > 0 && now - lastTelemetryFileWriteMs < 250)
+		return;
 	QSaveFile file(telemetryPath);
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
 		return;
 	file.write(payload);
-	file.commit();
+	if (file.commit()) {
+		lastTelemetryFileWriteMs = now;
+		lastTelemetryFileEventSequence = externalEventSequence;
+	}
 }
 
 void TempestSignalReactor::SetStatus(const QString &message, bool error)

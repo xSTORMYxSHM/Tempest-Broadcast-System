@@ -168,6 +168,8 @@ private:
 	QString configuredMediaUuid;
 	QString configuredMicrophoneUuid;
 	QString telemetryPath;
+	qint64 lastTelemetryFileWriteMs = 0;
+	quint64 lastTelemetryFileEventSequence = 0;
 	float manualPulse = 0.0f;
 	float beatBaseline = 0.0f;
 	float beatLevel = 0.0f;

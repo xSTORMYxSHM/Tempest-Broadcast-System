@@ -314,4 +314,5 @@ private:
 	QString reactionCircuitProfile = QStringLiteral("all");
 	QString reactionSoloCircuit;
 	QHash<QString, double> reactionCircuitGains;
+	bool reactionOutputsIdle = false;
 };

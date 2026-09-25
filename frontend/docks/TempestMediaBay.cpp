@@ -33,10 +33,22 @@ TempestMediaBay::TempestMediaBay(QWidget *parent) : OBSDock(parent)
 
 	sourceRefreshTimer.setInterval(1000);
 	connect(&sourceRefreshTimer, &QTimer::timeout, this, &TempestMediaBay::RefreshSources);
-	sourceRefreshTimer.start();
 	playbackTimer.setInterval(200);
 	connect(&playbackTimer, &QTimer::timeout, this, &TempestMediaBay::RefreshPlaybackState);
-	playbackTimer.start();
+	connect(this, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+		if (visible) {
+			sourceRefreshTimer.start();
+			playbackTimer.start();
+			RefreshSources();
+		} else {
+			sourceRefreshTimer.stop();
+			playbackTimer.stop();
+		}
+	});
+	if (isVisible()) {
+		sourceRefreshTimer.start();
+		playbackTimer.start();
+	}
 	RefreshSources();
 }
 
