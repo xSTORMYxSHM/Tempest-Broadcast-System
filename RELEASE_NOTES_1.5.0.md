@@ -37,6 +37,12 @@ native dual-format production assets, startup recovery, and local runtime observ
 - Migrates existing profiles to the single workspace without changing scenes, sources, outputs, or dock visibility.
 - Replaces Recover Command Layout with Recover Default Layout so recovery cannot return users to the retired mode.
 
+## Asset Library usability
+
+- Replaces multi-line asset rows with a compact, name-first list that remains readable in a narrow dock.
+- Moves collection, type, size, and full path details to the selected summary and hover tooltip.
+- Shortens the media-loop and asset action labels without changing their behavior.
+
 ## Compatibility and quality policy
 
 - Preserves Studio Bridge protocol `1.0` and Viewer Interaction render contract `1.0`.

@@ -242,6 +242,8 @@ Automation and scene switching use the native OBS scene and transition system. T
 
 The native **Asset Library** can share a dock bay with Stream Overlay and Sequence Director or remain independently docked or floating. It indexes user-selected folders recursively without copying, moving, renaming, decoding, or modifying the files it finds. No user folders are selected by default; the generated Stream Overlay element folder is included automatically.
 
+The asset browser uses compact, name-first rows so audio-reactive and other generated assets remain scannable in a narrow dock. Selecting an item shows its type, collection, and size; hovering either the row or selected summary reveals the full local path without repeating it throughout the list.
+
 The Asset Library provides:
 
 - incremental indexing for MP4, MOV, MKV, WebM, AVI, M4V, GIF, and local HTML overlay assets;

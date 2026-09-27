@@ -262,7 +262,7 @@ void TempestAssetVault::BuildInterface()
 		QLabel#vaultStatus { color: #45d9ff; font-size: 10px; }
 		QComboBox, QLineEdit, QListWidget { background: #06101a; border: 1px solid #1f506d; color: #bdf6ff; }
 		QComboBox, QLineEdit { min-height: 29px; padding: 0 7px; }
-		QListWidget::item { min-height: 39px; border-bottom: 1px solid #102c3e; padding: 4px; }
+		QListWidget::item { min-height: 27px; border-bottom: 1px solid #102c3e; padding: 3px 6px; }
 		QListWidget::item:selected { background: #073c5f; border: 1px solid #45d9ff; }
 		QPushButton { min-height: 31px; border: 1px solid #1f506d; background: #0d2230; color: #bdf6ff; font-weight: 700; padding: 0 8px; }
 		QPushButton:hover { border-color: #45d9ff; background: #0c456b; }
@@ -309,6 +309,8 @@ void TempestAssetVault::BuildInterface()
 	assetList = new QListWidget(root);
 	assetList->setObjectName(QStringLiteral("tempestVaultAssetList"));
 	assetList->setAccessibleName(QStringLiteral("Indexed media and overlay assets"));
+	assetList->setTextElideMode(Qt::ElideRight);
+	assetList->setUniformItemSizes(true);
 	connect(assetList, &QListWidget::currentRowChanged, this, &TempestAssetVault::SelectAsset);
 	connect(assetList, &QListWidget::itemDoubleClicked, this, &TempestAssetVault::LoadSelectedAsset);
 	layout->addWidget(assetList, 1);
@@ -329,11 +331,14 @@ void TempestAssetVault::BuildInterface()
 	bankRow->addWidget(assign);
 	layout->addLayout(bankRow);
 
-	loopOnBus = new QCheckBox(QStringLiteral("Loop video or audio when added / queued"), root);
+	loopOnBus = new QCheckBox(QStringLiteral("Loop media"), root);
+	loopOnBus->setToolTip(QStringLiteral("Loop video or audio when it is added or queued."));
 	layout->addWidget(loopOnBus);
-	loadButton = new QPushButton(QStringLiteral("PREVIEW SELECTED ASSET"), root);
-	queueButton = new QPushButton(QStringLiteral("ADD TO CURRENT SEQUENCE"), root);
-	auto *openFolder = new QPushButton(QStringLiteral("OPEN FILE LOCATION"), root);
+	loadButton = new QPushButton(QStringLiteral("SELECT AN ASSET"), root);
+	loadButton->setToolTip(QStringLiteral("Add or update the selected asset in the active scene."));
+	queueButton = new QPushButton(QStringLiteral("ADD TO SEQUENCE"), root);
+	queueButton->setToolTip(QStringLiteral("Add the selected media file to the current sequence."));
+	auto *openFolder = new QPushButton(QStringLiteral("SHOW IN FOLDER"), root);
 	connect(loadButton, &QPushButton::clicked, this, &TempestAssetVault::LoadSelectedAsset);
 	connect(queueButton, &QPushButton::clicked, this, &TempestAssetVault::AddSelectedToSequence);
 	connect(openFolder, &QPushButton::clicked, this, &TempestAssetVault::OpenSelectedFolder);
@@ -341,7 +346,8 @@ void TempestAssetVault::BuildInterface()
 	layout->addWidget(queueButton);
 	layout->addWidget(openFolder);
 
-	auto *refresh = new QPushButton(QStringLiteral("RESCAN LIBRARY"), root);
+	auto *refresh = new QPushButton(QStringLiteral("RESCAN"), root);
+	refresh->setToolTip(QStringLiteral("Rescan all configured asset folders."));
 	connect(refresh, &QPushButton::clicked, this, &TempestAssetVault::StartScan);
 	layout->addWidget(refresh);
 	statusLabel = new QLabel(QStringLiteral("LIBRARY INITIALIZING"), root);
@@ -608,13 +614,13 @@ void TempestAssetVault::RebuildAssetList()
 			continue;
 		}
 		const QFileInfo info(asset.path);
-		auto *item = new QListWidgetItem(QStringLiteral("%1 // %2 // %3\n%4")
-							 .arg(asset.bank, KindName(KindForFile(info), info),
-							      asset.displayName,
-							      QDir::toNativeSeparators(QFileInfo(asset.path).path())),
-						 assetList);
+		const QString kindName = KindName(KindForFile(info), info);
+		auto *item = new QListWidgetItem(asset.displayName, assetList);
 		item->setData(Qt::UserRole, index);
-		item->setToolTip(QDir::toNativeSeparators(asset.path));
+		item->setToolTip(QStringLiteral("%1\n%2 // %3\n%4")
+					 .arg(asset.displayName, kindName, asset.bank, QDir::toNativeSeparators(asset.path)));
+		item->setData(Qt::AccessibleDescriptionRole,
+			      QStringLiteral("%1, %2, %3").arg(kindName, asset.bank, FormatBytes(asset.bytes)));
 		if (asset.path == selectedPath) {
 			assetList->setCurrentItem(item);
 		}
@@ -642,22 +648,25 @@ void TempestAssetVault::SelectAsset()
 	const AssetKind kind = asset ? KindForFile(info) : AssetKind::Text;
 	queueButton->setEnabled(asset && kind == AssetKind::Media);
 	loopOnBus->setEnabled(asset && kind == AssetKind::Media);
-	if (kind == AssetKind::Image) {
-		loadButton->setText(QStringLiteral("ADD / UPDATE IMAGE ELEMENT"));
+	if (!asset) {
+		loadButton->setText(QStringLiteral("SELECT AN ASSET"));
+	} else if (kind == AssetKind::Image) {
+		loadButton->setText(QStringLiteral("ADD IMAGE"));
 	} else if (kind == AssetKind::Media) {
-		loadButton->setText(QStringLiteral("ADD / UPDATE MEDIA ELEMENT"));
+		loadButton->setText(QStringLiteral("ADD MEDIA"));
 	} else if (kind == AssetKind::Browser) {
-		loadButton->setText(QStringLiteral("ADD / UPDATE BROWSER ELEMENT"));
+		loadButton->setText(QStringLiteral("ADD OVERLAY"));
 	} else {
-		loadButton->setText(QStringLiteral("OPEN TEXT / DATA ASSET"));
+		loadButton->setText(QStringLiteral("OPEN FILE"));
 	}
 	if (!asset) {
 		detailLabel->setText(scanning ? QStringLiteral("INDEXING...") : QStringLiteral("NO ASSET SELECTED"));
+		detailLabel->setToolTip(QString());
 		return;
 	}
-	detailLabel->setText(QStringLiteral("%1\n%2\n%3 // %4 // %5")
-				     .arg(asset->displayName, QDir::toNativeSeparators(asset->path), asset->bank,
-					  KindName(kind, info), FormatBytes(asset->bytes)));
+	detailLabel->setText(QStringLiteral("%1\n%2 // %3 // %4")
+				     .arg(asset->displayName, KindName(kind, info), asset->bank, FormatBytes(asset->bytes)));
+	detailLabel->setToolTip(QDir::toNativeSeparators(asset->path));
 	const int bankIndex = assignBankSelector->findData(asset->bank);
 	if (bankIndex >= 0) {
 		QSignalBlocker blocker(assignBankSelector);
