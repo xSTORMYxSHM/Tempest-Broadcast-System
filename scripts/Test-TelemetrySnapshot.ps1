@@ -51,9 +51,23 @@ foreach ($field in @(
 
 Assert-Condition ($snapshot -match 'obs_frontend_get_streaming_output') `
     'Runtime telemetry must report the real primary stream output when available.'
+Assert-Condition ($snapshot -match 'obs_video_active\(\)\s*\?\s*obs_get_video\(\)\s*:\s*nullptr') `
+    'Runtime telemetry must not request the main video output before the startup video reset completes.'
 Assert-Condition ($snapshot -match 'obs_output_get_frames_dropped') `
     'Runtime telemetry must expose network/output dropped frames.'
 Assert-Condition ($snapshot -match 'telemetrySnapshotErrorLogged') `
     'Runtime telemetry failures must be log-rate-limited.'
+
+$frontendApiPath = Join-Path $SourceRoot 'frontend/OBSStudioAPI.cpp'
+$frontendApi = Get-Content -Raw -LiteralPath $frontendApiPath
+foreach ($method in @('obs_frontend_get_recording_output', 'obs_frontend_get_replay_buffer_output')) {
+    $methodMatch = [regex]::Match(
+        $frontendApi,
+        "obs_output_t \*OBSStudioAPI::${method}\(\)[\s\S]*?\n}"
+    )
+    Assert-Condition $methodMatch.Success "Unable to isolate ${method}."
+    Assert-Condition ($methodMatch.Value -match '!main\s*\|\|\s*!main->outputHandler') `
+        "${method} must tolerate telemetry requests before the output handler is initialized."
+}
 
 Write-Host 'Runtime telemetry snapshot regression checks passed.'

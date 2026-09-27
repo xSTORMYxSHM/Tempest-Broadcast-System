@@ -415,12 +415,20 @@ obs_output_t *OBSStudioAPI::obs_frontend_get_streaming_output()
 
 obs_output_t *OBSStudioAPI::obs_frontend_get_recording_output()
 {
+	if (!main || !main->outputHandler) {
+		return nullptr;
+	}
+
 	OBSOutput out = main->outputHandler->fileOutput.Get();
 	return obs_output_get_ref(out);
 }
 
 obs_output_t *OBSStudioAPI::obs_frontend_get_replay_buffer_output()
 {
+	if (!main || !main->outputHandler) {
+		return nullptr;
+	}
+
 	OBSOutput out = main->outputHandler->replayBuffer.Get();
 	return obs_output_get_ref(out);
 }

@@ -521,7 +521,10 @@ void TempestMainframeBar::WriteTelemetrySnapshot()
 		return;
 	}
 
-	video_t *video = obs_get_video();
+	/* The command bar is constructed before the initial video reset finishes.
+	 * obs_get_video() assumes the main canvas already exists, so never call it
+	 * from this startup timer until OBS reports an active video mix. */
+	video_t *video = obs_video_active() ? obs_get_video() : nullptr;
 	QJsonObject stats;
 	stats.insert(QStringLiteral("cpuUsage"), main->GetCPUUsage());
 	stats.insert(QStringLiteral("memoryUsage"),

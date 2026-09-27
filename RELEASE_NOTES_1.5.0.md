@@ -24,6 +24,8 @@ native dual-format production assets, startup recovery, and local runtime observ
 
 - Publishes an atomic local `telemetry/runtime.json` snapshot once per second without requiring the OBS WebSocket
   server to be enabled.
+- Defers video and output inspection until OBS startup has initialized those objects, preventing early telemetry
+  polling from dereferencing the not-yet-created main canvas or output handler.
 - Exposes OBS-compatible CPU, memory, FPS, render-time, render-lag, encoder-lag, stream-output, recording-output,
   congestion, reconnect, byte, frame, and dropped-frame counters.
 - Keeps the authenticated OBS WebSocket interface optional and leaves its existing enabled/disabled state unchanged.
