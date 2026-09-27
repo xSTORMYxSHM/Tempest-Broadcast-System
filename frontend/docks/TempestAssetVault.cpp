@@ -282,10 +282,12 @@ void TempestAssetVault::BuildInterface()
 	auto *rootRow = new QHBoxLayout();
 	rootsSelector = new QComboBox(root);
 	rootsSelector->setObjectName(QStringLiteral("tempestVaultRoots"));
+	rootsSelector->setAccessibleName(QStringLiteral("Asset folder view"));
 	auto *addRoot = new QPushButton(QStringLiteral("ADD FOLDER"), root);
 	auto *removeRoot = new QPushButton(QStringLiteral("REMOVE"), root);
 	connect(addRoot, &QPushButton::clicked, this, &TempestAssetVault::AddRootFolder);
 	connect(removeRoot, &QPushButton::clicked, this, &TempestAssetVault::RemoveRootFolder);
+	connect(rootsSelector, &QComboBox::currentIndexChanged, this, &TempestAssetVault::RebuildAssetList);
 	rootRow->addWidget(rootsSelector, 1);
 	rootRow->addWidget(addRoot);
 	rootRow->addWidget(removeRoot);
@@ -294,11 +296,12 @@ void TempestAssetVault::BuildInterface()
 	auto *filterRow = new QHBoxLayout();
 	searchField = new QLineEdit(root);
 	searchField->setObjectName(QStringLiteral("tempestVaultSearch"));
-	searchField->setPlaceholderText(QStringLiteral("Search filename or folder..."));
+	searchField->setPlaceholderText(QStringLiteral("Search this folder view..."));
 	bankFilter = new QComboBox(root);
-	bankFilter->addItem(QStringLiteral("ALL COLLECTIONS"), QString());
+	bankFilter->setAccessibleName(QStringLiteral("Optional asset tag filter"));
+	bankFilter->addItem(QStringLiteral("ALL TAGS"), QString());
 	for (const QString &bank : BankNames) {
-		bankFilter->addItem(bank, bank);
+		bankFilter->addItem(bank == QStringLiteral("UNASSIGNED") ? QStringLiteral("NO TAG") : bank, bank);
 	}
 	connect(searchField, &QLineEdit::textChanged, this, &TempestAssetVault::RebuildAssetList);
 	connect(bankFilter, &QComboBox::currentIndexChanged, this, &TempestAssetVault::RebuildAssetList);
@@ -323,9 +326,9 @@ void TempestAssetVault::BuildInterface()
 	auto *bankRow = new QHBoxLayout();
 	assignBankSelector = new QComboBox(root);
 	for (const QString &bank : BankNames) {
-		assignBankSelector->addItem(bank, bank);
+		assignBankSelector->addItem(bank == QStringLiteral("UNASSIGNED") ? QStringLiteral("NO TAG") : bank, bank);
 	}
-	auto *assign = new QPushButton(QStringLiteral("ASSIGN COLLECTION"), root);
+	auto *assign = new QPushButton(QStringLiteral("SET TAG"), root);
 	connect(assign, &QPushButton::clicked, this, &TempestAssetVault::AssignBank);
 	bankRow->addWidget(assignBankSelector, 1);
 	bankRow->addWidget(assign);
@@ -383,6 +386,7 @@ void TempestAssetVault::LoadState()
 	char controlDeckPath[1024];
 	if (GetAppConfigPath(controlDeckPath, sizeof(controlDeckPath), "tempest-broadcast-system/control-deck") > 0) {
 		const QString path = NormalizePath(QString::fromUtf8(controlDeckPath));
+		managedRoot = path;
 		const QString profilesPath = NormalizePath(QDir(path).filePath(QStringLiteral("profiles")));
 		const QString elementsPath = NormalizePath(QDir(path).filePath(QStringLiteral("vault-elements")));
 		for (qsizetype index = roots.size() - 1; index >= 0; --index) {
@@ -430,8 +434,19 @@ void TempestAssetVault::RebuildRootSelector()
 	if (roots.isEmpty()) {
 		rootsSelector->addItem(QStringLiteral("No indexed folders"), QString());
 	} else {
+		rootsSelector->addItem(QStringLiteral("ALL FOLDERS"), QString());
+		rootsSelector->setItemData(0, QStringLiteral("Show assets from every indexed folder."), Qt::ToolTipRole);
 		for (const QString &root : roots) {
-			rootsSelector->addItem(QDir::toNativeSeparators(root), root);
+			const QFileInfo info(root);
+			QString label = root.compare(managedRoot, Qt::CaseInsensitive) == 0
+						? QStringLiteral("BUILT-IN ASSETS")
+						: info.fileName();
+			if (label.isEmpty()) {
+				label = QDir::toNativeSeparators(root);
+			}
+			rootsSelector->addItem(label, root);
+			rootsSelector->setItemData(rootsSelector->count() - 1, QDir::toNativeSeparators(root),
+						   Qt::ToolTipRole);
 		}
 	}
 	const int index = rootsSelector->findData(selected);
@@ -453,6 +468,8 @@ void TempestAssetVault::AddRootFolder()
 		roots.push_back(normalized);
 	}
 	SaveRoots();
+	searchField->clear();
+	bankFilter->setCurrentIndex(0);
 	RebuildRootSelector();
 	rootsSelector->setCurrentIndex(rootsSelector->findData(normalized));
 	StartScan();
@@ -462,6 +479,11 @@ void TempestAssetVault::RemoveRootFolder()
 {
 	const QString selected = rootsSelector->currentData().toString();
 	if (selected.isEmpty()) {
+		SetStatus(QStringLiteral("SELECT A FOLDER TO REMOVE"), true);
+		return;
+	}
+	if (selected.compare(managedRoot, Qt::CaseInsensitive) == 0) {
+		SetStatus(QStringLiteral("BUILT-IN ASSETS CANNOT BE REMOVED"), true);
 		return;
 	}
 	for (int index = 0; index < roots.size(); ++index) {
@@ -471,6 +493,7 @@ void TempestAssetVault::RemoveRootFolder()
 		}
 	}
 	SaveRoots();
+	bankFilter->setCurrentIndex(0);
 	RebuildRootSelector();
 	StartScan();
 }
@@ -520,13 +543,16 @@ void TempestAssetVault::ScanBatch()
 			const bool browserAsset = kind == AssetKind::Browser;
 			const bool textAsset = kind == AssetKind::Text;
 			const QByteArray html = browserAsset ? HtmlPreview(path) : QByteArray();
-			const QString defaultBank = IsAudioReactiveHtml(info, html) ? QStringLiteral("AUDIO REACTIVE")
-						    : textAsset                     ? QStringLiteral("TEXT")
-						    : kind == AssetKind::Media &&
-								    HasExtension(AudioExtensions, info.suffix())
-							    ? QStringLiteral("ALERT")
-							    : QStringLiteral("OVERLAY");
-			assets.push_back({path, info.fileName(), FriendlyAssetName(info, html),
+			QString defaultBank = QStringLiteral("UNASSIGNED");
+			if (roots[scanRootIndex].compare(managedRoot, Qt::CaseInsensitive) == 0) {
+				defaultBank = IsAudioReactiveHtml(info, html) ? QStringLiteral("AUDIO REACTIVE")
+					      : textAsset                     ? QStringLiteral("TEXT")
+					      : kind == AssetKind::Media &&
+							      HasExtension(AudioExtensions, info.suffix())
+						      ? QStringLiteral("ALERT")
+						      : QStringLiteral("OVERLAY");
+			}
+			assets.push_back({path, roots[scanRootIndex], info.fileName(), FriendlyAssetName(info, html),
 					  banks.value(path, defaultBank), info.size()});
 		} else {
 			iterator.reset();
@@ -542,8 +568,8 @@ void TempestAssetVault::ScanBatch()
 	iterator.reset();
 	scanning = false;
 	std::sort(assets.begin(), assets.end(), [](const Asset &a, const Asset &b) {
-		const int bankOrder = a.bank.compare(b.bank, Qt::CaseInsensitive);
-		return bankOrder == 0 ? a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0 : bankOrder < 0;
+		const int rootOrder = a.root.compare(b.root, Qt::CaseInsensitive);
+		return rootOrder == 0 ? a.displayName.compare(b.displayName, Qt::CaseInsensitive) < 0 : rootOrder < 0;
 	});
 	RebuildAssetList();
 	RefreshWatchPaths();
@@ -600,11 +626,15 @@ void TempestAssetVault::RebuildAssetList()
 {
 	const QString selectedPath = SelectedAsset() ? SelectedAsset()->path : QString();
 	const QString search = searchField->text().trimmed();
+	const QString root = rootsSelector->currentData().toString();
 	const QString bank = bankFilter->currentData().toString();
 	QSignalBlocker blocker(assetList);
 	assetList->clear();
 	for (int index = 0; index < assets.size(); ++index) {
 		const Asset &asset = assets[index];
+		if (!root.isEmpty() && asset.root.compare(root, Qt::CaseInsensitive) != 0) {
+			continue;
+		}
 		if (!bank.isEmpty() && asset.bank != bank) {
 			continue;
 		}
@@ -629,6 +659,19 @@ void TempestAssetVault::RebuildAssetList()
 		assetList->setCurrentRow(0);
 	}
 	SelectAsset();
+	if (!scanning) {
+		if (assetList->count() > 0) {
+			SetStatus(QStringLiteral("SHOWING %1 OF %2 ASSETS").arg(assetList->count()).arg(assets.size()));
+		} else if (!search.isEmpty() || !bank.isEmpty()) {
+			detailLabel->setText(QStringLiteral("NO ASSETS MATCH THIS SEARCH OR TAG"));
+			SetStatus(QStringLiteral("NO ASSETS MATCH CURRENT FILTERS"));
+		} else if (!root.isEmpty()) {
+			detailLabel->setText(QStringLiteral("NO SUPPORTED ASSETS FOUND IN THIS FOLDER"));
+			SetStatus(QStringLiteral("THIS FOLDER HAS NO SUPPORTED ASSETS"));
+		} else {
+			SetStatus(QStringLiteral("LIBRARY EMPTY"));
+		}
+	}
 }
 
 const TempestAssetVault::Asset *TempestAssetVault::SelectedAsset() const
@@ -691,7 +734,7 @@ void TempestAssetVault::AssignBank()
 	}
 	SaveBanks();
 	RebuildAssetList();
-	SetStatus(QStringLiteral("COLLECTION ASSIGNED // %1").arg(bank));
+	SetStatus(QStringLiteral("TAG SET // %1").arg(bank == QStringLiteral("UNASSIGNED") ? QStringLiteral("NO TAG") : bank));
 }
 
 QString TempestAssetVault::EnsureAssetBus(const QString &filePath, bool playNow)

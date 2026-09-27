@@ -48,6 +48,7 @@ private slots:
 private:
 	struct Asset {
 		QString path;
+		QString root;
 		QString name;
 		QString displayName;
 		QString bank;
@@ -86,6 +87,7 @@ private:
 	QTimer scanTimer;
 	QTimer watcherDebounce;
 	QStringList roots;
+	QString managedRoot;
 	QHash<QString, QString> banks;
 	QSet<QString> scannedPaths;
 	QVector<Asset> assets;

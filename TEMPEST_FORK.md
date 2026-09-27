@@ -242,12 +242,14 @@ Automation and scene switching use the native OBS scene and transition system. T
 
 The native **Asset Library** can share a dock bay with Stream Overlay and Sequence Director or remain independently docked or floating. It indexes user-selected folders recursively without copying, moving, renaming, decoding, or modifying the files it finds. No user folders are selected by default; the generated Stream Overlay element folder is included automatically.
 
-The asset browser uses compact, name-first rows so audio-reactive and other generated assets remain scannable in a narrow dock. Selecting an item shows its type, collection, and size; hovering either the row or selected summary reveals the full local path without repeating it throughout the list.
+The asset browser uses compact, name-first rows so audio-reactive and other generated assets remain scannable in a narrow dock. Selecting an item shows its type, optional tag, and size; hovering either the row or selected summary reveals the full local path without repeating it throughout the list.
+
+The folder selector is also the library's primary navigation: **All Folders** shows the combined index, while selecting a named folder limits the list to that root. Adding a folder opens that view with search cleared and **All Tags** selected. User-folder files begin untagged instead of being classified automatically; optional tags can be assigned manually. Generated built-in Tempest assets retain their useful automatic tags.
 
 The Asset Library provides:
 
 - incremental indexing for MP4, MOV, MKV, WebM, AVI, M4V, GIF, and local HTML overlay assets;
-- filename and folder search plus persistent Fractal, Avatar, Text, Alert, Overlay, and Unassigned collections;
+- filename and folder search plus optional persistent Fractal, Avatar, Text, Alert, Overlay, and Audio Reactive tags;
 - direct folder access for locating an indexed file on disk;
 - deliberate load and preview through one reusable OBS Media Source named `Tempest // Asset Bus`; and
 - creation or updating of metadata-sized `Tempest Vault // ...` Browser Sources for HTML overlays; and

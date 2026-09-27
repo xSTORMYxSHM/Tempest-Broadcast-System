@@ -40,8 +40,13 @@ native dual-format production assets, startup recovery, and local runtime observ
 ## Asset Library usability
 
 - Replaces multi-line asset rows with a compact, name-first list that remains readable in a narrow dock.
-- Moves collection, type, size, and full path details to the selected summary and hover tooltip.
+- Moves tag, type, size, and full path details to the selected summary and hover tooltip.
 - Shortens the media-loop and asset action labels without changing their behavior.
+- Makes the folder selector a real library view with an explicit All Folders option and readable folder names.
+- Opens newly added folders immediately with search cleared and All Tags selected, preventing a prior tag filter from
+  making valid assets appear missing.
+- Leaves user-folder assets untagged until the operator assigns a tag; automatic tags remain limited to generated
+  built-in Tempest assets.
 
 ## Compatibility and quality policy
 
