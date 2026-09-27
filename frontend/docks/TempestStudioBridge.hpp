@@ -16,6 +16,7 @@ class QLineEdit;
 class QPushButton;
 class QTimer;
 class OBSBasic;
+class TempestDestinationCoordinator;
 class TempestSignalReactor;
 
 class TempestStudioBridge : public OBSDock {
@@ -26,6 +27,7 @@ public:
 	~TempestStudioBridge() override;
 
 	bool IsConnected() const;
+	void SetDestinationCoordinator(TempestDestinationCoordinator *coordinator);
 
 private:
 	struct ClientState;
@@ -47,6 +49,13 @@ private:
 	void HandleVisualShow(const QJsonObject &message, const QJsonObject &payload);
 	void HandleVisualHide(const QJsonObject &message, const QJsonObject &payload);
 	void HandleStatusRequest(const QJsonObject &message);
+	void HandleDualFormatConfigure(const QJsonObject &message, const QJsonObject &payload);
+	void HandleDualFormatPreview(const QJsonObject &message);
+	void HandleSimulcastConfigure(const QJsonObject &message, const QJsonObject &payload);
+	void HandleSimulcastPreflight(const QJsonObject &message);
+	void HandleSimulcastStart(const QJsonObject &message, const QJsonObject &payload);
+	void HandleSimulcastStop(const QJsonObject &message, const QJsonObject &payload);
+	void HandleSimulcastRetryKick(const QJsonObject &message);
 	void ExpireLease(const QString &leaseKey);
 	void RememberCommand(const QString &key);
 	void SendDocument(const QJsonObject &document);
@@ -63,9 +72,13 @@ private:
 	QString CommandKey(const QJsonObject &payload) const;
 	QString LeaseKey(const QJsonObject &payload) const;
 	bool SetCurrentSceneSourceVisible(const QString &sourceName, bool visible, bool restartMedia = false);
+	QJsonObject BuildStatusSnapshot() const;
+	QJsonObject BuildDualFormatStatus() const;
+	bool ConfigureDualFormat(const QJsonObject &arguments, QString &error);
 
 	QPointer<OBSBasic> main;
 	QPointer<TempestSignalReactor> reactor;
+	QPointer<TempestDestinationCoordinator> destinationCoordinator;
 	QPointer<QLineEdit> endpointEdit;
 	QPointer<QLineEdit> tokenPathEdit;
 	QPointer<QCheckBox> autoConnectCheck;

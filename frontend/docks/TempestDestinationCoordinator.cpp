@@ -6,6 +6,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDateTime>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -15,6 +16,11 @@
 #include <QSpinBox>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#ifdef _WIN32
+#include <Windows.h>
+#include <wincrypt.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -27,9 +33,65 @@ constexpr char ConfigSection[] = "TempestDestinations";
 constexpr char EnabledKey[] = "KickEnabled";
 constexpr char ServerKey[] = "KickServer";
 constexpr char StreamKeyKey[] = "KickStreamKey";
+constexpr char ProtectedStreamKeyKey[] = "KickStreamKeyProtected";
 constexpr char EncoderKey[] = "KickEncoder";
 constexpr char VideoBitrateKey[] = "KickVideoBitrate";
 constexpr char AudioBitrateKey[] = "KickAudioBitrate";
+constexpr char UploadCapacityKey[] = "UploadCapacityKbps";
+
+bool ProtectSecret(const QString &secret, QString &protectedValue)
+{
+#ifdef _WIN32
+	const QByteArray plain = secret.toUtf8();
+	DATA_BLOB input{static_cast<DWORD>(plain.size()),
+			reinterpret_cast<BYTE *>(const_cast<char *>(plain.constData()))};
+	DATA_BLOB output{};
+	if (!CryptProtectData(&input, L"Tempest Broadcast Kick stream key", nullptr, nullptr, nullptr,
+			      CRYPTPROTECT_UI_FORBIDDEN, &output)) {
+		return false;
+	}
+	protectedValue = QString::fromLatin1(
+		QByteArray(reinterpret_cast<const char *>(output.pbData), static_cast<int>(output.cbData)).toBase64());
+	LocalFree(output.pbData);
+	return true;
+#else
+	Q_UNUSED(secret);
+	Q_UNUSED(protectedValue);
+	return false;
+#endif
+}
+
+bool UnprotectSecret(const QString &protectedValue, QString &secret)
+{
+#ifdef _WIN32
+	const QByteArray encrypted = QByteArray::fromBase64(protectedValue.toLatin1());
+	if (encrypted.isEmpty()) {
+		return false;
+	}
+	DATA_BLOB input{static_cast<DWORD>(encrypted.size()),
+			reinterpret_cast<BYTE *>(const_cast<char *>(encrypted.constData()))};
+	DATA_BLOB output{};
+	if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output)) {
+		return false;
+	}
+	secret = QString::fromUtf8(reinterpret_cast<const char *>(output.pbData), static_cast<int>(output.cbData));
+	LocalFree(output.pbData);
+	return true;
+#else
+	Q_UNUSED(protectedValue);
+	Q_UNUSED(secret);
+	return false;
+#endif
+}
+
+bool SecureStorageAvailable()
+{
+#ifdef _WIN32
+	return true;
+#else
+	return false;
+#endif
+}
 
 bool EncoderIsAvailable(const QString &wanted)
 {
@@ -143,7 +205,7 @@ void TempestDestinationCoordinator::BuildInterface()
 
 	auto *hint = new QLabel(
 		QStringLiteral(
-			"Credentials stay in the active profile and the key is never shown in status text or logs. "
+			"The stream key is protected for your Windows account and is never shown in status text or logs. "
 			"Confirm current bitrate limits in your Kick creator dashboard."),
 		root);
 	hint->setObjectName(QStringLiteral("destinationHint"));
@@ -209,13 +271,22 @@ void TempestDestinationCoordinator::LoadSettings()
 	config_t *config = main->Config();
 	kickEnabled->setChecked(config_get_bool(config, ConfigSection, EnabledKey));
 	kickServer->setText(QString::fromUtf8(config_get_string(config, ConfigSection, ServerKey)));
-	kickKey->setText(QString::fromUtf8(config_get_string(config, ConfigSection, StreamKeyKey)));
+	QString storedKey;
+	const QString protectedKey = QString::fromUtf8(config_get_string(config, ConfigSection, ProtectedStreamKeyKey));
+	credentialsProtected = !protectedKey.isEmpty() && UnprotectSecret(protectedKey, storedKey);
+	if (storedKey.isEmpty()) {
+		storedKey = QString::fromUtf8(config_get_string(config, ConfigSection, StreamKeyKey));
+	}
+	kickKey->setText(storedKey);
 	kickVideoBitrate->setValue(config_has_user_value(config, ConfigSection, VideoBitrateKey)
 					   ? static_cast<int>(config_get_int(config, ConfigSection, VideoBitrateKey))
 					   : 6000);
 	kickAudioBitrate->setValue(config_has_user_value(config, ConfigSection, AudioBitrateKey)
 					   ? static_cast<int>(config_get_int(config, ConfigSection, AudioBitrateKey))
 					   : 160);
+	uploadCapacityKbps = config_has_user_value(config, ConfigSection, UploadCapacityKey)
+				     ? static_cast<int>(config_get_int(config, ConfigSection, UploadCapacityKey))
+				     : 0;
 	const QString encoder = QString::fromUtf8(config_get_string(config, ConfigSection, EncoderKey));
 	PopulateEncoders();
 	int encoderIndex = kickEncoder->findData(encoder.isEmpty() ? QStringLiteral("auto") : encoder);
@@ -237,17 +308,50 @@ void TempestDestinationCoordinator::SaveSettings()
 		return;
 	}
 
+	QString error;
+	if (!PersistSettings(error)) {
+		SetStatus(error, true);
+		return;
+	}
+	SetStatus(kickEnabled->isChecked() ? QStringLiteral("PROFILE SAVED / RUN READINESS CHECK")
+					   : QStringLiteral("KICK DESTINATION DISABLED"));
+}
+
+bool TempestDestinationCoordinator::PersistSettings(QString &error)
+{
+	if (!main || !main->Config()) {
+		error = QStringLiteral("The active profile is not ready.");
+		return false;
+	}
 	config_t *config = main->Config();
 	config_set_bool(config, ConfigSection, EnabledKey, kickEnabled->isChecked());
 	config_set_string(config, ConfigSection, ServerKey, kickServer->text().trimmed().toUtf8().constData());
-	config_set_string(config, ConfigSection, StreamKeyKey, kickKey->text().toUtf8().constData());
+	const QString streamKey = kickKey->text();
+	if (streamKey.isEmpty()) {
+		config_remove_value(config, ConfigSection, ProtectedStreamKeyKey);
+		config_remove_value(config, ConfigSection, StreamKeyKey);
+		credentialsProtected = false;
+	} else {
+		QString protectedValue;
+		if (!ProtectSecret(streamKey, protectedValue)) {
+			error = QStringLiteral("Windows credential protection could not store the Kick stream key.");
+			return false;
+		}
+		config_set_string(config, ConfigSection, ProtectedStreamKeyKey, protectedValue.toUtf8().constData());
+		config_remove_value(config, ConfigSection, StreamKeyKey);
+		credentialsProtected = true;
+	}
 	config_set_string(config, ConfigSection, EncoderKey,
 			  kickEncoder->currentData().toString().toUtf8().constData());
 	config_set_int(config, ConfigSection, VideoBitrateKey, kickVideoBitrate->value());
 	config_set_int(config, ConfigSection, AudioBitrateKey, kickAudioBitrate->value());
-	config_save_safe(config, "tmp", nullptr);
-	SetStatus(kickEnabled->isChecked() ? QStringLiteral("PROFILE SAVED / RUN READINESS CHECK")
-					   : QStringLiteral("KICK DESTINATION DISABLED"));
+	config_set_int(config, ConfigSection, UploadCapacityKey, uploadCapacityKbps);
+	if (config_save_safe(config, "tmp", nullptr) != CONFIG_SUCCESS) {
+		error = QStringLiteral("The active Broadcast profile could not be saved.");
+		return false;
+	}
+	emit StatusChanged();
+	return true;
 }
 
 QString TempestDestinationCoordinator::ResolveEncoderId() const
@@ -331,6 +435,258 @@ void TempestDestinationCoordinator::CheckReadiness()
 		return;
 	}
 	SetStatus(QStringLiteral("READY / %1 / %2 KBPS VIDEO").arg(encoderId.toUpper()).arg(kickVideoBitrate->value()));
+}
+
+int TempestDestinationCoordinator::EstimatedRequiredKbps() const
+{
+	if (!main || !main->Config()) {
+		return 0;
+	}
+	config_t *config = main->Config();
+	const char *mode = config_get_string(config, "Output", "Mode");
+	int primaryVideo = 0;
+	int primaryAudio = 0;
+	if (mode && strcmp(mode, "Advanced") == 0) {
+		primaryVideo = static_cast<int>(config_get_int(config, "AdvOut", "FFVBitrate"));
+		primaryAudio = static_cast<int>(config_get_int(config, "AdvOut", "FFABitrate"));
+	} else {
+		primaryVideo = static_cast<int>(config_get_int(config, "SimpleOutput", "VBitrate"));
+		primaryAudio = static_cast<int>(config_get_int(config, "SimpleOutput", "ABitrate"));
+	}
+	if (primaryVideo <= 0) {
+		primaryVideo = 6000;
+	}
+	if (primaryAudio <= 0) {
+		primaryAudio = 160;
+	}
+	const int rawKbps =
+		primaryVideo + primaryAudio +
+		(kickEnabled && kickEnabled->isChecked() ? kickVideoBitrate->value() + kickAudioBitrate->value() : 0);
+	return (rawKbps * 120 + 99) / 100;
+}
+
+QJsonObject TempestDestinationCoordinator::OutputHealth(obs_output_t *candidate, const QString &idleState,
+							const QString &lastError) const
+{
+	const bool active = candidate && obs_output_active(candidate);
+	QString state = active ? QStringLiteral("live") : idleState;
+	if (!lastError.isEmpty() && !active) {
+		state = QStringLiteral("error");
+	}
+	QJsonObject result{{QStringLiteral("state"), state}, {QStringLiteral("active"), active}};
+	if (candidate) {
+		result.insert(QStringLiteral("bytesSent"), static_cast<qint64>(obs_output_get_total_bytes(candidate)));
+		result.insert(QStringLiteral("droppedFrames"), obs_output_get_frames_dropped(candidate));
+		result.insert(QStringLiteral("totalFrames"), obs_output_get_total_frames(candidate));
+		result.insert(QStringLiteral("congestion"), obs_output_get_congestion(candidate));
+		const QString outputError = OutputError(candidate);
+		if (!active && outputError != QStringLiteral("The output could not be started.")) {
+			result.insert(QStringLiteral("lastError"), outputError.left(400));
+		}
+	}
+	if (!lastError.isEmpty()) {
+		result.insert(QStringLiteral("lastError"), lastError.left(400));
+	}
+	return result;
+}
+
+QJsonObject TempestDestinationCoordinator::StatusSnapshot(bool dualFormatReady) const
+{
+	OBSOutputAutoRelease primaryOutput = obs_frontend_get_streaming_output();
+	const bool enabled = kickEnabled && kickEnabled->isChecked();
+	const bool serverConfigured = kickServer && !kickServer->text().trimmed().isEmpty();
+	const bool credentialsStored = credentialsProtected && kickKey && !kickKey->text().trimmed().isEmpty();
+	const bool configured = enabled && serverConfigured && credentialsStored && !ResolveEncoderId().isEmpty();
+	bool twitchServiceReady = false;
+	if (main) {
+		obs_service_t *primaryService = main->GetService();
+		twitchServiceReady = primaryService && obs_service_get_id(primaryService) &&
+				     *obs_service_get_id(primaryService);
+	}
+	const int requiredKbps = EstimatedRequiredKbps();
+	const bool uploadConfigured = uploadCapacityKbps >= 1000;
+	const bool uploadReady = uploadConfigured && requiredKbps > 0 && uploadCapacityKbps >= requiredKbps;
+	const bool recordingWithStream = App() && App()->GetUserConfig() &&
+					 config_get_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming");
+	QString kickIdleState = enabled ? QStringLiteral("offline") : QStringLiteral("disabled");
+	if (startRequested) {
+		kickIdleState = QStringLiteral("starting");
+	} else if (stopRequested) {
+		kickIdleState = QStringLiteral("stopping");
+	}
+
+	QJsonObject result{{QStringLiteral("supported"), true},
+			   {QStringLiteral("enabled"), enabled},
+			   {QStringLiteral("configured"), configured},
+			   {QStringLiteral("credentialsStored"), credentialsStored},
+			   {QStringLiteral("secureStorageAvailable"), SecureStorageAvailable()},
+			   {QStringLiteral("kickServerConfigured"), serverConfigured},
+			   {QStringLiteral("twitchServiceReady"), twitchServiceReady},
+			   {QStringLiteral("dualFormatReady"), dualFormatReady},
+			   {QStringLiteral("sharedEncoder"), false},
+			   {QStringLiteral("uploadCapacityConfigured"), uploadConfigured},
+			   {QStringLiteral("uploadCapacityKbps"), uploadCapacityKbps},
+			   {QStringLiteral("estimatedRequiredKbps"), requiredKbps},
+			   {QStringLiteral("uploadHeadroomReady"), uploadReady},
+			   {QStringLiteral("recordingWithStream"), recordingWithStream},
+			   {QStringLiteral("lastPreflightPassed"), lastPreflightPassed},
+			   {QStringLiteral("twitch"), OutputHealth(primaryOutput, QStringLiteral("offline"))},
+			   {QStringLiteral("kick"), OutputHealth(output, kickIdleState, lastKickError)}};
+	if (!lastPreflightAt.isEmpty()) {
+		result.insert(QStringLiteral("lastPreflightAt"), lastPreflightAt);
+	}
+	if (!lastPreflightError.isEmpty()) {
+		result.insert(QStringLiteral("lastPreflightError"), lastPreflightError.left(400));
+	}
+	if (!lastKickError.isEmpty()) {
+		result.insert(QStringLiteral("lastError"), lastKickError.left(400));
+	}
+	return result;
+}
+
+bool TempestDestinationCoordinator::ConfigureFromStudio(const QJsonObject &arguments, QString &error)
+{
+	if (!main || main->StreamingActive() || IsBusy()) {
+		error = QStringLiteral("Stop Twitch and Kick outputs before changing simulcast configuration.");
+		return false;
+	}
+	if (!arguments.value(QStringLiteral("enabled")).isBool()) {
+		error = QStringLiteral("Simulcast configuration must include enabled=true or enabled=false.");
+		return false;
+	}
+	const bool enabled = arguments.value(QStringLiteral("enabled")).toBool();
+	const QString server = arguments.value(QStringLiteral("kickServer")).toString().trimmed();
+	const QString suppliedKey = arguments.value(QStringLiteral("kickStreamKey")).toString();
+	const bool keepStoredKey = arguments.value(QStringLiteral("keepStoredKey")).toBool(true);
+	const int capacity = arguments.value(QStringLiteral("uploadCapacityKbps")).toInt(uploadCapacityKbps);
+	if (capacity != 0 && (capacity < 1000 || capacity > 1000000)) {
+		error = QStringLiteral("Upload capacity must be between 1,000 and 1,000,000 Kbps.");
+		return false;
+	}
+	kickEnabled->setChecked(enabled);
+	if (!server.isEmpty()) {
+		kickServer->setText(server);
+	}
+	if (!suppliedKey.isEmpty()) {
+		kickKey->setText(suppliedKey);
+	} else if (!keepStoredKey) {
+		kickKey->clear();
+	}
+	uploadCapacityKbps = capacity;
+	if (arguments.value(QStringLiteral("recordingWithStream")).isBool() && App() && App()->GetUserConfig()) {
+		config_set_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming",
+				arguments.value(QStringLiteral("recordingWithStream")).toBool());
+		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+	}
+	lastPreflightAt.clear();
+	lastPreflightPassed = false;
+	lastPreflightError.clear();
+	if (!PersistSettings(error)) {
+		return false;
+	}
+	SetStatus(enabled ? QStringLiteral("PROFILE SAVED / RUN READINESS CHECK")
+			  : QStringLiteral("KICK DESTINATION DISABLED"));
+	UpdateEditorState();
+	return true;
+}
+
+bool TempestDestinationCoordinator::RunPreflight(bool dualFormatReady, QString &error)
+{
+	if (!main || main->StreamingActive() || IsBusy()) {
+		error = QStringLiteral("Run preflight while Twitch and Kick outputs are stopped.");
+	} else if (!kickEnabled || !kickEnabled->isChecked()) {
+		error = QStringLiteral("Enable the coordinated Kick destination before running preflight.");
+	} else if (!SecureStorageAvailable()) {
+		error = QStringLiteral("Secure credential storage is unavailable on this platform.");
+	} else if (!dualFormatReady) {
+		error = QStringLiteral("Dual Format must be ready before simulcast preflight can pass.");
+	} else if (uploadCapacityKbps < EstimatedRequiredKbps()) {
+		error = QStringLiteral("Configured upload capacity does not provide the required 20% headroom.");
+	} else {
+		QString encoderId;
+		if (ValidateSettings(error, &encoderId) && CreateKickOutput(encoderId, error)) {
+			ReleaseKickOutput();
+			lastPreflightAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+			lastPreflightPassed = true;
+			lastPreflightError.clear();
+			lastKickError.clear();
+			SetStatus(QStringLiteral("PRODUCTION PREFLIGHT PASSED"));
+			emit StatusChanged();
+			return true;
+		}
+	}
+	lastPreflightAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+	lastPreflightPassed = false;
+	lastPreflightError = error;
+	SetStatus(error, true);
+	emit StatusChanged();
+	return false;
+}
+
+bool TempestDestinationCoordinator::StartFromStudio(bool recording, QString &error)
+{
+	if (!main || main->StreamingActive() || IsBusy()) {
+		error = QStringLiteral("Twitch or Kick is already active or preparing.");
+		return false;
+	}
+	const QDateTime preflight = QDateTime::fromString(lastPreflightAt, Qt::ISODateWithMs);
+	if (!lastPreflightPassed || !preflight.isValid() ||
+	    preflight.secsTo(QDateTime::currentDateTimeUtc()) > 4 * 60 * 60) {
+		error = QStringLiteral("Run a successful production preflight before going live.");
+		return false;
+	}
+	if (recording && App() && App()->GetUserConfig()) {
+		config_set_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming", true);
+		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+	}
+	if (!ValidateSettings(error)) {
+		return false;
+	}
+	// OBSBasic::StartStreaming owns the single PrepareForMainStream call so the
+	// normal toolbar path and the Studio command path share identical setup.
+	main->StartStreaming();
+	emit StatusChanged();
+	return true;
+}
+
+bool TempestDestinationCoordinator::StopFromStudio(const QString &scope, bool force, QString &error)
+{
+	if (scope != QStringLiteral("all") && scope != QStringLiteral("kick")) {
+		error = QStringLiteral("Stop scope must be 'all' or 'kick'.");
+		return false;
+	}
+	if (scope == QStringLiteral("kick")) {
+		StopKickOutput(force);
+	} else if (main) {
+		if (force) {
+			main->ForceStopStreaming();
+		} else {
+			main->StopStreaming();
+		}
+		StopKickOutput(force);
+	}
+	emit StatusChanged();
+	return true;
+}
+
+bool TempestDestinationCoordinator::RetryKick(QString &error)
+{
+	if (!main || !main->StreamingActive() || (output && obs_output_active(output))) {
+		error = QStringLiteral("Kick retry is available only while Twitch is live and Kick is offline.");
+		return false;
+	}
+	QString encoderId;
+	if (!ValidateSettings(error, &encoderId) || !CreateKickOutput(encoderId, error)) {
+		lastKickError = error;
+		return false;
+	}
+	prepared = true;
+	startRequested = false;
+	stopRequested = false;
+	lastKickError.clear();
+	StartKickOutput();
+	emit StatusChanged();
+	return true;
 }
 
 bool TempestDestinationCoordinator::CreateKickOutput(const QString &encoderId, QString &error)
@@ -471,6 +827,7 @@ void TempestDestinationCoordinator::StartKickOutput()
 	SetStatus(QStringLiteral("KICK / CONNECTING"));
 	if (!obs_output_start(output)) {
 		const QString error = OutputError(output);
+		lastKickError = error;
 		startRequested = false;
 		prepared = false;
 		SetStatus(QStringLiteral("KICK FAILED / %1").arg(error), true);
@@ -570,6 +927,7 @@ void TempestDestinationCoordinator::MainStreamStopped(bool withDelay)
 void TempestDestinationCoordinator::HandleKickStarted()
 {
 	startRequested = false;
+	lastKickError.clear();
 	SetStatus(QStringLiteral("KICK / LIVE"), false, true);
 	UpdateEditorState();
 }
@@ -587,6 +945,7 @@ void TempestDestinationCoordinator::HandleKickStopped(int code, const QString &l
 						   : QStringLiteral("KICK DESTINATION DISABLED"));
 	} else {
 		const QString detail = lastError.isEmpty() ? QStringLiteral("connection ended") : lastError;
+		lastKickError = detail;
 		SetStatus(QStringLiteral("KICK FAILED / %1").arg(detail), true);
 		if (main) {
 			main->ShowStatusBarMessage(QStringLiteral("Kick destination stopped: %1").arg(detail));
@@ -641,6 +1000,7 @@ void TempestDestinationCoordinator::SetStatus(const QString &message, bool error
 			      : live ? QStringLiteral("#65f7a1")
 				     : QStringLiteral("#45d9ff");
 	statusLabel->setStyleSheet(QStringLiteral("color: %1;").arg(color));
+	emit StatusChanged();
 }
 
 bool TempestDestinationCoordinator::IsBusy() const

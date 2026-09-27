@@ -436,6 +436,7 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	addDockWidget(Qt::RightDockWidgetArea, tempestHUDComposer);
 	tabifyDockWidget(tempestAssetVault, tempestHUDComposer);
 	tempestDestinationCoordinator = new TempestDestinationCoordinator(this, this);
+	tempestStudioBridge->SetDestinationCoordinator(tempestDestinationCoordinator);
 	addDockWidget(Qt::RightDockWidgetArea, tempestDestinationCoordinator);
 	tabifyDockWidget(tempestHUDComposer, tempestDestinationCoordinator);
 	tempestGuestLayouts = new TempestGuestLayouts(this, this);

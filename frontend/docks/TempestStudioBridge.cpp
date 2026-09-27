@@ -1,5 +1,6 @@
 #include "TempestStudioBridge.hpp"
 
+#include "TempestDestinationCoordinator.hpp"
 #include "TempestSignalReactor.hpp"
 
 #include <OBSApp.hpp>
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <initializer_list>
 #include <mutex>
 #include <thread>
@@ -46,12 +48,63 @@ constexpr char ApplicationId[] = "com.tempestmainframe.tempest-broadcast";
 constexpr char ProtocolVersion[] = "1.0";
 constexpr int MaximumRememberedCommands = 512;
 
+struct VerticalAlertInventory {
+	bool twitch = false;
+	bool interactions = false;
+};
+
+bool CollectVerticalAlerts(void *data, obs_source_t *source)
+{
+	if (!source || obs_source_removed(source)) {
+		return true;
+	}
+	const char *id = obs_source_get_unversioned_id(source);
+	if (!id || strcmp(id, "browser_source") != 0) {
+		return true;
+	}
+	OBSDataAutoRelease settings = obs_source_get_settings(source);
+	const QString url = QString::fromUtf8(obs_data_get_string(settings, "url"));
+	auto *inventory = static_cast<VerticalAlertInventory *>(data);
+	if (url.contains(QStringLiteral("/visual-alerts/twitch")) &&
+	    url.contains(QStringLiteral("orientation=vertical"))) {
+		inventory->twitch = true;
+	}
+	if (url.contains(QStringLiteral("/visual-alerts/interactions")) &&
+	    url.contains(QStringLiteral("orientation=vertical"))) {
+		inventory->interactions = true;
+	}
+	return true;
+}
+
+int CountLinkedScenes(int width, int height, int &totalScenes)
+{
+	int linkedScenes = 0;
+	obs_frontend_source_list scenes{};
+	obs_frontend_get_scenes(&scenes);
+	totalScenes = static_cast<int>(scenes.sources.num);
+	for (size_t sceneIndex = 0; sceneIndex < scenes.sources.num; ++sceneIndex) {
+		OBSDataAutoRelease settings = obs_source_get_settings(scenes.sources.array[sceneIndex]);
+		OBSDataArrayAutoRelease links = obs_data_get_array(settings, "canvas");
+		for (size_t linkIndex = 0; links && linkIndex < obs_data_array_count(links); ++linkIndex) {
+			OBSDataAutoRelease link = obs_data_array_item(links, linkIndex);
+			if (obs_data_get_int(link, "width") == width && obs_data_get_int(link, "height") == height &&
+			    *obs_data_get_string(link, "scene")) {
+				++linkedScenes;
+				break;
+			}
+		}
+	}
+	obs_frontend_source_list_free(&scenes);
+	return linkedScenes;
+}
+
 QString FirstString(const QJsonObject &object, std::initializer_list<const char *> keys)
 {
 	for (const char *key : keys) {
 		const QString value = object.value(QString::fromUtf8(key)).toString().trimmed();
-		if (!value.isEmpty())
+		if (!value.isEmpty()) {
 			return value;
+		}
 	}
 	return {};
 }
@@ -63,11 +116,13 @@ struct StudioSourceInventory {
 
 bool CollectAudioSource(void *data, obs_source_t *source)
 {
-	if (!source || obs_source_removed(source) || !(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO))
+	if (!source || obs_source_removed(source) || !(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO)) {
 		return true;
+	}
 	const char *name = obs_source_get_name(source);
-	if (name && *name)
+	if (name && *name) {
 		static_cast<StudioSourceInventory *>(data)->audio.append(QString::fromUtf8(name));
+	}
 	return true;
 }
 
@@ -76,12 +131,14 @@ bool CollectVisualSceneItem(obs_scene_t *, obs_sceneitem_t *item, void *data)
 	obs_source_t *source = obs_sceneitem_get_source(item);
 	if (source && !obs_source_removed(source) && (obs_source_get_output_flags(source) & OBS_SOURCE_VIDEO)) {
 		const char *name = obs_source_get_name(source);
-		if (name && *name)
+		if (name && *name) {
 			static_cast<StudioSourceInventory *>(data)->visual.append(QString::fromUtf8(name));
+		}
 	}
 	if (obs_sceneitem_is_group(item)) {
-		if (obs_scene_t *groupScene = obs_sceneitem_group_get_scene(item))
+		if (obs_scene_t *groupScene = obs_sceneitem_group_get_scene(item)) {
 			obs_scene_enum_items(groupScene, CollectVisualSceneItem, data);
+		}
 	}
 	return true;
 }
@@ -91,8 +148,9 @@ QJsonObject BuildSourceInventory(OBSBasic *main)
 	StudioSourceInventory inventory;
 	obs_enum_sources(CollectAudioSource, &inventory);
 	OBSScene scene = main ? main->GetCurrentScene() : OBSScene();
-	if (scene)
+	if (scene) {
 		obs_scene_enum_items(scene, CollectVisualSceneItem, &inventory);
+	}
 	inventory.audio.removeDuplicates();
 	inventory.visual.removeDuplicates();
 	inventory.audio.sort(Qt::CaseInsensitive);
@@ -107,8 +165,9 @@ QJsonObject BuildSourceInventory(OBSBasic *main)
 QJsonObject BuildCanvasProfile()
 {
 	obs_video_info videoInfo{};
-	if (!obs_get_video_info(&videoInfo))
+	if (!obs_get_video_info(&videoInfo)) {
 		return {};
+	}
 	return {{QStringLiteral("baseWidth"), static_cast<int>(videoInfo.base_width)},
 		{QStringLiteral("baseHeight"), static_cast<int>(videoInfo.base_height)},
 		{QStringLiteral("outputWidth"), static_cast<int>(videoInfo.output_width)},
@@ -151,8 +210,9 @@ TempestStudioBridge::TempestStudioBridge(OBSBasic *main, TempestSignalReactor *r
 		PublishHealth(QStringLiteral("periodic"));
 	});
 
-	if (autoConnectCheck->isChecked())
+	if (autoConnectCheck->isChecked()) {
 		QTimer::singleShot(1800, this, &TempestStudioBridge::ConnectToStudio);
+	}
 }
 
 TempestStudioBridge::~TempestStudioBridge()
@@ -163,6 +223,18 @@ TempestStudioBridge::~TempestStudioBridge()
 bool TempestStudioBridge::IsConnected() const
 {
 	return client && client->connected.load();
+}
+
+void TempestStudioBridge::SetDestinationCoordinator(TempestDestinationCoordinator *coordinator)
+{
+	if (destinationCoordinator) {
+		disconnect(destinationCoordinator, nullptr, this, nullptr);
+	}
+	destinationCoordinator = coordinator;
+	if (destinationCoordinator) {
+		connect(destinationCoordinator, &TempestDestinationCoordinator::StatusChanged, this,
+			[this]() { PublishHealth(QStringLiteral("destination-changed")); });
+	}
 }
 
 void TempestStudioBridge::BuildInterface()
@@ -257,10 +329,11 @@ void TempestStudioBridge::BuildInterface()
 	setWidget(root);
 
 	connect(connectButton, &QPushButton::clicked, this, [this]() {
-		if (IsConnected() || client)
+		if (IsConnected() || client) {
 			DisconnectFromStudio(true);
-		else
+		} else {
 			ConnectToStudio();
+		}
 	});
 	connect(reloadButton, &QPushButton::clicked, this, [this]() {
 		QString error;
@@ -275,10 +348,11 @@ void TempestStudioBridge::BuildInterface()
 	connect(tokenPathEdit, &QLineEdit::editingFinished, this, &TempestStudioBridge::SaveState);
 	connect(autoConnectCheck, &QCheckBox::toggled, this, [this](bool enabled) {
 		SaveState();
-		if (enabled && !IsConnected())
+		if (enabled && !IsConnected()) {
 			ScheduleReconnect();
-		else if (!enabled && reconnectTimer)
+		} else if (!enabled && reconnectTimer) {
 			reconnectTimer->stop();
+		}
 	});
 }
 
@@ -286,8 +360,9 @@ void TempestStudioBridge::LoadState()
 {
 	config_t *config = App()->GetUserConfig();
 	QString endpoint = QString::fromUtf8(config_get_string(config, ConfigSection, "Endpoint")).trimmed();
-	if (endpoint.isEmpty())
+	if (endpoint.isEmpty()) {
 		endpoint = QStringLiteral("ws://127.0.0.1:4765/v1/socket");
+	}
 	QString tokenPath = QString::fromUtf8(config_get_string(config, ConfigSection, "TokenPath")).trimmed();
 	if (tokenPath.isEmpty()) {
 		const QString appData = qEnvironmentVariable("APPDATA");
@@ -312,15 +387,17 @@ QString TempestStudioBridge::ResolveToken(QString *error) const
 {
 	QFile file(tokenPathEdit->text().trimmed());
 	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-		if (error)
+		if (error) {
 			*error = QStringLiteral(
 				"Studio token was not found. Start Tempest Studio once, then reconnect.");
+		}
 		return {};
 	}
 	const QString token = QString::fromUtf8(file.readAll()).trimmed();
 	if (token.size() < 32) {
-		if (error)
+		if (error) {
 			*error = QStringLiteral("Studio token file is invalid or incomplete.");
+		}
 		return {};
 	}
 	return token;
@@ -328,10 +405,12 @@ QString TempestStudioBridge::ResolveToken(QString *error) const
 
 void TempestStudioBridge::ConnectToStudio()
 {
-	if (IsConnected())
+	if (IsConnected()) {
 		return;
-	if (client)
+	}
+	if (client) {
 		DisconnectFromStudio(false);
+	}
 	SaveState();
 	operatorDisconnect = false;
 	QString tokenError;
@@ -361,37 +440,44 @@ void TempestStudioBridge::ConnectToStudio()
 	state->endpoint->set_open_handler([guarded, state](websocketpp::connection_hdl handle) {
 		state->connection = handle;
 		state->connected.store(true);
-		if (guarded)
+		if (guarded) {
 			QMetaObject::invokeMethod(guarded, [guarded]() {
-				if (guarded)
+				if (guarded) {
 					guarded->HandleConnected();
+				}
 			});
+		}
 	});
 	state->endpoint->set_message_handler(
 		[guarded](websocketpp::connection_hdl, ClientState::Endpoint::message_ptr message) {
 			const QByteArray payload(message->get_payload().data(), int(message->get_payload().size()));
-			if (guarded)
+			if (guarded) {
 				QMetaObject::invokeMethod(guarded, [guarded, payload]() {
-					if (guarded)
+					if (guarded) {
 						guarded->HandleIncoming(payload);
+					}
 				});
+			}
 		});
 	auto closed = [guarded, state](websocketpp::connection_hdl handle) {
 		state->connected.store(false);
 		QString reason = QStringLiteral("Studio connection closed.");
 		try {
 			auto connection = state->endpoint->get_con_from_hdl(handle);
-			if (connection && !connection->get_remote_close_reason().empty())
+			if (connection && !connection->get_remote_close_reason().empty()) {
 				reason = QString::fromStdString(connection->get_remote_close_reason());
-			else if (connection && connection->get_ec())
+			} else if (connection && connection->get_ec()) {
 				reason = QString::fromStdString(connection->get_ec().message());
+			}
 		} catch (...) {
 		}
-		if (guarded)
+		if (guarded) {
 			QMetaObject::invokeMethod(guarded, [guarded, reason]() {
-				if (guarded)
+				if (guarded) {
 					guarded->HandleDisconnected(reason);
+				}
 			});
+		}
 	};
 	state->endpoint->set_close_handler(closed);
 	state->endpoint->set_fail_handler(closed);
@@ -419,22 +505,26 @@ void TempestStudioBridge::ConnectToStudio()
 void TempestStudioBridge::DisconnectFromStudio(bool operatorRequested)
 {
 	operatorDisconnect = operatorRequested;
-	if (reconnectTimer)
+	if (reconnectTimer) {
 		reconnectTimer->stop();
-	if (heartbeatTimer)
+	}
+	if (heartbeatTimer) {
 		heartbeatTimer->stop();
+	}
 	if (client) {
 		ClientState *state = client.get();
 		if (state->endpoint) {
 			websocketpp::lib::error_code error;
-			if (state->connected.load())
+			if (state->connected.load()) {
 				state->endpoint->close(state->connection, websocketpp::close::status::going_away,
 						       "Tempest Broadcast disconnecting", error);
+			}
 			state->endpoint->stop_perpetual();
 			state->endpoint->stop();
 		}
-		if (state->worker.joinable())
+		if (state->worker.joinable()) {
 			state->worker.join();
+		}
 		client.reset();
 	}
 	if (operatorRequested) {
@@ -448,8 +538,9 @@ void TempestStudioBridge::DisconnectFromStudio(bool operatorRequested)
 void TempestStudioBridge::ScheduleReconnect()
 {
 	if (!operatorDisconnect && autoConnectCheck && autoConnectCheck->isChecked() && reconnectTimer &&
-	    !reconnectTimer->isActive())
+	    !reconnectTimer->isActive()) {
 		reconnectTimer->start();
+	}
 }
 
 void TempestStudioBridge::HandleConnected()
@@ -459,18 +550,21 @@ void TempestStudioBridge::HandleConnected()
 	connectButton->setText(QStringLiteral("DISCONNECT"));
 	SendHello();
 	PublishHealth(QStringLiteral("connected"));
-	if (heartbeatTimer)
+	if (heartbeatTimer) {
 		heartbeatTimer->start();
+	}
 }
 
 void TempestStudioBridge::HandleDisconnected(const QString &reason)
 {
-	if (heartbeatTimer)
+	if (heartbeatTimer) {
 		heartbeatTimer->stop();
+	}
 	SetConnectionState(QStringLiteral("OFFLINE // STUDIO UNAVAILABLE"), reason, !operatorDisconnect);
 	connectButton->setText(QStringLiteral("CONNECT"));
-	if (!operatorDisconnect)
+	if (!operatorDisconnect) {
 		ScheduleReconnect();
+	}
 }
 
 void TempestStudioBridge::SetConnectionState(const QString &state, const QString &detail, bool error)
@@ -480,8 +574,9 @@ void TempestStudioBridge::SetConnectionState(const QString &state, const QString
 		connectionLabel->setAccessibleName(state);
 		connectionLabel->setStyleSheet(error ? QStringLiteral("color: #ff6b8a;") : QString());
 	}
-	if (detailLabel)
+	if (detailLabel) {
 		detailLabel->setText(detail);
+	}
 }
 
 QJsonObject TempestStudioBridge::CreateMessage(const QString &kind, const QString &topic, const QJsonObject &payload,
@@ -492,37 +587,52 @@ QJsonObject TempestStudioBridge::CreateMessage(const QString &kind, const QStrin
 			    {QStringLiteral("kind"), kind},
 			    {QStringLiteral("source"), QString::fromUtf8(ApplicationId)},
 			    {QStringLiteral("timestamp"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}};
-	if (!topic.isEmpty())
+	if (!topic.isEmpty()) {
 		message.insert(QStringLiteral("topic"), topic);
-	if (!target.isEmpty())
+	}
+	if (!target.isEmpty()) {
 		message.insert(QStringLiteral("target"), target);
-	if (!correlationId.isEmpty())
+	}
+	if (!correlationId.isEmpty()) {
 		message.insert(QStringLiteral("correlationId"), correlationId);
-	if (!payload.isEmpty())
+	}
+	if (!payload.isEmpty()) {
 		message.insert(QStringLiteral("payload"), payload);
+	}
 	return message;
 }
 
 void TempestStudioBridge::SendDocument(const QJsonObject &document)
 {
-	if (!IsConnected())
+	if (!IsConnected()) {
 		return;
+	}
 	const std::string data = QJsonDocument(document).toJson(QJsonDocument::Compact).toStdString();
 	ClientState *state = client.get();
 	std::lock_guard<std::mutex> lock(state->sendMutex);
 	websocketpp::lib::error_code error;
 	state->endpoint->send(state->connection, data, websocketpp::frame::opcode::text, error);
-	if (error)
+	if (error) {
 		SetConnectionState(QStringLiteral("ONLINE // SEND DEGRADED"), QString::fromStdString(error.message()),
 				   true);
+	}
 }
 
 void TempestStudioBridge::SendHello()
 {
-	const QJsonArray capabilities{
-		QStringLiteral("broadcast.reaction.trigger"), QStringLiteral("broadcast.reaction.clear"),
-		QStringLiteral("broadcast.audio.play"),       QStringLiteral("broadcast.visual.show"),
-		QStringLiteral("broadcast.visual.hide"),      QStringLiteral("broadcast.status")};
+	const QJsonArray capabilities{QStringLiteral("broadcast.reaction.trigger"),
+				      QStringLiteral("broadcast.reaction.clear"),
+				      QStringLiteral("broadcast.audio.play"),
+				      QStringLiteral("broadcast.visual.show"),
+				      QStringLiteral("broadcast.visual.hide"),
+				      QStringLiteral("broadcast.status"),
+				      QStringLiteral("broadcast.dual-format.configure"),
+				      QStringLiteral("broadcast.dual-format.preview"),
+				      QStringLiteral("broadcast.simulcast.configure"),
+				      QStringLiteral("broadcast.simulcast.preflight"),
+				      QStringLiteral("broadcast.simulcast.start"),
+				      QStringLiteral("broadcast.simulcast.stop"),
+				      QStringLiteral("broadcast.simulcast.retry-kick")};
 	SendDocument(CreateMessage(QStringLiteral("hello"), {},
 				   {{QStringLiteral("applicationId"), QString::fromUtf8(ApplicationId)},
 				    {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)},
@@ -542,21 +652,152 @@ void TempestStudioBridge::SendHeartbeat()
 
 void TempestStudioBridge::PublishHealth(const QString &reason)
 {
-	QJsonObject payload{{QStringLiteral("status"),
-			     IsConnected() ? QStringLiteral("online") : QStringLiteral("offline")},
-			    {QStringLiteral("ready"), IsConnected() && reactor && reactor->ExternalEventBridgeArmed()},
-			    {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)},
-			    {QStringLiteral("protocolVersion"), QString::fromUtf8(ProtocolVersion)},
-			    {QStringLiteral("streaming"), obs_frontend_streaming_active()},
-			    {QStringLiteral("recording"), obs_frontend_recording_active()},
-			    {QStringLiteral("reactionArmed"), reactor && reactor->ExternalEventBridgeArmed()},
-			    {QStringLiteral("activeLeases"), activeLeases.size()},
-			    {QStringLiteral("canvasProfile"), BuildCanvasProfile()},
-			    {QStringLiteral("sourceInventory"), BuildSourceInventory(main)},
-			    {QStringLiteral("commandsHandled"), commandsHandled}};
-	if (!reason.isEmpty())
+	QJsonObject payload = BuildStatusSnapshot();
+	payload.insert(QStringLiteral("status"), IsConnected() ? QStringLiteral("online") : QStringLiteral("offline"));
+	payload.insert(QStringLiteral("protocolVersion"), QString::fromUtf8(ProtocolVersion));
+	if (!reason.isEmpty()) {
 		payload.insert(QStringLiteral("reason"), reason);
+	}
 	PublishEvent(QStringLiteral("broadcast.status"), payload);
+}
+
+QJsonObject TempestStudioBridge::BuildDualFormatStatus() const
+{
+	QJsonObject status{{QStringLiteral("supported"), true},
+			   {QStringLiteral("enabled"), false},
+			   {QStringLiteral("enhancedBroadcastingEnabled"), false},
+			   {QStringLiteral("additionalCanvasSelected"), false},
+			   {QStringLiteral("sceneLinksReady"), false},
+			   {QStringLiteral("linkedScenes"), 0},
+			   {QStringLiteral("totalScenes"), 0},
+			   {QStringLiteral("audioReady"), false},
+			   {QStringLiteral("browserSourcesReady"), false},
+			   {QStringLiteral("previewAvailable"), false}};
+	if (!main || !main->Config()) {
+		status.insert(QStringLiteral("lastError"),
+			      QStringLiteral("The active Broadcast profile is not ready."));
+		return status;
+	}
+	config_t *config = main->Config();
+	const bool enhanced = config_get_bool(config, "Stream1", "EnableMultitrackVideo");
+	const QString selectedUuid = QString::fromUtf8(config_get_string(config, "Stream1", "MultitrackExtraCanvas"));
+	status.insert(QStringLiteral("enhancedBroadcastingEnabled"), enhanced);
+
+	obs_frontend_canvas_list canvases{};
+	obs_frontend_get_canvases(&canvases);
+	for (size_t index = 0; index < canvases.canvases.num; ++index) {
+		obs_canvas_t *canvas = canvases.canvases.array[index];
+		const QString uuid = QString::fromUtf8(obs_canvas_get_uuid(canvas));
+		if (selectedUuid.isEmpty() || uuid != selectedUuid) {
+			continue;
+		}
+		obs_video_info info{};
+		if (!obs_canvas_get_video_info(canvas, &info)) {
+			continue;
+		}
+		const bool supportedPreset = (info.output_width == 1080 && info.output_height == 1920) ||
+					     (info.output_width == 720 && info.output_height == 1280);
+		status.insert(QStringLiteral("additionalCanvasSelected"), supportedPreset);
+		status.insert(QStringLiteral("previewAvailable"), true);
+		status.insert(QStringLiteral("audioReady"), obs_get_audio() != nullptr);
+		status.insert(QStringLiteral("canvas"),
+			      QJsonObject{{QStringLiteral("id"), uuid},
+					  {QStringLiteral("name"), QString::fromUtf8(obs_canvas_get_name(canvas))},
+					  {QStringLiteral("baseWidth"), static_cast<int>(info.base_width)},
+					  {QStringLiteral("baseHeight"), static_cast<int>(info.base_height)},
+					  {QStringLiteral("outputWidth"), static_cast<int>(info.output_width)},
+					  {QStringLiteral("outputHeight"), static_cast<int>(info.output_height)},
+					  {QStringLiteral("fpsNumerator"), static_cast<int>(info.fps_num)},
+					  {QStringLiteral("fpsDenominator"), static_cast<int>(info.fps_den)}});
+		int totalScenes = 0;
+		const int linkedScenes = CountLinkedScenes(static_cast<int>(info.base_width),
+							   static_cast<int>(info.base_height), totalScenes);
+		status.insert(QStringLiteral("linkedScenes"), linkedScenes);
+		status.insert(QStringLiteral("totalScenes"), totalScenes);
+		status.insert(QStringLiteral("sceneLinksReady"), totalScenes > 0 && linkedScenes == totalScenes);
+		break;
+	}
+	obs_frontend_canvas_list_free(&canvases);
+
+	VerticalAlertInventory alertInventory;
+	obs_enum_sources(CollectVerticalAlerts, &alertInventory);
+	status.insert(QStringLiteral("browserSourcesReady"), alertInventory.twitch && alertInventory.interactions);
+	const bool enabled = enhanced && status.value(QStringLiteral("additionalCanvasSelected")).toBool();
+	status.insert(QStringLiteral("enabled"), enabled);
+	return status;
+}
+
+QJsonObject TempestStudioBridge::BuildStatusSnapshot() const
+{
+	const QJsonObject dualFormat = BuildDualFormatStatus();
+	const bool dualFormatReady = dualFormat.value(QStringLiteral("enabled")).toBool() &&
+				     dualFormat.value(QStringLiteral("sceneLinksReady")).toBool() &&
+				     dualFormat.value(QStringLiteral("audioReady")).toBool() &&
+				     dualFormat.value(QStringLiteral("browserSourcesReady")).toBool();
+	QJsonObject status{{QStringLiteral("ready"), IsConnected() && reactor && reactor->ExternalEventBridgeArmed()},
+			   {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)},
+			   {QStringLiteral("streaming"), obs_frontend_streaming_active()},
+			   {QStringLiteral("recording"), obs_frontend_recording_active()},
+			   {QStringLiteral("reactionArmed"), reactor && reactor->ExternalEventBridgeArmed()},
+			   {QStringLiteral("activeLeases"), activeLeases.size()},
+			   {QStringLiteral("canvasProfile"), BuildCanvasProfile()},
+			   {QStringLiteral("sourceInventory"), BuildSourceInventory(main)},
+			   {QStringLiteral("commandsHandled"), commandsHandled},
+			   {QStringLiteral("dualFormat"), dualFormat}};
+	if (destinationCoordinator) {
+		status.insert(QStringLiteral("simulcast"), destinationCoordinator->StatusSnapshot(dualFormatReady));
+	}
+	return status;
+}
+
+bool TempestStudioBridge::ConfigureDualFormat(const QJsonObject &arguments, QString &error)
+{
+	if (!main || !main->Config() || obs_frontend_streaming_active()) {
+		error = QStringLiteral("Stop streaming before changing Dual Format configuration.");
+		return false;
+	}
+	if (!arguments.value(QStringLiteral("enabled")).isBool()) {
+		error = QStringLiteral("Dual Format configuration must include enabled=true or enabled=false.");
+		return false;
+	}
+	config_t *config = main->Config();
+	const bool enabled = arguments.value(QStringLiteral("enabled")).toBool();
+	if (!enabled) {
+		config_set_bool(config, "Stream1", "EnableMultitrackVideo", false);
+		config_save_safe(config, "tmp", nullptr);
+		return true;
+	}
+	const QJsonObject canvasRequest = arguments.value(QStringLiteral("additionalCanvas")).toObject();
+	const int width = canvasRequest.value(QStringLiteral("outputWidth"))
+				  .toInt(canvasRequest.value(QStringLiteral("baseWidth")).toInt());
+	const int height = canvasRequest.value(QStringLiteral("outputHeight"))
+				   .toInt(canvasRequest.value(QStringLiteral("baseHeight")).toInt());
+	if (!((width == 1080 && height == 1920) || (width == 720 && height == 1280))) {
+		error = QStringLiteral("Dual Format supports only 1080x1920 or 720x1280 canvases.");
+		return false;
+	}
+	QString selectedUuid;
+	obs_frontend_canvas_list canvases{};
+	obs_frontend_get_canvases(&canvases);
+	for (size_t index = 0; index < canvases.canvases.num; ++index) {
+		obs_video_info info{};
+		if (obs_canvas_get_video_info(canvases.canvases.array[index], &info) &&
+		    static_cast<int>(info.output_width) == width && static_cast<int>(info.output_height) == height) {
+			selectedUuid = QString::fromUtf8(obs_canvas_get_uuid(canvases.canvases.array[index]));
+			break;
+		}
+	}
+	obs_frontend_canvas_list_free(&canvases);
+	if (selectedUuid.isEmpty()) {
+		error = QStringLiteral("No existing Broadcast canvas matches the requested %1x%2 preset.")
+				.arg(width)
+				.arg(height);
+		return false;
+	}
+	config_set_bool(config, "Stream1", "EnableMultitrackVideo", true);
+	config_set_string(config, "Stream1", "MultitrackExtraCanvas", selectedUuid.toUtf8().constData());
+	config_save_safe(config, "tmp", nullptr);
+	return true;
 }
 
 void TempestStudioBridge::PublishEvent(const QString &topic, const QJsonObject &payload)
@@ -581,16 +822,17 @@ void TempestStudioBridge::HandleIncoming(const QByteArray &messageBytes)
 		return;
 	}
 	const QString kind = message.value(QStringLiteral("kind")).toString();
-	if (kind == QStringLiteral("command"))
+	if (kind == QStringLiteral("command")) {
 		HandleCommand(message);
-	else if (kind == QStringLiteral("welcome"))
+	} else if (kind == QStringLiteral("welcome")) {
 		SetConnectionState(QStringLiteral("ONLINE // STUDIO AUTHENTICATED"),
 				   QStringLiteral("Bridge protocol 1.0 welcome received."));
-	else if (kind == QStringLiteral("error"))
+	} else if (kind == QStringLiteral("error")) {
 		SetConnectionState(
 			QStringLiteral("ONLINE // BRIDGE ERROR"),
 			message.value(QStringLiteral("payload")).toObject().value(QStringLiteral("message")).toString(),
 			true);
+	}
 }
 
 QString TempestStudioBridge::CommandKey(const QJsonObject &payload) const
@@ -611,17 +853,22 @@ void TempestStudioBridge::RememberCommand(const QString &key)
 {
 	processedCommands.insert(key);
 	processedCommandOrder.append(key);
-	while (processedCommandOrder.size() > MaximumRememberedCommands)
+	while (processedCommandOrder.size() > MaximumRememberedCommands) {
 		processedCommands.remove(processedCommandOrder.takeFirst());
+	}
 }
 
 void TempestStudioBridge::HandleCommand(const QJsonObject &message)
 {
 	const QString target = message.value(QStringLiteral("target")).toString();
-	if (!target.isEmpty() && target != QString::fromUtf8(ApplicationId))
+	if (!target.isEmpty() && target != QString::fromUtf8(ApplicationId)) {
 		return;
+	}
 	const QJsonObject payload = message.value(QStringLiteral("payload")).toObject();
-	const QString commandKey = CommandKey(payload);
+	QString commandKey = CommandKey(payload);
+	if (commandKey == QStringLiteral("//")) {
+		commandKey = message.value(QStringLiteral("id")).toString();
+	}
 	if (processedCommands.contains(commandKey)) {
 		SendResponse(message, true, QStringLiteral("duplicate"),
 			     QStringLiteral("Command was already applied; no state was changed."));
@@ -630,21 +877,36 @@ void TempestStudioBridge::HandleCommand(const QJsonObject &message)
 	RememberCommand(commandKey);
 	++commandsHandled;
 	const QString topic = message.value(QStringLiteral("topic")).toString();
-	if (topic == QStringLiteral("broadcast.reaction.trigger"))
+	if (topic == QStringLiteral("broadcast.reaction.trigger")) {
 		HandleReactionTrigger(message, payload);
-	else if (topic == QStringLiteral("broadcast.reaction.clear"))
+	} else if (topic == QStringLiteral("broadcast.reaction.clear")) {
 		HandleReactionClear(message, payload);
-	else if (topic == QStringLiteral("broadcast.audio.play"))
+	} else if (topic == QStringLiteral("broadcast.audio.play")) {
 		HandleAudioPlay(message, payload);
-	else if (topic == QStringLiteral("broadcast.visual.show"))
+	} else if (topic == QStringLiteral("broadcast.visual.show")) {
 		HandleVisualShow(message, payload);
-	else if (topic == QStringLiteral("broadcast.visual.hide"))
+	} else if (topic == QStringLiteral("broadcast.visual.hide")) {
 		HandleVisualHide(message, payload);
-	else if (topic == QStringLiteral("broadcast.status"))
+	} else if (topic == QStringLiteral("broadcast.dual-format.configure")) {
+		HandleDualFormatConfigure(message, payload);
+	} else if (topic == QStringLiteral("broadcast.dual-format.preview")) {
+		HandleDualFormatPreview(message);
+	} else if (topic == QStringLiteral("broadcast.simulcast.configure")) {
+		HandleSimulcastConfigure(message, payload);
+	} else if (topic == QStringLiteral("broadcast.simulcast.preflight")) {
+		HandleSimulcastPreflight(message);
+	} else if (topic == QStringLiteral("broadcast.simulcast.start")) {
+		HandleSimulcastStart(message, payload);
+	} else if (topic == QStringLiteral("broadcast.simulcast.stop")) {
+		HandleSimulcastStop(message, payload);
+	} else if (topic == QStringLiteral("broadcast.simulcast.retry-kick")) {
+		HandleSimulcastRetryKick(message);
+	} else if (topic == QStringLiteral("broadcast.status")) {
 		HandleStatusRequest(message);
-	else
+	} else {
 		SendResponse(message, false, QStringLiteral("unsupported"),
 			     QStringLiteral("Broadcast does not provide capability %1.").arg(topic));
+	}
 	commandLabel->setText(
 		QStringLiteral("COMMANDS // %1 // ACTIVE LEASES // %2").arg(commandsHandled).arg(activeLeases.size()));
 }
@@ -698,8 +960,9 @@ void TempestStudioBridge::HandleReactionTrigger(const QJsonObject &message, cons
 	timer->setSingleShot(true);
 	timer->setInterval(durationMs);
 	connect(timer, &QTimer::timeout, this, [this, leaseKey]() { ExpireLease(leaseKey); });
-	if (auto oldTimer = activeLeases.take(leaseKey))
+	if (auto oldTimer = activeLeases.take(leaseKey)) {
 		oldTimer->deleteLater();
+	}
 	activeLeases.insert(leaseKey, timer);
 	currentLeaseKey = leaseKey;
 	timer->start();
@@ -728,23 +991,26 @@ void TempestStudioBridge::HandleReactionClear(const QJsonObject &message, const 
 
 void TempestStudioBridge::ExpireLease(const QString &leaseKey)
 {
-	if (auto timer = activeLeases.take(leaseKey))
+	if (auto timer = activeLeases.take(leaseKey)) {
 		timer->deleteLater();
+	}
 	if (currentLeaseKey == leaseKey && reactor) {
 		reactor->ClearExternalEvent();
 		currentLeaseKey.clear();
 	}
 	const QString visualSource = activeVisualSources.take(leaseKey);
-	if (!visualSource.isEmpty())
+	if (!visualSource.isEmpty()) {
 		SetCurrentSceneSourceVisible(visualSource, false);
+	}
 	PublishEvent(QStringLiteral("broadcast.reaction.expired"),
 		     {{QStringLiteral("leaseKey"), leaseKey},
 		      {QStringLiteral("reason"), QStringLiteral("local-fallback-expiry")}});
 	PublishHealth(QStringLiteral("lease-expired"));
-	if (commandLabel)
+	if (commandLabel) {
 		commandLabel->setText(QStringLiteral("COMMANDS // %1 // ACTIVE LEASES // %2")
 					      .arg(commandsHandled)
 					      .arg(activeLeases.size()));
+	}
 }
 
 void TempestStudioBridge::HandleAudioPlay(const QJsonObject &message, const QJsonObject &payload)
@@ -774,20 +1040,24 @@ void TempestStudioBridge::HandleAudioPlay(const QJsonObject &message, const QJso
 
 bool TempestStudioBridge::SetCurrentSceneSourceVisible(const QString &sourceName, bool visible, bool restartMedia)
 {
-	if (!main || sourceName.isEmpty())
+	if (!main || sourceName.isEmpty()) {
 		return false;
+	}
 	OBSScene scene = main->GetCurrentScene();
-	if (!scene)
+	if (!scene) {
 		return false;
+	}
 	const QByteArray name = sourceName.toUtf8();
 	obs_sceneitem_t *item = obs_scene_find_source_recursive(scene, name.constData());
-	if (!item)
+	if (!item) {
 		return false;
+	}
 	obs_sceneitem_set_visible(item, visible);
 	if (visible && restartMedia) {
 		obs_source_t *source = obs_sceneitem_get_source(item);
-		if (source && (obs_source_get_output_flags(source) & OBS_SOURCE_CONTROLLABLE_MEDIA) != 0)
+		if (source && (obs_source_get_output_flags(source) & OBS_SOURCE_CONTROLLABLE_MEDIA) != 0) {
 			obs_source_media_restart(source);
+		}
 	}
 	return true;
 }
@@ -816,8 +1086,9 @@ void TempestStudioBridge::HandleVisualShow(const QJsonObject &message, const QJs
 	timer->setSingleShot(true);
 	timer->setInterval(durationMs);
 	connect(timer, &QTimer::timeout, this, [this, leaseKey]() { ExpireLease(leaseKey); });
-	if (auto oldTimer = activeLeases.take(leaseKey))
+	if (auto oldTimer = activeLeases.take(leaseKey)) {
 		oldTimer->deleteLater();
+	}
 	activeVisualSources.insert(leaseKey, sourceName);
 	activeLeases.insert(leaseKey, timer);
 	timer->start();
@@ -835,8 +1106,9 @@ void TempestStudioBridge::HandleVisualHide(const QJsonObject &message, const QJs
 		timer->deleteLater();
 	}
 	QString sourceName = activeVisualSources.take(leaseKey);
-	if (sourceName.isEmpty())
+	if (sourceName.isEmpty()) {
 		sourceName = FirstString(arguments, {"broadcastVisualSource", "visualSource", "sourceName", "cue"});
+	}
 	const bool hidden = SetCurrentSceneSourceVisible(sourceName, false);
 	SendResponse(message, true, hidden ? QStringLiteral("hidden") : QStringLiteral("already-hidden"),
 		     hidden ? QStringLiteral("OBS visual source hidden: %1").arg(sourceName)
@@ -845,15 +1117,123 @@ void TempestStudioBridge::HandleVisualHide(const QJsonObject &message, const QJs
 
 void TempestStudioBridge::HandleStatusRequest(const QJsonObject &message)
 {
-	const QJsonObject status{{QStringLiteral("ready"), reactor && reactor->ExternalEventBridgeArmed()},
-				 {QStringLiteral("streaming"), obs_frontend_streaming_active()},
-				 {QStringLiteral("recording"), obs_frontend_recording_active()},
-				 {QStringLiteral("activeLeases"), activeLeases.size()},
-				 {QStringLiteral("canvasProfile"), BuildCanvasProfile()},
-				 {QStringLiteral("sourceInventory"), BuildSourceInventory(main)},
-				 {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)}};
+	const QJsonObject status = BuildStatusSnapshot();
 	SendResponse(message, true, QStringLiteral("ready"), QStringLiteral("Broadcast status snapshot."), status);
 	PublishHealth(QStringLiteral("requested"));
+}
+
+void TempestStudioBridge::HandleDualFormatConfigure(const QJsonObject &message, const QJsonObject &payload)
+{
+	QString error;
+	const bool configured = ConfigureDualFormat(payload.value(QStringLiteral("arguments")).toObject(), error);
+	SendResponse(message, configured, configured ? QStringLiteral("configured") : QStringLiteral("rejected"),
+		     configured ? QStringLiteral("Dual Format profile settings were updated.") : error,
+		     {{QStringLiteral("dualFormat"), BuildDualFormatStatus()}});
+	PublishHealth(configured ? QStringLiteral("dual-format-configured")
+				 : QStringLiteral("dual-format-configuration-rejected"));
+}
+
+void TempestStudioBridge::HandleDualFormatPreview(const QJsonObject &message)
+{
+	const bool opened = proc_handler_call(obs_get_proc_handler(), "tempest_vertical_open_workspace", nullptr);
+	SendResponse(message, opened, opened ? QStringLiteral("opened") : QStringLiteral("unavailable"),
+		     opened ? QStringLiteral("Vertical canvas workspace opened.")
+			    : QStringLiteral("The Tempest vertical canvas workspace is unavailable."));
+}
+
+void TempestStudioBridge::HandleSimulcastConfigure(const QJsonObject &message, const QJsonObject &payload)
+{
+	if (!destinationCoordinator) {
+		SendResponse(message, false, QStringLiteral("unavailable"),
+			     QStringLiteral("The Broadcast destination controller is unavailable."));
+		return;
+	}
+	QString error;
+	const bool configured = destinationCoordinator->ConfigureFromStudio(
+		payload.value(QStringLiteral("arguments")).toObject(), error);
+	const QJsonObject dual = BuildDualFormatStatus();
+	const bool dualReady = dual.value(QStringLiteral("enabled")).toBool() &&
+			       dual.value(QStringLiteral("sceneLinksReady")).toBool() &&
+			       dual.value(QStringLiteral("audioReady")).toBool() &&
+			       dual.value(QStringLiteral("browserSourcesReady")).toBool();
+	SendResponse(message, configured, configured ? QStringLiteral("configured") : QStringLiteral("rejected"),
+		     configured ? QStringLiteral("Simulcast profile settings were stored in Broadcast.") : error,
+		     {{QStringLiteral("simulcast"), destinationCoordinator->StatusSnapshot(dualReady)}});
+	PublishHealth(configured ? QStringLiteral("simulcast-configured")
+				 : QStringLiteral("simulcast-configuration-rejected"));
+}
+
+void TempestStudioBridge::HandleSimulcastPreflight(const QJsonObject &message)
+{
+	if (!destinationCoordinator) {
+		SendResponse(message, false, QStringLiteral("unavailable"),
+			     QStringLiteral("The Broadcast destination controller is unavailable."));
+		return;
+	}
+	const QJsonObject dual = BuildDualFormatStatus();
+	const bool dualReady = dual.value(QStringLiteral("enabled")).toBool() &&
+			       dual.value(QStringLiteral("sceneLinksReady")).toBool() &&
+			       dual.value(QStringLiteral("audioReady")).toBool() &&
+			       dual.value(QStringLiteral("browserSourcesReady")).toBool();
+	QString error;
+	const bool passed = destinationCoordinator->RunPreflight(dualReady, error);
+	SendResponse(message, passed, passed ? QStringLiteral("passed") : QStringLiteral("failed"),
+		     passed ? QStringLiteral("Local production preflight passed.") : error,
+		     {{QStringLiteral("simulcast"), destinationCoordinator->StatusSnapshot(dualReady)}});
+	PublishHealth(passed ? QStringLiteral("simulcast-preflight-passed")
+			     : QStringLiteral("simulcast-preflight-failed"));
+}
+
+void TempestStudioBridge::HandleSimulcastStart(const QJsonObject &message, const QJsonObject &payload)
+{
+	if (!destinationCoordinator) {
+		SendResponse(message, false, QStringLiteral("unavailable"),
+			     QStringLiteral("The Broadcast destination controller is unavailable."));
+		return;
+	}
+	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
+	if (arguments.value(QStringLiteral("operatorChecklistAccepted")).toBool() != true) {
+		SendResponse(message, false, QStringLiteral("rejected"),
+			     QStringLiteral("The operator rehearsal checklist must be accepted before going live."));
+		return;
+	}
+	QString error;
+	const bool started =
+		destinationCoordinator->StartFromStudio(arguments.value(QStringLiteral("recording")).toBool(), error);
+	SendResponse(message, started, started ? QStringLiteral("starting") : QStringLiteral("rejected"),
+		     started ? QStringLiteral("Coordinated Twitch and Kick startup requested.") : error);
+	PublishHealth(started ? QStringLiteral("simulcast-starting") : QStringLiteral("simulcast-start-rejected"));
+}
+
+void TempestStudioBridge::HandleSimulcastStop(const QJsonObject &message, const QJsonObject &payload)
+{
+	if (!destinationCoordinator) {
+		SendResponse(message, false, QStringLiteral("unavailable"),
+			     QStringLiteral("The Broadcast destination controller is unavailable."));
+		return;
+	}
+	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
+	QString error;
+	const bool stopped = destinationCoordinator->StopFromStudio(
+		arguments.value(QStringLiteral("scope")).toString(QStringLiteral("all")),
+		arguments.value(QStringLiteral("force")).toBool(), error);
+	SendResponse(message, stopped, stopped ? QStringLiteral("stopping") : QStringLiteral("rejected"),
+		     stopped ? QStringLiteral("Requested Broadcast outputs are stopping.") : error);
+	PublishHealth(stopped ? QStringLiteral("simulcast-stopping") : QStringLiteral("simulcast-stop-rejected"));
+}
+
+void TempestStudioBridge::HandleSimulcastRetryKick(const QJsonObject &message)
+{
+	if (!destinationCoordinator) {
+		SendResponse(message, false, QStringLiteral("unavailable"),
+			     QStringLiteral("The Broadcast destination controller is unavailable."));
+		return;
+	}
+	QString error;
+	const bool retrying = destinationCoordinator->RetryKick(error);
+	SendResponse(message, retrying, retrying ? QStringLiteral("starting") : QStringLiteral("rejected"),
+		     retrying ? QStringLiteral("Kick recovery attempt started; Twitch remains live.") : error);
+	PublishHealth(retrying ? QStringLiteral("kick-retry-starting") : QStringLiteral("kick-retry-rejected"));
 }
 
 void TempestStudioBridge::SendResponse(const QJsonObject &command, bool success, const QString &status,
@@ -863,8 +1243,9 @@ void TempestStudioBridge::SendResponse(const QJsonObject &command, bool success,
 			    {QStringLiteral("success"), success},
 			    {QStringLiteral("status"), status},
 			    {QStringLiteral("detail"), detail}};
-	for (auto it = extra.begin(); it != extra.end(); ++it)
+	for (auto it = extra.begin(); it != extra.end(); ++it) {
 		payload.insert(it.key(), it.value());
+	}
 	const QString correlationId = command.value(QStringLiteral("correlationId")).toString();
 	SendDocument(CreateMessage(QStringLiteral("response"), command.value(QStringLiteral("topic")).toString(),
 				   payload, command.value(QStringLiteral("source")).toString(), correlationId));

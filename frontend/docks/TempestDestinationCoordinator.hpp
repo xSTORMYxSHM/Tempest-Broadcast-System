@@ -5,6 +5,7 @@
 #include <obs.hpp>
 
 #include <QPointer>
+#include <QJsonObject>
 #include <QString>
 
 class QCheckBox;
@@ -26,6 +27,15 @@ public:
 	bool PrepareForMainStream(QString &error);
 	void CancelPreparedStart();
 	void ReloadProfile();
+	QJsonObject StatusSnapshot(bool dualFormatReady) const;
+	bool ConfigureFromStudio(const QJsonObject &arguments, QString &error);
+	bool RunPreflight(bool dualFormatReady, QString &error);
+	bool StartFromStudio(bool recording, QString &error);
+	bool StopFromStudio(const QString &scope, bool force, QString &error);
+	bool RetryKick(QString &error);
+
+signals:
+	void StatusChanged();
 
 protected:
 	void showEvent(QShowEvent *event) override;
@@ -49,6 +59,10 @@ private:
 	bool ValidateSettings(QString &error, QString *encoderId = nullptr) const;
 	QString ResolveEncoderId() const;
 	bool CreateKickOutput(const QString &encoderId, QString &error);
+	bool PersistSettings(QString &error);
+	int EstimatedRequiredKbps() const;
+	QJsonObject OutputHealth(obs_output_t *candidate, const QString &idleState,
+				 const QString &lastError = QString()) const;
 	void StartKickOutput();
 	void StopKickOutput(bool force = false);
 	void ReleaseKickOutput();
@@ -79,4 +93,10 @@ private:
 	bool startRequested = false;
 	bool stopRequested = false;
 	bool loading = false;
+	int uploadCapacityKbps = 0;
+	QString lastPreflightAt;
+	bool lastPreflightPassed = false;
+	QString lastPreflightError;
+	QString lastKickError;
+	bool credentialsProtected = false;
 };
