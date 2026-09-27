@@ -62,7 +62,7 @@
 #include <cstring>
 
 #ifndef TEMPEST_PRODUCT_VERSION
-#define TEMPEST_PRODUCT_VERSION "1.2.1"
+#define TEMPEST_PRODUCT_VERSION "1.4.5"
 #endif
 
 namespace {
