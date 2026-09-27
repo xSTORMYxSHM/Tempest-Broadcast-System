@@ -482,7 +482,7 @@ private:
 	QPointer<TempestMainframeBar> tempestMainframeBar;
 	QByteArray tempestCommandDockState;
 	QByteArray tempestEngineeringDockState;
-	bool tempestCommandWorkspace = true;
+	bool tempestCommandWorkspace = false;
 	QString tempestResponsiveProfile;
 	QString tempestResponsiveBreakpoint;
 	bool tempestResponsiveProfilesInitialized = false;

@@ -8,7 +8,6 @@
 #include <obs-frontend-api.h>
 #include <util/platform.h>
 
-#include <QButtonGroup>
 #include <QDateTime>
 #include <QDir>
 #include <QHBoxLayout>
@@ -193,16 +192,6 @@ void TempestMainframeBar::BuildInterface()
 
 	auto *workspaceLayout = new QHBoxLayout();
 	workspaceLayout->setSpacing(4);
-	commandWorkspaceButton = new QPushButton(QStringLiteral("COMMAND"), this);
-	engineeringWorkspaceButton = new QPushButton(QStringLiteral("ENGINEERING"), this);
-	commandWorkspaceButton->setCheckable(true);
-	engineeringWorkspaceButton->setCheckable(true);
-	auto *workspaceGroup = new QButtonGroup(this);
-	workspaceGroup->setExclusive(true);
-	workspaceGroup->addButton(commandWorkspaceButton);
-	workspaceGroup->addButton(engineeringWorkspaceButton);
-	workspaceLayout->addWidget(commandWorkspaceButton);
-	workspaceLayout->addWidget(engineeringWorkspaceButton);
 	dockManagerButton = new QPushButton(QStringLiteral("LAYOUT"), this);
 	dockManagerButton->setObjectName(QStringLiteral("tempestDockManager"));
 	dockManagerButton->setToolTip(QStringLiteral("Open workspace layout settings"));
@@ -240,8 +229,6 @@ void TempestMainframeBar::BuildInterface()
 		"Show or suspend the local canvas preview. Streaming, recording, projectors, and source output continue."));
 	root->addWidget(canvasButton);
 
-	connect(commandWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(true); });
-	connect(engineeringWorkspaceButton, &QPushButton::clicked, this, [this]() { emit WorkspaceRequested(false); });
 	connect(dockManagerButton, &QPushButton::clicked, this, [this]() { emit DockManagerRequested(); });
 	connect(portraitWorkspaceButton, &QPushButton::clicked, this, &TempestMainframeBar::OpenPortraitWorkspace);
 	connect(uiScaleDown, &QPushButton::clicked, this, [this]() { emit UiScaleRequested(uiScalePercent - 10); });
@@ -402,12 +389,6 @@ void TempestMainframeBar::ApplyAdaptiveVisibility()
 	if (detailLabel) {
 		detailLabel->setVisible(showSecondary);
 	}
-}
-
-void TempestMainframeBar::SetCommandWorkspace(bool commandMode)
-{
-	commandWorkspaceButton->setChecked(commandMode);
-	engineeringWorkspaceButton->setChecked(!commandMode);
 }
 
 void TempestMainframeBar::ToggleArm(bool armed)

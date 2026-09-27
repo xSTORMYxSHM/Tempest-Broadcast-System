@@ -876,7 +876,7 @@ void OBSBasic::OpenTempestDockManager()
 	auto *title = new QLabel(QStringLiteral("WORKSPACE LAYOUT"), &dialog);
 	title->setObjectName(QStringLiteral("layoutTitle"));
 	auto *subtitle = new QLabel(
-		QStringLiteral("Monitor profiles, responsive reflow, visibility, scale, and workspace recovery."),
+		QStringLiteral("Monitor profiles, visibility, scale, and workspace recovery."),
 		&dialog);
 	subtitle->setObjectName(QStringLiteral("layoutSubtitle"));
 	root->addWidget(title);
@@ -901,17 +901,12 @@ void OBSBasic::OpenTempestDockManager()
 				  config_get_string(config, TempestResponsiveConfigSection, TempestManualProfileKey)));
 	responsiveProfile->setCurrentIndex(responsiveProfile->findData(selectedProfile));
 	responsiveProfile->setAccessibleName(QStringLiteral("Responsive workspace profile"));
-	auto *autoReflow = new QCheckBox(QStringLiteral("LIVE DOCK REFLOW"), &dialog);
-	autoReflow->setChecked(config_get_bool(config, TempestResponsiveConfigSection, TempestAutoReflowKey));
-	autoReflow->setToolTip(QStringLiteral(
-		"Tab compact panels and expand operational docks when the window crosses layout breakpoints."));
 	auto *safeAreaGuides = new QCheckBox(QStringLiteral("CANVAS SAFE-AREA GUIDES"), &dialog);
 	safeAreaGuides->setChecked(config_get_bool(config, "BasicWindow", "ShowSafeAreas"));
 	safeAreaGuides->setToolTip(
 		QStringLiteral("Show broadcast-safe guides inside the 16:9 stream canvas on every display shape."));
 	profileRow->addWidget(profileLabel);
 	profileRow->addWidget(responsiveProfile, 1);
-	profileRow->addWidget(autoReflow);
 	profileRow->addWidget(safeAreaGuides);
 	root->addLayout(profileRow);
 
@@ -1042,8 +1037,8 @@ void OBSBasic::OpenTempestDockManager()
 	auto *utilityRow = new QHBoxLayout();
 	auto *showAll = new QPushButton(QStringLiteral("SHOW ALL"), &dialog);
 	auto *resetScales = new QPushButton(QStringLiteral("RESET UI SCALE"), &dialog);
-	auto *recover = new QPushButton(QStringLiteral("RECOVER COMMAND LAYOUT"), &dialog);
-	recover->setToolTip(QStringLiteral("Dock every Tempest panel back into the standard Command workspace."));
+	auto *recover = new QPushButton(QStringLiteral("RECOVER DEFAULT LAYOUT"), &dialog);
+	recover->setToolTip(QStringLiteral("Restore the conventional OBS workspace and keep Tempest panels available."));
 	utilityRow->addWidget(showAll);
 	utilityRow->addWidget(resetScales);
 	utilityRow->addWidget(recover);
@@ -1056,9 +1051,9 @@ void OBSBasic::OpenTempestDockManager()
 	});
 	connect(resetScales, &QPushButton::clicked, &dialog,
 		[applicationScale]() { applicationScale->setCurrentIndex(applicationScale->findData(100)); });
-	bool recoverCommandLayout = false;
-	connect(recover, &QPushButton::clicked, &dialog, [&dialog, &recoverCommandLayout]() {
-		recoverCommandLayout = true;
+	bool recoverDefaultLayout = false;
+	connect(recover, &QPushButton::clicked, &dialog, [&dialog, &recoverDefaultLayout]() {
+		recoverDefaultLayout = true;
 		dialog.accept();
 	});
 
@@ -1078,17 +1073,18 @@ void OBSBasic::OpenTempestDockManager()
 	if (!useAutomaticProfile)
 		config_set_string(config, TempestResponsiveConfigSection, TempestManualProfileKey,
 				  profileSelection.toUtf8().constData());
-	config_set_bool(config, TempestResponsiveConfigSection, TempestAutoReflowKey, autoReflow->isChecked());
 	config_set_bool(config, "BasicWindow", "ShowSafeAreas", safeAreaGuides->isChecked());
 	UpdatePreviewSafeAreas();
 	SetTempestResponsiveProfile(useAutomaticProfile ? DetectTempestResponsiveProfile() : profileSelection, true);
 
-	if (recoverCommandLayout) {
-		tempestCommandDockState.clear();
-		tempestCommandWorkspace = true;
-		ConfigureTempestCommandLayout();
-		tempestMainframeBar->SetCommandWorkspace(true);
-		config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace", "command");
+	if (recoverDefaultLayout) {
+		tempestEngineeringDockState.clear();
+		tempestCommandWorkspace = false;
+		on_resetDocks_triggered(true);
+		menuBar()->setVisible(true);
+		if (tempestStreamInfoDock)
+			IntegrateTempestStreamInfoDock(tempestStreamInfoDock);
+		config_set_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace", "engineering");
 	} else {
 		for (DockControls &control : controls) {
 			if (!control.dock)
@@ -1195,7 +1191,6 @@ void OBSBasic::SetTempestWorkspace(bool commandMode, bool initial)
 		IntegrateTempestStreamInfoDock(tempestStreamInfoDock);
 
 	tempestCommandToolbar->setVisible(true);
-	tempestMainframeBar->SetCommandWorkspace(commandMode);
 	if (commandMode) {
 		tempestResponsiveBreakpoint.clear();
 		ApplyTempestResponsiveDockPriorities(true);

@@ -143,15 +143,14 @@ Rendering any Stream Overlay change regenerates all four landscape mode files, a
 
 The default 1920x1080 workspace is headed by the native **Tempest Broadcast control bar**. It provides:
 
-- persistent Command and Engineering workspaces,
+- one conventional OBS workspace with the complete Tempest dock suite,
 - an armed stream safety state before streaming can begin,
 - direct stream and recording controls backed by the existing OBS output system,
 - a confirmed force-stop action that leaves local recording intact,
 - current-scene, render FPS, CPU, render-lag, recording, and stream-time telemetry,
-- a Command layout optimized for a large program canvas with scenes, sources, audio, and Stream Overlay,
-- one-click access to the full conventional OBS frontend in Engineering mode.
+- direct access to the conventional OBS menus, scenes, sources, audio, and advanced tools.
 
-Each workspace stores its dock layout independently. Plugins and advanced dialogs remain available in Engineering mode while Command mode presents the Tempest-first operating surface.
+The retired Command/Engineering switch is not part of the control bar. Existing profiles migrate to the conventional workspace automatically, while every Tempest surface remains available through the Docks menu and Workspace Layout.
 
 The control bar also writes an atomic runtime health snapshot once per second at
 `tempest-broadcast-system\telemetry\runtime.json`. It mirrors the core OBS statistics used by OBS WebSocket—CPU,
@@ -168,15 +167,15 @@ Scaling adjusts application typography plus control dimensions, panel minimums, 
 
 The saved percentage is restored before the workspace appears. With **Auto-size window on startup** enabled, Broadcast restores a normal window from its 1920x1080 workstation baseline and automatically adopts the active display's aspect ratio on ultrawide screens, up to 32:9. It expands with the selected UI scale, accounts for window borders and the taskbar, clamps to the available work area, and centers itself. Full-screen sessions keep their restored state; users who prefer a maximized window can disable auto-sizing in Workspace Layout.
 
-The control bar's **Layout** button opens **Workspace Layout**. It manages the single application UI scale, startup auto-sizing, visibility, docked or floating state, and focus for the complete Tempest dock suite, with Stream Information included whenever Twitch authentication makes that dock available. **Recover Command Layout** returns all panels to the standard Command workspace without discarding the user's accessibility scale.
+The control bar's **Layout** button opens **Workspace Layout**. It manages the single application UI scale, startup auto-sizing, visibility, docked or floating state, and focus for the complete Tempest dock suite, with Stream Information included whenever Twitch authentication makes that dock available. **Recover Default Layout** restores the conventional OBS workspace without discarding the user's accessibility scale.
 
 Workspace Layout also provides an application-wide color selector. **Tempest Cyan** remains the default, with Ultraviolet, Neon Magenta, Ember, Emerald, Ice Blue, and a full custom-color picker available as persistent alternatives. The selected accent is derived into coordinated highlight, border, surface, and muted-text tones and is reapplied after UI-scale or dock-layout changes. Recording, error, and warning colors keep their standard operational meaning. This setting changes Broadcast's application chrome only; stream overlays and Browser Source artwork retain their own reactive palettes.
 
 ### Responsive workspace profiles
 
-The Layout Director maintains independent Command and Engineering dock states for **Standard 16:9**, **Ultrawide**, and **Super Ultrawide** displays. Automatic mode detects the active monitor from its available work-area aspect ratio, saves the outgoing profile (including floating dock geometry), restores the matching profile after a monitor move, and identifies the active profile in the Command Nexus. Manual profile selection is available for unusual monitor arrangements.
+The Layout Director maintains a dock state for **Standard 16:9**, **Ultrawide**, and **Super Ultrawide** displays. Automatic mode detects the active monitor from its available work-area aspect ratio, saves the outgoing profile (including floating dock geometry), restores the matching profile after a monitor move, and identifies the active profile in the control bar. Manual profile selection is available for unusual monitor arrangements.
 
-With **Live Dock Reflow** enabled, the Command workspace uses compact, standard, and wide breakpoints. Compact windows tab Media Controls behind the Audio Mixer to protect the canvas and primary controls; standard and wide windows split those panels again and allocate progressively more width to Scene Control and the right-side dock stack. Source Operations shares Scene Control's left-side dock bay as a tab by default, so separating detailed source work does not reduce canvas width. Reflow only runs when a breakpoint changes, so ordinary resizing does not continually disturb the layout. **Canvas Safe-area Guides** exposes OBS's broadcast-safe 16:9 canvas guides directly in Workspace Layout, which is particularly useful when the application workspace itself is ultrawide.
+Monitor-profile changes restore the operator's saved dock arrangement rather than automatically rearranging panels while the window is resized. **Canvas Safe-area Guides** exposes OBS's broadcast-safe 16:9 canvas guides directly in Workspace Layout, which is particularly useful when the application workspace itself is ultrawide.
 
 ### Interactive window performance
 
@@ -184,13 +183,13 @@ On Windows, an interactive move or resize temporarily pauses presentation of the
 
 ### Twitch Stream Information dock
 
-The standard authenticated OBS/Twitch **Stream Information** dock remains the owner of title, Go Live notification, category, audience, tags, language, content labels, rerun, and branded-content controls. When base OBS creates its `twitchInfo` dock, TBS detects it asynchronously, docks it into the right-side operations stack beside Stream Overlay, Sequence Director, Asset Library, and Overlay Designer, and includes it in both Command and Engineering workspace state. Its normal Docks menu action remains available.
+The standard authenticated OBS/Twitch **Stream Information** dock remains the owner of title, Go Live notification, category, audience, tags, language, content labels, rerun, and branded-content controls. When base OBS creates its `twitchInfo` dock, TBS detects it asynchronously, docks it into the right-side operations stack beside Stream Overlay, Sequence Director, Asset Library, and Overlay Designer, and includes it in the saved workspace state. Its normal Docks menu action remains available.
 
 OBS only compiles this authenticated service dock when a Twitch developer client ID and matching obfuscation hash are supplied at configure time. Public packages do not embed personal credentials, so the integration slot is present but the dock will not instantiate until TBS is configured with its own Twitch application credentials.
 
 ## Scene Control
 
-Command mode replaces the conventional Scenes and Sources column with native **Scene Control** and a companion **Source Operations** dock. Engineering mode retains the original OBS docks.
+The optional native **Scene Control** and companion **Source Operations** docks complement the conventional OBS Scenes and Sources docks. Operators can show, hide, dock, or float them from the Docks menu or Workspace Layout.
 
 The matrix provides:
 
@@ -206,11 +205,11 @@ The matrix provides:
 
 The selected view is stored locally. Only one control surface is shown at a time, so scene destinations are not duplicated below the automation controls.
 
-The separate **Source Operations** dock follows the source selected in Scene Control. It contains source-aware Fit, Center, Reset, Properties, Filters, Rename, Duplicate, Interact, Refresh, media transport, and audio mute actions, plus the collapsible **Precision Layout** and **Reactive Binding** consoles. Its transform fields, snapping, nudging, layout snapshots, and audio-effect binding remain connected to the Scene Control selection even when the dock is floated or moved to another dock bay. Source Operations has independent overflow scrolling and participates in the single persistent application scale. In the recovered Command layout it is tabbed behind Scene Control on the left; it is also independently visible, floatable, lockable, and focusable from the Docks menu and Workspace Layout.
+The separate **Source Operations** dock follows the source selected in Scene Control. It contains source-aware Fit, Center, Reset, Properties, Filters, Rename, Duplicate, Interact, Refresh, media transport, and audio mute actions, plus the collapsible **Precision Layout** and **Reactive Binding** consoles. Its transform fields, snapping, nudging, layout snapshots, and audio-effect binding remain connected to the Scene Control selection even when the dock is floated or moved to another dock bay. Source Operations has independent overflow scrolling and participates in the single persistent application scale. It is independently visible, floatable, lockable, and focusable from the Docks menu and Workspace Layout.
 
 ## Media Controls
 
-Native **Media Controls** sit beside the Audio Mixer in the Command workspace and are also available from the Docks menu. They discover every OBS source that exposes controllable-media transport, including Media Source, VLC Video Source, and Image Slide Show inputs.
+Native **Media Controls** are available from the Docks menu and Workspace Layout. They discover every OBS source that exposes controllable-media transport, including Media Source, VLC Video Source, and Image Slide Show inputs.
 
 The bay provides:
 
@@ -224,7 +223,7 @@ This makes a fractal visualizer, avatar sequence, or intro playlist controllable
 
 ## Sequence Director
 
-The **Sequence Director** shares the right-side Command workspace bay with Stream Overlay. It stores independent editable cue stacks for Starting, Live, BRB, and Ending.
+The **Sequence Director** can share a dock bay with Stream Overlay or remain independently docked or floating. It stores independent editable cue stacks for Starting, Live, BRB, and Ending.
 
 Each timestamped cue can independently:
 
@@ -241,7 +240,7 @@ Automation and scene switching use the native OBS scene and transition system. T
 
 ## Asset Library
 
-The native **Asset Library** shares the Command workspace bay with Stream Overlay and Sequence Director. It indexes user-selected folders recursively without copying, moving, renaming, decoding, or modifying the files it finds. No user folders are selected by default; the generated Stream Overlay element folder is included automatically.
+The native **Asset Library** can share a dock bay with Stream Overlay and Sequence Director or remain independently docked or floating. It indexes user-selected folders recursively without copying, moving, renaming, decoding, or modifying the files it finds. No user folders are selected by default; the generated Stream Overlay element folder is included automatically.
 
 The Asset Library provides:
 

@@ -30,6 +30,13 @@ native dual-format production assets, startup recovery, and local runtime observ
   congestion, reconnect, byte, frame, and dropped-frame counters.
 - Keeps the authenticated OBS WebSocket interface optional and leaves its existing enabled/disabled state unchanged.
 
+## Workspace simplification
+
+- Removes the unused Command/Engineering workspace switch from the control bar.
+- Uses the conventional OBS workspace as the single default while retaining all Tempest docks and tools.
+- Migrates existing profiles to the single workspace without changing scenes, sources, outputs, or dock visibility.
+- Replaces Recover Command Layout with Recover Default Layout so recovery cannot return users to the retired mode.
+
 ## Compatibility and quality policy
 
 - Preserves Studio Bridge protocol `1.0` and Viewer Interaction render contract `1.0`.

@@ -279,8 +279,6 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 	tempestCommandToolbar->setContentsMargins(0, 0, 0, 0);
 	tempestCommandToolbar->addWidget(tempestMainframeBar);
 	addToolBar(Qt::TopToolBarArea, tempestCommandToolbar);
-	connect(tempestMainframeBar, &TempestMainframeBar::WorkspaceRequested, this,
-		[this](bool commandMode) { SetTempestWorkspace(commandMode); });
 	connect(tempestMainframeBar, &TempestMainframeBar::DockManagerRequested, this,
 		[this]() { OpenTempestDockManager(); });
 	connect(tempestMainframeBar, &TempestMainframeBar::CanvasVisibilityRequested, this, [this](bool visible) {
@@ -1371,9 +1369,9 @@ void OBSBasic::OBSInit()
 		config_set_int(App()->GetUserConfig(), "BasicWindow", "TempestCommandLayoutVersion", 7);
 	}
 	InitializeTempestResponsiveWorkspaceProfiles();
-	const char *workspace = config_get_string(App()->GetUserConfig(), "BasicWindow", "TempestWorkspace");
-	const bool commandWorkspace = !workspace || strcmp(workspace, "engineering") != 0;
-	SetTempestWorkspace(commandWorkspace, true);
+	// Tempest now uses one conventional OBS workspace. Existing Command-mode
+	// preferences are migrated to Engineering on first 1.5.0 launch.
+	SetTempestWorkspace(false, true);
 	QTimer::singleShot(0, this, [this]() {
 		ApplyTempestStartupSizing();
 		ScheduleTempestResponsiveWorkspaceRefresh();
