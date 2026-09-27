@@ -931,6 +931,11 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 			if (!browserUrl.isValid()) {
 				return;
 			}
+			// Reassert the current-scene item as visible before refreshing it. OBS can leave a
+			// transparent browser source loaded but JavaScript-suspended after its local server
+			// disappears; a visibility edge wakes CEF without recreating the user's source.
+			SetCurrentSceneSourceVisible(candidate.name, false);
+			SetCurrentSceneSourceVisible(candidate.name, true);
 			QUrlQuery query(browserUrl);
 			query.removeAllQueryItems(QStringLiteral("tempest_recovery"));
 			query.addQueryItem(QStringLiteral("tempest_recovery"),
