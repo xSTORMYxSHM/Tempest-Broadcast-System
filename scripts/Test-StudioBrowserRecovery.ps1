@@ -43,6 +43,9 @@ Assert-Condition ($recovery -match 'obs_source_update\(source, settings\)') `
 Assert-Condition ($recovery -match 'SetCurrentSceneSourceVisible\(candidate\.name, false\)' -and `
                   $recovery -match 'SetCurrentSceneSourceVisible\(candidate\.name, true\)') `
     'Recovery must wake a suspended transparent Browser Source before refreshing it.'
+Assert-Condition ($recovery -match 'obs_source_inc_showing\(source\)' -and `
+                  $bridge -match 'obs_source_dec_showing\(source\)') `
+    'Recovery must hold a balanced showing reference so OBS cannot suspend the recovered Browser Source.'
 Assert-Condition ($recovery -match 'refreshnocache' -and $recovery -match 'obs_property_button_clicked') `
     'Recovery must invoke the Browser Source no-cache refresh after updating its URL.'
 Assert-Condition (-not ($recovery -match 'recoveredBrowserSources')) `

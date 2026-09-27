@@ -41,6 +41,7 @@
 #include <initializer_list>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 #include "moc_TempestStudioBridge.cpp"
 
@@ -484,6 +485,13 @@ TempestStudioBridge::TempestStudioBridge(OBSBasic *main, TempestSignalReactor *r
 TempestStudioBridge::~TempestStudioBridge()
 {
 	DisconnectFromStudio(true);
+	for (const QString &uuid : std::as_const(heldBrowserShowingSources)) {
+		OBSSourceAutoRelease source = obs_get_source_by_uuid(uuid.toUtf8().constData());
+		if (source) {
+			obs_source_dec_showing(source);
+		}
+	}
+	heldBrowserShowingSources.clear();
 }
 
 bool TempestStudioBridge::IsConnected() const
@@ -936,6 +944,10 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 			// disappears; a visibility edge wakes CEF without recreating the user's source.
 			SetCurrentSceneSourceVisible(candidate.name, false);
 			SetCurrentSceneSourceVisible(candidate.name, true);
+			if (!heldBrowserShowingSources.contains(candidate.uuid)) {
+				obs_source_inc_showing(source);
+				heldBrowserShowingSources.insert(candidate.uuid);
+			}
 			QUrlQuery query(browserUrl);
 			query.removeAllQueryItems(QStringLiteral("tempest_recovery"));
 			query.addQueryItem(QStringLiteral("tempest_recovery"),

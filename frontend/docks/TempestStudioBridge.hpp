@@ -104,6 +104,7 @@ private:
 	QHash<QString, std::shared_ptr<InteractionState>> activeInteractions;
 	QSet<QString> processedCommands;
 	QSet<QString> pendingBrowserRecoverySources;
+	QSet<QString> heldBrowserShowingSources;
 	QStringList processedCommandOrder;
 	QString currentLeaseKey;
 	bool operatorDisconnect = false;
