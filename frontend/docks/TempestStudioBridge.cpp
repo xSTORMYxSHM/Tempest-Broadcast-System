@@ -54,7 +54,7 @@ constexpr char ApplicationId[] = "com.tempestmainframe.tempest-broadcast";
 constexpr char ProtocolVersion[] = "1.0";
 constexpr char InteractionRenderContractVersion[] = "1.0";
 constexpr int MaximumRememberedCommands = 512;
-constexpr int BrowserRecoveryDelayMs = 1200;
+constexpr int BrowserRecoveryDelayMs = 5000;
 
 struct BrowserRecoveryContext {
 	QString host;
@@ -682,7 +682,6 @@ void TempestStudioBridge::ConnectToStudio()
 	QString tokenError;
 	const QString token = ResolveToken(&tokenError);
 	if (token.isEmpty()) {
-		studioUnavailableObserved = true;
 		SetConnectionState(QStringLiteral("OFFLINE // AUTHENTICATION REQUIRED"), tokenError, true);
 		ScheduleReconnect();
 		return;
@@ -752,7 +751,6 @@ void TempestStudioBridge::ConnectToStudio()
 	websocketpp::lib::error_code error;
 	auto connection = state->endpoint->get_connection(uri.toStdString(), error);
 	if (error) {
-		studioUnavailableObserved = true;
 		SetConnectionState(QStringLiteral("OFFLINE // CONNECTION FAILED"),
 				   QString::fromStdString(error.message()), true);
 		DisconnectFromStudio(false);
@@ -813,8 +811,6 @@ void TempestStudioBridge::ScheduleReconnect()
 
 void TempestStudioBridge::HandleConnected()
 {
-	const bool recoverBrowsers = studioUnavailableObserved;
-	studioUnavailableObserved = false;
 	SetConnectionState(QStringLiteral("ONLINE // STUDIO AUTHENTICATED"),
 			   QStringLiteral("Workflow commands are routed through Tempest Studio."));
 	connectButton->setText(QStringLiteral("DISCONNECT"));
@@ -823,9 +819,10 @@ void TempestStudioBridge::HandleConnected()
 	if (heartbeatTimer) {
 		heartbeatTimer->start();
 	}
-	if (recoverBrowsers) {
-		ScheduleBrowserSourceRecovery();
-	}
+	// Every fresh Studio session can invalidate a Browser Source connection even
+	// when Broadcast never observed the brief outage. Recheck once per session;
+	// healthy sources are left untouched by RecoverFailedBrowserSources().
+	ScheduleBrowserSourceRecovery();
 }
 
 void TempestStudioBridge::HandleDisconnected(const QString &reason)
@@ -836,7 +833,6 @@ void TempestStudioBridge::HandleDisconnected(const QString &reason)
 	SetConnectionState(QStringLiteral("OFFLINE // STUDIO UNAVAILABLE"), reason, !operatorDisconnect);
 	connectButton->setText(QStringLiteral("CONNECT"));
 	if (!operatorDisconnect) {
-		studioUnavailableObserved = true;
 		ScheduleReconnect();
 	}
 }
@@ -854,10 +850,14 @@ void TempestStudioBridge::ScheduleBrowserSourceRecovery()
 		}
 		guarded->browserRecoveryScheduled = false;
 		if (!guarded->IsConnected()) {
-			guarded->studioUnavailableObserved = true;
 			return;
 		}
 		guarded->RecoverFailedBrowserSources();
+		QTimer::singleShot(20000, guarded, [guarded]() {
+			if (guarded && guarded->IsConnected()) {
+				guarded->RecoverFailedBrowserSources();
+			}
+		});
 	});
 }
 
@@ -881,8 +881,7 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 	}
 
 	for (const BrowserRecoveryContext::Candidate &candidate : context.candidates) {
-		if (recoveredBrowserSources.contains(candidate.uuid) ||
-		    pendingBrowserRecoverySources.contains(candidate.uuid)) {
+		if (pendingBrowserRecoverySources.contains(candidate.uuid)) {
 			continue;
 		}
 		QUrl statusUrl = endpoint;
@@ -901,7 +900,9 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 			const QByteArray response = reply->readAll();
 			const QNetworkReply::NetworkError networkError = reply->error();
 			reply->deleteLater();
-			if (networkError != QNetworkReply::NoError || recoveredBrowserSources.contains(candidate.uuid)) {
+			if (networkError != QNetworkReply::NoError) {
+				blog(LOG_WARNING, "[Tempest Studio Bridge] Browser recovery status check failed for '%s': %s",
+				     candidate.name.toUtf8().constData(), reply->errorString().toUtf8().constData());
 				return;
 			}
 			const QJsonDocument document = QJsonDocument::fromJson(response);
@@ -912,7 +913,10 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 			if (!candidate.statusSection.isEmpty()) {
 				status = status.value(candidate.statusSection).toObject();
 			}
-			if (status.value(QStringLiteral("connectedClients")).toInt(-1) != 0) {
+			const int connectedClients = status.value(QStringLiteral("connectedClients")).toInt(-1);
+			const bool reportsReadiness = status.contains(QStringLiteral("readyClients"));
+			const int readyClients = status.value(QStringLiteral("readyClients")).toInt(-1);
+			if (connectedClients != 0 && (!reportsReadiness || readyClients > 0)) {
 				return;
 			}
 
@@ -933,7 +937,14 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 			const QByteArray recoveredUrl = browserUrl.toString(QUrl::FullyEncoded).toUtf8();
 			obs_data_set_string(settings, "url", recoveredUrl.constData());
 			obs_source_update(source, settings);
-			recoveredBrowserSources.insert(candidate.uuid);
+			obs_properties_t *properties = obs_source_properties(source);
+			obs_property_t *refresh = properties ? obs_properties_get(properties, "refreshnocache") : nullptr;
+			if (refresh) {
+				obs_property_button_clicked(refresh, source);
+			}
+			if (properties) {
+				obs_properties_destroy(properties);
+			}
 			blog(LOG_INFO,
 			     "[Tempest Studio Bridge] Reinitialized disconnected Studio browser source '%s' with a cache-busting URL",
 			     candidate.name.toUtf8().constData());

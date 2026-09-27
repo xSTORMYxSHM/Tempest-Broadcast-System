@@ -103,12 +103,10 @@ private:
 	QHash<QString, QString> activeVisualSources;
 	QHash<QString, std::shared_ptr<InteractionState>> activeInteractions;
 	QSet<QString> processedCommands;
-	QSet<QString> recoveredBrowserSources;
 	QSet<QString> pendingBrowserRecoverySources;
 	QStringList processedCommandOrder;
 	QString currentLeaseKey;
 	bool operatorDisconnect = false;
-	bool studioUnavailableObserved = false;
 	bool browserRecoveryScheduled = false;
 	int commandsHandled = 0;
 };
