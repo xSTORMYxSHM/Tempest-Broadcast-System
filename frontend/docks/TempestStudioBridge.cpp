@@ -914,9 +914,11 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 				status = status.value(candidate.statusSection).toObject();
 			}
 			const int connectedClients = status.value(QStringLiteral("connectedClients")).toInt(-1);
-			const bool reportsReadiness = status.contains(QStringLiteral("readyClients"));
-			const int readyClients = status.value(QStringLiteral("readyClients")).toInt(-1);
-			if (connectedClients != 0 && (!reportsReadiness || readyClients > 0)) {
+			// A connected source can legitimately spend several seconds initializing a WebGL
+			// renderer. Readiness belongs to Studio's engine diagnostics; recovering it here
+			// would interrupt initialization and create a reload loop. Only revive a source
+			// when Studio confirms that no Browser Source transport is connected.
+			if (connectedClients != 0) {
 				return;
 			}
 
