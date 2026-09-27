@@ -857,18 +857,22 @@ QString TempestAssetVault::EnsureBrowserAsset(const QString &filePath)
 	if (!main) {
 		return {};
 	}
-	OBSScene scene = main->GetCurrentScene();
-	if (!scene) {
-		SetStatus(QStringLiteral("BROWSER ELEMENT FAILED // NO ACTIVE SCENE"), true);
-		return {};
-	}
 	QFile file(filePath);
 	int width = 1920;
 	int height = 1080;
+	int targetCanvasWidth = 0;
+	int targetCanvasHeight = 0;
 	bool containsAudio = false;
+	bool portraitAsset = false;
 	if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
 		const QString html = QString::fromUtf8(file.read(262144));
 		containsAudio = html.contains(QStringLiteral("<audio"), Qt::CaseInsensitive);
+		portraitAsset = QRegularExpression(
+					QStringLiteral(
+						"<meta\\s+name=[\\\"']tempest-orientation[\\\"']\\s+content=[\\\"']portrait[\\\"']"),
+					QRegularExpression::CaseInsensitiveOption)
+					.match(html)
+					.hasMatch();
 		const QRegularExpressionMatch size =
 			QRegularExpression(
 				QStringLiteral(
@@ -880,6 +884,50 @@ QString TempestAssetVault::EnsureBrowserAsset(const QString &filePath)
 			height = std::clamp(size.captured(2).toInt(), 64, 4096);
 		}
 	}
+
+	OBSScene scene;
+	if (portraitAsset) {
+		calldata_t callData;
+		calldata_init(&callData);
+		// Zero dimensions select the active Tempest Portrait canvas regardless of
+		// whether the user runs it at 1080x1920 or 720x1280.
+		calldata_set_int(&callData, "width", 0);
+		calldata_set_int(&callData, "height", 0);
+		QString sceneName;
+		if (proc_handler_call(obs_get_proc_handler(), "tempest_vertical_get_scene", &callData)) {
+			const char *name = calldata_string(&callData, "scene");
+			if (name)
+					sceneName = QString::fromUtf8(name);
+		}
+		if (proc_handler_call(obs_get_proc_handler(), "tempest_vertical_get_video", &callData)) {
+			video_t *video = static_cast<video_t *>(calldata_ptr(&callData, "video"));
+			if (video) {
+				targetCanvasWidth = int(video_output_get_width(video));
+				targetCanvasHeight = int(video_output_get_height(video));
+			}
+		}
+		calldata_free(&callData);
+		if (targetCanvasWidth <= 0 || targetCanvasHeight <= 0) {
+			targetCanvasWidth = 1080;
+			targetCanvasHeight = 1920;
+		}
+		if (!sceneName.isEmpty()) {
+			OBSSourceAutoRelease sceneSource = obs_get_source_by_name(sceneName.toUtf8().constData());
+			if (sceneSource)
+				scene = obs_scene_from_source(sceneSource);
+		}
+		if (!scene) {
+			SetStatus(QStringLiteral("PORTRAIT ELEMENT FAILED // OPEN OR CREATE A PORTRAIT SCENE"), true);
+			return {};
+		}
+	} else {
+		scene = main->GetCurrentScene();
+		if (!scene) {
+			SetStatus(QStringLiteral("BROWSER ELEMENT FAILED // NO ACTIVE SCENE"), true);
+			return {};
+		}
+	}
+
 	const QString sourceName = QStringLiteral("Tempest Vault // %1").arg(QFileInfo(filePath).completeBaseName());
 	OBSSourceAutoRelease source = obs_get_source_by_name(sourceName.toUtf8().constData());
 	bool created = false;
@@ -918,9 +966,14 @@ QString TempestAssetVault::EnsureBrowserAsset(const QString &filePath)
 	if (!item) {
 		item = obs_scene_add(scene, source);
 		obs_video_info video{};
-		if (item && obs_get_video_info(&video)) {
-			vec2 position{(float(video.base_width) - float(width)) / 2.0f,
-				      (float(video.base_height) - float(height)) / 2.0f};
+		if (item && (portraitAsset || obs_get_video_info(&video))) {
+			const float canvasWidth = portraitAsset ? float(targetCanvasWidth) : float(video.base_width);
+			const float canvasHeight = portraitAsset ? float(targetCanvasHeight) : float(video.base_height);
+			const float scale = portraitAsset ? std::min(canvasWidth / 1080.0f, canvasHeight / 1920.0f) : 1.0f;
+			vec2 itemScale{scale, scale};
+			vec2 position{(canvasWidth - float(width) * scale) / 2.0f,
+				      (canvasHeight - float(height) * scale) / 2.0f};
+			obs_sceneitem_set_scale(item, &itemScale);
 			obs_sceneitem_set_pos(item, &position);
 		}
 	}

@@ -1,18 +1,26 @@
 #include "TempestMainframeBar.hpp"
 
 #include "../TempestAppearance.hpp"
+#include "../OBSApp.hpp"
 #include "OBSBasic.hpp"
 
 #include <obs.h>
+#include <obs-frontend-api.h>
+#include <util/platform.h>
 
 #include <QButtonGroup>
+#include <QDateTime>
+#include <QDir>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLayout>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QResizeEvent>
+#include <QSaveFile>
 #include <QTimer>
 #include <QVariant>
 #include <QVBoxLayout>
@@ -51,6 +59,15 @@ QString ScaledStyleSheet(const QString &source, qreal scale)
 
 TempestMainframeBar::TempestMainframeBar(OBSBasic *main) : QFrame(main), main(main)
 {
+	char telemetryDirectory[512];
+	if (GetAppConfigPath(telemetryDirectory, sizeof(telemetryDirectory),
+			     "tempest-broadcast-system/telemetry") > 0) {
+		const QString directory = QString::fromUtf8(telemetryDirectory);
+		if (QDir().mkpath(directory)) {
+			telemetrySnapshotPath = QDir(directory).filePath(QStringLiteral("runtime.json"));
+		}
+	}
+
 	setObjectName(QStringLiteral("tempestMainframeBar"));
 	setMinimumHeight(68);
 	setMaximumHeight(76);
@@ -495,6 +512,80 @@ void TempestMainframeBar::RefreshTelemetry()
 
 	recording = main->RecordingActive();
 	UpdateActionButtons();
+	WriteTelemetrySnapshot();
+}
+
+void TempestMainframeBar::WriteTelemetrySnapshot()
+{
+	if (!main || telemetrySnapshotPath.isEmpty()) {
+		return;
+	}
+
+	video_t *video = obs_get_video();
+	QJsonObject stats;
+	stats.insert(QStringLiteral("cpuUsage"), main->GetCPUUsage());
+	stats.insert(QStringLiteral("memoryUsage"),
+		     static_cast<double>(os_get_proc_resident_size()) / (1024.0 * 1024.0));
+	stats.insert(QStringLiteral("activeFps"), obs_get_active_fps());
+	stats.insert(QStringLiteral("averageFrameRenderTime"),
+		     static_cast<double>(obs_get_average_frame_time_ns()) / 1000000.0);
+	stats.insert(QStringLiteral("renderSkippedFrames"), static_cast<double>(obs_get_lagged_frames()));
+	stats.insert(QStringLiteral("renderTotalFrames"), static_cast<double>(obs_get_total_frames()));
+	stats.insert(QStringLiteral("outputSkippedFrames"),
+		     video ? static_cast<double>(video_output_get_skipped_frames(video)) : 0.0);
+	stats.insert(QStringLiteral("outputTotalFrames"),
+		     video ? static_cast<double>(video_output_get_total_frames(video)) : 0.0);
+
+	auto outputSnapshot = [](obs_output_t *output) {
+		QJsonObject result;
+		result.insert(QStringLiteral("active"), output && obs_output_active(output));
+		result.insert(QStringLiteral("reconnecting"), output && obs_output_reconnecting(output));
+		result.insert(QStringLiteral("bytes"),
+			      output ? static_cast<double>(obs_output_get_total_bytes(output)) : 0.0);
+		result.insert(QStringLiteral("totalFrames"),
+			      output ? static_cast<double>(obs_output_get_total_frames(output)) : 0.0);
+		result.insert(QStringLiteral("droppedFrames"),
+			      output ? static_cast<double>(obs_output_get_frames_dropped(output)) : 0.0);
+		result.insert(QStringLiteral("congestion"), output ? obs_output_get_congestion(output) : 0.0);
+		return result;
+	};
+
+	OBSOutputAutoRelease streamOutput = obs_frontend_get_streaming_output();
+	OBSOutputAutoRelease recordOutput = obs_frontend_get_recording_output();
+	OBSSourceAutoRelease scene = main->GetCurrentSceneSource();
+
+	QJsonObject document;
+	document.insert(QStringLiteral("schemaVersion"), 1);
+	document.insert(QStringLiteral("source"), QStringLiteral("tempest-broadcast-runtime"));
+	document.insert(QStringLiteral("timestampUtc"),
+			QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+	document.insert(QStringLiteral("streamActive"), main->StreamingActive());
+	document.insert(QStringLiteral("recordingActive"), main->RecordingActive());
+	document.insert(QStringLiteral("currentProgramSceneName"),
+			scene ? QString::fromUtf8(obs_source_get_name(scene)) : QString());
+	document.insert(QStringLiteral("stats"), stats);
+	document.insert(QStringLiteral("streamOutput"), outputSnapshot(streamOutput));
+	document.insert(QStringLiteral("recordOutput"), outputSnapshot(recordOutput));
+
+	QSaveFile file(telemetrySnapshotPath);
+	if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+		if (!telemetrySnapshotErrorLogged) {
+			blog(LOG_WARNING, "[Tempest Telemetry] Could not open runtime snapshot: %s",
+			     file.errorString().toUtf8().constData());
+			telemetrySnapshotErrorLogged = true;
+		}
+		return;
+	}
+	const QByteArray payload = QJsonDocument(document).toJson(QJsonDocument::Compact);
+	if (file.write(payload) != payload.size() || !file.commit()) {
+		if (!telemetrySnapshotErrorLogged) {
+			blog(LOG_WARNING, "[Tempest Telemetry] Could not save runtime snapshot: %s",
+			     file.errorString().toUtf8().constData());
+			telemetrySnapshotErrorLogged = true;
+		}
+		return;
+	}
+	telemetrySnapshotErrorLogged = false;
 }
 
 void TempestMainframeBar::SetTransmissionState(const QString &state, const QString &detail, const QString &color)

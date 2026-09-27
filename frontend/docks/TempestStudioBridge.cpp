@@ -21,8 +21,13 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMetaObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPushButton>
 #include <QTimer>
+#include <QUrl>
+#include <QUrlQuery>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -49,6 +54,85 @@ constexpr char ApplicationId[] = "com.tempestmainframe.tempest-broadcast";
 constexpr char ProtocolVersion[] = "1.0";
 constexpr char InteractionRenderContractVersion[] = "1.0";
 constexpr int MaximumRememberedCommands = 512;
+constexpr int BrowserRecoveryDelayMs = 1200;
+
+struct BrowserRecoveryContext {
+	QString host;
+	int port = 4765;
+	struct Candidate {
+		QString uuid;
+		QString name;
+		QString statusPath;
+		QString statusSection;
+	};
+	QList<Candidate> candidates;
+};
+
+bool IsLoopbackHost(const QString &host)
+{
+	return host.compare(QStringLiteral("localhost"), Qt::CaseInsensitive) == 0 ||
+	       host == QStringLiteral("127.0.0.1") || host == QStringLiteral("::1");
+}
+
+bool IsStudioBrowserUrl(const QString &value, const BrowserRecoveryContext &context)
+{
+	const QUrl url(value);
+	if (!url.isValid() || !IsLoopbackHost(url.host()) || !IsLoopbackHost(context.host)) {
+		return false;
+	}
+	const int port = url.port(url.scheme().compare(QStringLiteral("https"), Qt::CaseInsensitive) == 0 ? 443 : 80);
+	return port == context.port;
+}
+
+bool CollectStudioBrowserSource(void *data, obs_source_t *source)
+{
+	auto *context = static_cast<BrowserRecoveryContext *>(data);
+	if (!context || !source || obs_source_removed(source) ||
+	    (!obs_source_active(source) && !obs_source_showing(source))) {
+		return true;
+	}
+	const char *id = obs_source_get_unversioned_id(source);
+	if (!id || strcmp(id, "browser_source") != 0) {
+		return true;
+	}
+
+	OBSDataAutoRelease settings = obs_source_get_settings(source);
+	const QString url = QString::fromUtf8(obs_data_get_string(settings, "url"));
+	if (!IsStudioBrowserUrl(url, *context)) {
+		return true;
+	}
+
+	const QUrl browserUrl(url);
+	QString statusPath;
+	QString statusSection;
+	if (browserUrl.path() == QStringLiteral("/visual-alerts/twitch")) {
+		statusPath = QStringLiteral("/v1/visual-alerts");
+		statusSection = QStringLiteral("twitch");
+	} else if (browserUrl.path() == QStringLiteral("/visual-alerts") ||
+		   browserUrl.path() == QStringLiteral("/visual-alerts/interactions")) {
+		statusPath = QStringLiteral("/v1/visual-alerts");
+		statusSection = QStringLiteral("interaction");
+	} else if (browserUrl.path() == QStringLiteral("/chat-overlay")) {
+		statusPath = QStringLiteral("/v1/chat-overlay");
+	} else if (browserUrl.path() == QStringLiteral("/emote-wall")) {
+		statusPath = QStringLiteral("/v1/emote-wall");
+	} else if (browserUrl.path() == QStringLiteral("/dice-overlay")) {
+		statusPath = QStringLiteral("/v1/dice-overlay");
+	} else if (browserUrl.path() == QStringLiteral("/twitch-experiences")) {
+		statusPath = QStringLiteral("/v1/twitch-experiences");
+	} else if (browserUrl.path() == QStringLiteral("/discord-voice")) {
+		statusPath = QStringLiteral("/v1/discord-voice");
+	} else {
+		return true;
+	}
+
+	const char *uuid = obs_source_get_uuid(source);
+	if (uuid && *uuid) {
+		context->candidates.append({QString::fromUtf8(uuid), QString::fromUtf8(obs_source_get_name(source)),
+					    statusPath, statusSection});
+	}
+	return true;
+}
 
 struct VerticalAlertInventory {
 	bool twitch = false;
@@ -390,6 +474,7 @@ TempestStudioBridge::TempestStudioBridge(OBSBasic *main, TempestSignalReactor *r
 		SendHeartbeat();
 		PublishHealth(QStringLiteral("periodic"));
 	});
+	recoveryNetwork = new QNetworkAccessManager(this);
 
 	if (autoConnectCheck->isChecked()) {
 		QTimer::singleShot(1800, this, &TempestStudioBridge::ConnectToStudio);
@@ -597,6 +682,7 @@ void TempestStudioBridge::ConnectToStudio()
 	QString tokenError;
 	const QString token = ResolveToken(&tokenError);
 	if (token.isEmpty()) {
+		studioUnavailableObserved = true;
 		SetConnectionState(QStringLiteral("OFFLINE // AUTHENTICATION REQUIRED"), tokenError, true);
 		ScheduleReconnect();
 		return;
@@ -666,6 +752,7 @@ void TempestStudioBridge::ConnectToStudio()
 	websocketpp::lib::error_code error;
 	auto connection = state->endpoint->get_connection(uri.toStdString(), error);
 	if (error) {
+		studioUnavailableObserved = true;
 		SetConnectionState(QStringLiteral("OFFLINE // CONNECTION FAILED"),
 				   QString::fromStdString(error.message()), true);
 		DisconnectFromStudio(false);
@@ -726,6 +813,8 @@ void TempestStudioBridge::ScheduleReconnect()
 
 void TempestStudioBridge::HandleConnected()
 {
+	const bool recoverBrowsers = studioUnavailableObserved;
+	studioUnavailableObserved = false;
 	SetConnectionState(QStringLiteral("ONLINE // STUDIO AUTHENTICATED"),
 			   QStringLiteral("Workflow commands are routed through Tempest Studio."));
 	connectButton->setText(QStringLiteral("DISCONNECT"));
@@ -733,6 +822,9 @@ void TempestStudioBridge::HandleConnected()
 	PublishHealth(QStringLiteral("connected"));
 	if (heartbeatTimer) {
 		heartbeatTimer->start();
+	}
+	if (recoverBrowsers) {
+		ScheduleBrowserSourceRecovery();
 	}
 }
 
@@ -744,7 +836,108 @@ void TempestStudioBridge::HandleDisconnected(const QString &reason)
 	SetConnectionState(QStringLiteral("OFFLINE // STUDIO UNAVAILABLE"), reason, !operatorDisconnect);
 	connectButton->setText(QStringLiteral("CONNECT"));
 	if (!operatorDisconnect) {
+		studioUnavailableObserved = true;
 		ScheduleReconnect();
+	}
+}
+
+void TempestStudioBridge::ScheduleBrowserSourceRecovery()
+{
+	if (browserRecoveryScheduled) {
+		return;
+	}
+	browserRecoveryScheduled = true;
+	QPointer<TempestStudioBridge> guarded(this);
+	QTimer::singleShot(BrowserRecoveryDelayMs, this, [guarded]() {
+		if (!guarded) {
+			return;
+		}
+		guarded->browserRecoveryScheduled = false;
+		if (!guarded->IsConnected()) {
+			guarded->studioUnavailableObserved = true;
+			return;
+		}
+		guarded->RecoverFailedBrowserSources();
+	});
+}
+
+void TempestStudioBridge::RecoverFailedBrowserSources()
+{
+	const QUrl endpoint(endpointEdit ? endpointEdit->text().trimmed() : QString());
+	QString tokenError;
+	const QString token = ResolveToken(&tokenError);
+	if (!endpoint.isValid() || token.isEmpty() || !recoveryNetwork) {
+		blog(LOG_WARNING, "[Tempest Studio Bridge] Browser recovery status check could not start");
+		return;
+	}
+
+	BrowserRecoveryContext context;
+	context.host = endpoint.host();
+	context.port = endpoint.port(4765);
+	obs_enum_sources(CollectStudioBrowserSource, &context);
+	if (context.candidates.isEmpty()) {
+		blog(LOG_INFO, "[Tempest Studio Bridge] Browser recovery found no active Studio sources");
+		return;
+	}
+
+	for (const BrowserRecoveryContext::Candidate &candidate : context.candidates) {
+		if (recoveredBrowserSources.contains(candidate.uuid) ||
+		    pendingBrowserRecoverySources.contains(candidate.uuid)) {
+			continue;
+		}
+		QUrl statusUrl = endpoint;
+		statusUrl.setScheme(endpoint.scheme().compare(QStringLiteral("wss"), Qt::CaseInsensitive) == 0
+					    ? QStringLiteral("https")
+					    : QStringLiteral("http"));
+		statusUrl.setPath(candidate.statusPath);
+		statusUrl.setQuery(QString());
+		QNetworkRequest request(statusUrl);
+		request.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
+		request.setRawHeader("Cache-Control", "no-store");
+		pendingBrowserRecoverySources.insert(candidate.uuid);
+		QNetworkReply *reply = recoveryNetwork->get(request);
+		connect(reply, &QNetworkReply::finished, this, [this, reply, candidate]() {
+			pendingBrowserRecoverySources.remove(candidate.uuid);
+			const QByteArray response = reply->readAll();
+			const QNetworkReply::NetworkError networkError = reply->error();
+			reply->deleteLater();
+			if (networkError != QNetworkReply::NoError || recoveredBrowserSources.contains(candidate.uuid)) {
+				return;
+			}
+			const QJsonDocument document = QJsonDocument::fromJson(response);
+			if (!document.isObject()) {
+				return;
+			}
+			QJsonObject status = document.object();
+			if (!candidate.statusSection.isEmpty()) {
+				status = status.value(candidate.statusSection).toObject();
+			}
+			if (status.value(QStringLiteral("connectedClients")).toInt(-1) != 0) {
+				return;
+			}
+
+			OBSSourceAutoRelease source = obs_get_source_by_uuid(candidate.uuid.toUtf8().constData());
+			if (!source || (!obs_source_active(source) && !obs_source_showing(source))) {
+				return;
+			}
+			OBSDataAutoRelease settings = obs_source_get_settings(source);
+			QUrl browserUrl(QString::fromUtf8(obs_data_get_string(settings, "url")));
+			if (!browserUrl.isValid()) {
+				return;
+			}
+			QUrlQuery query(browserUrl);
+			query.removeAllQueryItems(QStringLiteral("tempest_recovery"));
+			query.addQueryItem(QStringLiteral("tempest_recovery"),
+					   QString::number(QDateTime::currentMSecsSinceEpoch()));
+			browserUrl.setQuery(query);
+			const QByteArray recoveredUrl = browserUrl.toString(QUrl::FullyEncoded).toUtf8();
+			obs_data_set_string(settings, "url", recoveredUrl.constData());
+			obs_source_update(source, settings);
+			recoveredBrowserSources.insert(candidate.uuid);
+			blog(LOG_INFO,
+			     "[Tempest Studio Bridge] Reinitialized disconnected Studio browser source '%s' with a cache-busting URL",
+			     candidate.name.toUtf8().constData());
+		});
 	}
 }
 

@@ -69,6 +69,7 @@ private:
 	void UpdateOverlayPath();
 	QString BuildOverlayStateJson(const QString &modeId = QString(), bool vaultElement = false) const;
 	QString BuildOverlayHtml(const QString &modeId = QString()) const;
+	QString BuildPortraitOverlayHtml(const QString &modeId = QString()) const;
 	QString BuildVaultElementHtml(const QString &elementId, int width, int height) const;
 	bool RenderVaultElements();
 	QString CurrentModeId() const;

@@ -13,6 +13,7 @@
 class QCheckBox;
 class QLabel;
 class QLineEdit;
+class QNetworkAccessManager;
 class QPushButton;
 class QTimer;
 class OBSBasic;
@@ -42,6 +43,8 @@ private:
 	void SetConnectionState(const QString &state, const QString &detail, bool error = false);
 	void HandleConnected();
 	void HandleDisconnected(const QString &reason);
+	void ScheduleBrowserSourceRecovery();
+	void RecoverFailedBrowserSources();
 	void HandleIncoming(const QByteArray &message);
 	void HandleCommand(const QJsonObject &message);
 	void HandleReactionTrigger(const QJsonObject &message, const QJsonObject &payload);
@@ -86,6 +89,7 @@ private:
 	QPointer<TempestDestinationCoordinator> destinationCoordinator;
 	QPointer<QLineEdit> endpointEdit;
 	QPointer<QLineEdit> tokenPathEdit;
+	QPointer<QNetworkAccessManager> recoveryNetwork;
 	QPointer<QCheckBox> autoConnectCheck;
 	QPointer<QPushButton> connectButton;
 	QPointer<QLabel> connectionLabel;
@@ -99,8 +103,12 @@ private:
 	QHash<QString, QString> activeVisualSources;
 	QHash<QString, std::shared_ptr<InteractionState>> activeInteractions;
 	QSet<QString> processedCommands;
+	QSet<QString> recoveredBrowserSources;
+	QSet<QString> pendingBrowserRecoverySources;
 	QStringList processedCommandOrder;
 	QString currentLeaseKey;
 	bool operatorDisconnect = false;
+	bool studioUnavailableObserved = false;
+	bool browserRecoveryScheduled = false;
 	int commandsHandled = 0;
 };

@@ -74,8 +74,8 @@ The deck provides:
 - editable heading and stream status;
 - rotating message lines with an adjustable interval;
 - a persistent start/restart/clear countdown;
-- automatic generation of a transparent 1920x1080 HTML overlay; and
-- automatic export of its nine visual layers as independent reactive browser assets; and
+- automatic generation of transparent 1920x1080 landscape and 1080x1920 portrait HTML overlays;
+- automatic export of complete landscape and portrait visual sets as independent reactive browser assets; and
 - one-click creation or updating of the `Tempest // Starting Soon` Browser Source in the active scene.
 
 The generated overlay is stored beneath the active Tempest configuration root at:
@@ -86,7 +86,9 @@ tempest-broadcast-system\control-deck\starting-soon.html
 
 Edits are saved to the Tempest profile and automatically refresh an existing linked Browser Source. The overlay uses no external network assets.
 
-The layer exports are stored in `control-deck\vault-elements`: scanlines, stream frame, reactive core, stream header, title plate, countdown, rotating message, spectrum, and footer plate. They read the saved Starting Soon state even when Stream Overlay is currently editing Live, BRB, or Ending mode.
+The layer exports are stored in `control-deck\vault-elements`: scanlines, stream frame, reactive core, stream header, title plate, countdown, rotating message, spectrum, footer plate, orbit badge, telemetry plate, stream ticker, alert popup, signal rail, creator lower third, and radio player. Each has a portrait-native counterpart sized and typeset for a 9:16 mobile canvas rather than a rotated or cropped landscape layout. They read the saved Starting Soon state even when Stream Overlay is currently editing Live, BRB, or Ending mode.
+
+Each mode also generates a complete `portrait-starting-soon.html`, `portrait-live.html`, `portrait-brb.html`, or `portrait-ending.html` scene overlay at 1080x1920. Portrait assets carry explicit orientation and size metadata. Loading one from Asset Library routes it to the active Tempest Portrait scene, centers it, and scales the 1080x1920 design proportionally when the canvas is 720x1280. Landscape assets continue to target the normal current scene.
 
 The rotating-message element is backed by the shared `vault-elements\rotating-lines.txt` asset instead of a multiline dock editor. The first run merges and deduplicates previously saved lines from every overlay mode, preserving custom content. Users can open the library from Stream Overlay or Asset Library and add one message per line; blank lines and `#` comments are ignored. Unmarked lines are active, `[x] Message` explicitly enables a line, and `[ ] Message` keeps an entry available in the library without displaying it. `@playlist name` begins a named section; ungrouped lines and `@playlist common` form the shared section. Active assembled overlays and the independent rotating-message asset poll the file, so saving it updates the live rotation without regenerating or refreshing a Browser Source. Messages supplied by Sequence Director or Studio workflows append unique entries to the profile's common section.
 
@@ -135,7 +137,7 @@ The Audio Reactor's **Reactivity Director** is the persistent global tuning surf
 
 The same telemetry contract carries Studio, Warudo, and Twitch reaction-event accents. An active event can temporarily override the normal palette, and the existing Sound Alert Dance event selects full-spectrum color behavior. Director changes are consumed live without regenerating or reloading Browser Sources.
 
-Rendering any Stream Overlay change regenerates all four assembled mode files plus the element exports, so inactive mode files do not remain on an older reactive template.
+Rendering any Stream Overlay change regenerates all four landscape mode files, all four portrait mode files, and both modular element sets, so inactive mode files do not remain on an older reactive template.
 
 ## Tempest Broadcast workstation shell
 
@@ -150,6 +152,13 @@ The default 1920x1080 workspace is headed by the native **Tempest Broadcast cont
 - one-click access to the full conventional OBS frontend in Engineering mode.
 
 Each workspace stores its dock layout independently. Plugins and advanced dialogs remain available in Engineering mode while Command mode presents the Tempest-first operating surface.
+
+The control bar also writes an atomic runtime health snapshot once per second at
+`tempest-broadcast-system\telemetry\runtime.json`. It mirrors the core OBS statistics used by OBS WebSocket—CPU,
+memory, active FPS, average render time, render and encoder skipped/total frames—plus primary stream and recording
+output state, bytes, dropped frames, congestion, and reconnect status. Local telemetry tools can read this file while
+Broadcast is running without enabling an OBS WebSocket listener. The existing authenticated WebSocket server remains
+available when an operator explicitly enables it.
 
 ### Application-wide UI scaling
 

@@ -2202,6 +2202,23 @@ void TempestControlDeck::RenderOverlay()
 				  true);
 			return;
 		}
+
+		const QString portraitPath =
+			QDir(overlayDirectory).filePath(QStringLiteral("portrait-%1").arg(QString::fromUtf8(mode.filename)));
+		QSaveFile portraitFile(portraitPath);
+		if (!portraitFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+			SetStatus(QStringLiteral("Portrait %1 overlay write failed: %2")
+					  .arg(QString::fromUtf8(mode.label), portraitFile.errorString()),
+				  true);
+			return;
+		}
+		const QByteArray portraitHtml = BuildPortraitOverlayHtml(modeId).toUtf8();
+		if (portraitFile.write(portraitHtml) != portraitHtml.size() || !portraitFile.commit()) {
+			SetStatus(QStringLiteral("Portrait %1 overlay save failed: %2")
+					  .arg(QString::fromUtf8(mode.label), portraitFile.errorString()),
+				  true);
+			return;
+		}
 	}
 	RenderVaultElements();
 
@@ -2273,6 +2290,8 @@ QString TempestControlDeck::BuildOverlayHtml(const QString &modeId) const
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="tempest-size" content="1920x1080">
+<meta name="tempest-orientation" content="landscape">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--void:#03090f;--panel:rgba(5,16,26,.84);--cyan:#45d9ff;--ice:#bdf6ff;--blue:#0c7ccb;--deep:#06345d;--muted:#748fa4;--danger:#ff4b70;--audio:0;--glow:12px;--audioAlpha:.04;--coreScale:1;--reactorScale:.88;--reactorOpacity:.14;--titleScale:1;--audioScale:1;--audioLift:0px;--scanlineOpacity:.18;--footerPulse:.35;--audioFill:20%}
@@ -2324,81 +2343,106 @@ async function telemetry(){let data={};try{const response=await fetch('./telemet
 	return html;
 }
 
+QString TempestControlDeck::BuildPortraitOverlayHtml(const QString &modeId) const
+{
+	QString html = BuildOverlayHtml(modeId);
+	html.replace(QStringLiteral("content=\"1920x1080\""), QStringLiteral("content=\"1080x1920\""));
+	html.replace(QStringLiteral("content=\"landscape\""), QStringLiteral("content=\"portrait\""));
+	html.replace(QStringLiteral("TEMPEST BROADCAST // STREAM OVERLAY"),
+		     QStringLiteral("TEMPEST BROADCAST // PORTRAIT FEED"));
+
+	const QString portraitCss = QString::fromUtf8(R"TEMPESTCSS(
+/* Portrait-native 9:16 composition. Coordinates target 1080x1920 and retain a
+   32 px outer safe area plus generous mobile-app caption/control clearance. */
+.frame{inset:32px 30px;clip-path:polygon(0 0,30% 0,32% 1px,68% 1px,70% 0,100% 0,100% 100%,70% 100%,68% calc(100% - 1px),32% calc(100% - 1px),30% 100%,0 100%)}
+.corner{width:68px;height:68px}.c1{left:30px;top:32px}.c2{right:30px;top:32px}.c3{left:30px;bottom:32px}.c4{right:30px;bottom:32px}
+.top{left:64px;right:64px;top:72px;display:grid;grid-template-columns:1fr;gap:22px;align-items:start;font-size:17px;line-height:1.45;letter-spacing:.17em}.sig{max-width:840px}.status{justify-self:start;padding:10px 16px;font-size:15px}
+.hero{left:68px;right:68px;top:430px}.kicker{font-size:20px;line-height:1.5;letter-spacing:.32em;margin-bottom:28px}.title{font-size:78px;line-height:.98;letter-spacing:.045em;overflow-wrap:anywhere}.rule{width:82%;margin:38px auto}.countdown{font-size:112px;letter-spacing:.08em}.message{max-width:900px;margin:30px auto 0;font-size:25px;line-height:1.45;letter-spacing:.16em;overflow-wrap:anywhere}
+.reactor{top:56%;width:820px;height:820px;max-width:none;max-height:none}.eq{left:11%;right:11%;bottom:190px;height:72px;gap:9px}.eq i{width:7px}
+.bottom{left:64px;right:64px;bottom:76px;display:grid;grid-template-columns:auto 1fr auto;gap:18px;font-size:13px;letter-spacing:.13em}.bottom>span:first-child,.bottom>i:first-of-type{display:none}
+@keyframes sweep{from{transform:translateX(-20%)}to{transform:translateX(700%)}}
+)TEMPESTCSS");
+	html.replace(QStringLiteral("</style>"), portraitCss + QStringLiteral("</style>"));
+	return html;
+}
+
 QString TempestControlDeck::BuildVaultElementHtml(const QString &elementId, int width, int height) const
 {
+	const bool portrait = elementId.startsWith(QStringLiteral("portrait-"));
+	const QString componentId = portrait ? elementId.mid(9) : elementId;
 	QString body;
 	QString componentCss;
-	if (elementId == QStringLiteral("scanlines")) {
+	if (componentId == QStringLiteral("scanlines")) {
 		body = QStringLiteral("<div class=\"scanlines\"></div>");
 		componentCss = QStringLiteral(
 			".scanlines{position:absolute;inset:-8px;background:repeating-linear-gradient(0deg,color-mix(in srgb,var(--cyan) 3.5%,transparent) 0,color-mix(in srgb,var(--cyan) 3.5%,transparent) 1px,transparent 1px,transparent 5px);opacity:var(--scanlineOpacity);filter:drop-shadow(0 0 var(--glow) var(--cyan));transform:translateY(var(--audioLift));transition:opacity 70ms linear,transform 70ms linear}.scanlines:after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 0,var(--cyan) 50%,transparent 100%);opacity:var(--audioAlpha);animation:sweep 3.2s linear infinite}");
-	} else if (elementId == QStringLiteral("signal-frame")) {
+	} else if (componentId == QStringLiteral("signal-frame")) {
 		body = QStringLiteral(
 			"<div class=\"frame\"></div><i class=\"corner c1\"></i><i class=\"corner c2\"></i><i class=\"corner c3\"></i><i class=\"corner c4\"></i>");
 		componentCss = QStringLiteral(
 			".frame{position:absolute;inset:3px;border:1px solid color-mix(in srgb,var(--cyan) 24%,transparent);box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--cyan) 18%,transparent)}.frame:before,.frame:after{content:'';position:absolute;width:16%;height:2px;top:-1px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);animation:sweep 4s linear infinite}.frame:after{top:auto;bottom:-1px;right:0;animation-direction:reverse}.corner{position:absolute;width:54px;height:54px;opacity:.72}.c1{left:0;top:0;border-left:3px solid var(--cyan);border-top:3px solid var(--cyan)}.c2{right:0;top:0;border-right:3px solid var(--cyan);border-top:3px solid var(--cyan)}.c3{left:0;bottom:0;border-left:3px solid var(--cyan);border-bottom:3px solid var(--cyan)}.c4{right:0;bottom:0;border-right:3px solid var(--cyan);border-bottom:3px solid var(--cyan)}");
-	} else if (elementId == QStringLiteral("reactor-core")) {
+	} else if (componentId == QStringLiteral("reactor-core")) {
 		body = QStringLiteral("<div class=\"reactor\"></div>");
 		componentCss = QStringLiteral(
 			".reactor{position:absolute;inset:1px;border:1px solid color-mix(in srgb,var(--cyan) 25%,transparent);border-radius:50%;opacity:var(--reactorOpacity);box-shadow:0 0 var(--glow) color-mix(in srgb,var(--blue) 30%,transparent);transform:scale(var(--reactorScale))}.reactor:before,.reactor:after{content:'';position:absolute;border:1px dashed color-mix(in srgb,var(--cyan) 35%,transparent);border-radius:50%;inset:12%;animation:orbit 18s linear infinite}.reactor:after{inset:27%;animation-duration:11s;animation-direction:reverse}");
-	} else if (elementId == QStringLiteral("uplink-header")) {
+	} else if (componentId == QStringLiteral("uplink-header")) {
 		body = QStringLiteral(
 			"<header><div class=\"sig\"><i class=\"core\"></i><span>TEMPEST BROADCAST // STREAM OVERLAY</span></div><div class=\"status\" id=\"status\"></div></header>");
 		componentCss = QStringLiteral(
 			"header{position:absolute;inset:0;display:flex;justify-content:space-between;align-items:center;font-size:18px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}.sig{display:flex;align-items:center;gap:12px;color:var(--cyan);font-weight:700}.core{width:14px;height:14px;border:2px solid var(--cyan);transform:rotate(45deg) scale(var(--coreScale));box-shadow:0 0 var(--glow) var(--cyan);animation:pulse 1.8s ease-in-out infinite}.status{padding:8px 14px;border:1px solid color-mix(in srgb,var(--cyan) 35%,transparent);background:rgba(3,9,15,.66)}");
-	} else if (elementId == QStringLiteral("title-plate")) {
+	} else if (componentId == QStringLiteral("title-plate")) {
 		body = QStringLiteral(
 			"<main><div class=\"kicker\" id=\"kicker\"></div><div class=\"title\" id=\"title\"></div><div class=\"rule\"></div></main>");
 		componentCss = QStringLiteral(
 			"main{position:absolute;inset:0;text-align:center;text-transform:uppercase}.kicker{font-size:22px;letter-spacing:.48em;color:var(--cyan);margin-bottom:18px}.title{color:var(--ice);font-size:96px;line-height:.92;font-weight:800;letter-spacing:.06em;text-shadow:0 0 var(--glow) color-mix(in srgb,var(--cyan) 52%,transparent);transform:scale(var(--titleScale))}.rule{height:1px;width:72%;margin:28px auto;background:linear-gradient(90deg,transparent,var(--blue),var(--cyan),var(--blue),transparent);position:relative}.rule:after{content:'';position:absolute;left:50%;top:-4px;width:9px;height:9px;background:var(--ice);transform:rotate(45deg);box-shadow:0 0 16px var(--cyan)}");
-	} else if (elementId == QStringLiteral("countdown")) {
+	} else if (componentId == QStringLiteral("countdown")) {
 		body = QStringLiteral("<div class=\"countdown\" id=\"countdown\"></div>");
 		componentCss = QStringLiteral(
 			".countdown{position:absolute;inset:0;text-align:center;font-variant-numeric:tabular-nums;font-size:132px;line-height:1.2;font-weight:300;letter-spacing:.12em;color:var(--ice);text-shadow:0 0 var(--glow) var(--cyan);transform:scale(var(--audioScale));transition:transform 70ms linear}");
-	} else if (elementId == QStringLiteral("rotation-message")) {
+	} else if (componentId == QStringLiteral("rotation-message")) {
 		body = QStringLiteral("<div class=\"message\" id=\"message\"></div>");
 		componentCss = QStringLiteral(
 			".message{position:absolute;inset:0;text-align:center;font-size:28px;line-height:70px;letter-spacing:.3em;color:var(--lineAccent,var(--cyan));text-shadow:0 0 var(--glow) var(--lineAccent,var(--cyan));transform:translateY(var(--audioLift)) scale(var(--audioScale));transition:opacity .24s ease,transform 70ms linear}.message[data-effect=\"pulse\"]{animation:messagePulse 1.2s ease-in-out infinite}.message[data-effect=\"glitch\"]{animation:messageGlitch .32s steps(2,end) infinite}.message[data-effect=\"alert\"]{animation:messageAlert .7s ease-in-out infinite alternate}");
-	} else if (elementId == QStringLiteral("spectrum")) {
+	} else if (componentId == QStringLiteral("spectrum")) {
 		body = QStringLiteral("<div class=\"eq\" id=\"eq\"></div>");
 		componentCss = QStringLiteral(
 			".eq{position:absolute;inset:0;display:flex;gap:5px;align-items:flex-end;justify-content:center;opacity:.72}.eq i{display:block;width:3px;height:3px;background:var(--cyan);box-shadow:0 0 8px var(--cyan);transition:height 45ms linear}");
-	} else if (elementId == QStringLiteral("footer-plate")) {
+	} else if (componentId == QStringLiteral("footer-plate")) {
 		body = QStringLiteral(
 			"<footer><span>LIVE PRODUCTION</span><i></i><span class=\"packet\">STREAM READY</span><i></i><span>TEMPEST BROADCAST</span></footer>");
 		componentCss = QStringLiteral(
 			"footer{position:absolute;inset:0;display:flex;align-items:center;gap:18px;color:var(--muted);font-size:16px;letter-spacing:.18em;opacity:var(--footerPulse);transform:scaleX(var(--audioScale));transition:opacity 70ms linear,transform 70ms linear}footer i{height:1px;flex:1;background:linear-gradient(90deg,var(--deep),var(--cyan),var(--deep));box-shadow:0 0 var(--glow) var(--cyan)}.packet{color:var(--cyan);text-shadow:0 0 var(--glow) var(--cyan)}");
-	} else if (elementId == QStringLiteral("orbit-badge")) {
+	} else if (componentId == QStringLiteral("orbit-badge")) {
 		body = QStringLiteral(
 			"<div class=\"orbit-badge\"><i></i><strong>TM</strong><span id=\"status\"></span></div>");
 		componentCss = QStringLiteral(
 			".orbit-badge{position:absolute;inset:8px;border:1px solid color-mix(in srgb,var(--cyan) 42%,transparent);border-radius:50%;box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--cyan) 18%,transparent),0 0 var(--glow) color-mix(in srgb,var(--cyan) 12%,transparent);display:grid;place-items:center;text-align:center}.orbit-badge:before,.orbit-badge:after,.orbit-badge i{content:'';position:absolute;border:1px dashed color-mix(in srgb,var(--cyan) 38%,transparent);border-radius:50%;inset:13%;animation:orbit 13s linear infinite}.orbit-badge:after{inset:27%;animation-duration:8s;animation-direction:reverse}.orbit-badge i{inset:39%;border-style:solid;animation-duration:5s}.orbit-badge strong{font-size:68px;letter-spacing:.12em;color:var(--ice);text-shadow:0 0 var(--glow) var(--cyan)}.orbit-badge span{position:absolute;bottom:22%;font-size:9px;letter-spacing:.18em;color:var(--cyan);max-width:70%}");
-	} else if (elementId == QStringLiteral("telemetry-plate")) {
+	} else if (componentId == QStringLiteral("telemetry-plate")) {
 		body = QStringLiteral(
 			"<section class=\"telemetry-plate\"><header><b>STREAM TELEMETRY</b><span id=\"clock\"></span></header><h2 id=\"title\"></h2><p id=\"status\"></p><div class=\"meter\"><i></i></div><footer><span>AUDIO REACTOR</span><strong id=\"level\">0%</strong></footer></section>");
 		componentCss = QStringLiteral(
 			".telemetry-plate{position:absolute;inset:2px;padding:22px 26px;border:1px solid color-mix(in srgb,var(--cyan) 48%,transparent);background:linear-gradient(135deg,rgba(4,15,24,.94),rgba(4,10,17,.74));clip-path:polygon(0 0,94% 0,100% 16%,100% 100%,6% 100%,0 84%)}header,footer{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:10px;letter-spacing:.18em}header b{color:var(--cyan)}h2{margin:28px 0 8px;font-size:28px;letter-spacing:.13em;color:var(--ice)}p{margin:0 0 20px;color:var(--cyan);font-size:11px;letter-spacing:.13em}.meter{height:4px;background:color-mix(in srgb,var(--cyan) 12%,transparent);overflow:hidden}.meter i{display:block;width:var(--meter,4%);height:100%;background:linear-gradient(90deg,var(--blue),var(--cyan),var(--ice));box-shadow:0 0 var(--glow) var(--cyan);transition:width 70ms linear}footer{margin-top:12px}footer strong{color:var(--cyan)}");
-	} else if (elementId == QStringLiteral("archive-ticker")) {
+	} else if (componentId == QStringLiteral("archive-ticker")) {
 		body = QStringLiteral(
 			"<div class=\"archive-ticker\"><b>STREAM FEED</b><i></i><span id=\"message\"></span><em>ONLINE</em></div>");
 		componentCss = QStringLiteral(
 			".archive-ticker{position:absolute;inset:2px;display:grid;grid-template-columns:auto 80px 1fr auto;gap:20px;align-items:center;padding:0 22px;border-top:1px solid var(--cyan);border-bottom:1px solid var(--blue);background:rgba(3,11,18,.88);box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--cyan) 18%,transparent);font-size:12px;letter-spacing:.18em;transform:translateY(var(--audioLift));transition:transform 70ms linear}.archive-ticker b,.archive-ticker em{color:var(--cyan);font-style:normal;text-shadow:0 0 var(--glow) var(--cyan)}.archive-ticker i{height:2px;width:var(--audioFill);background:linear-gradient(90deg,transparent,var(--cyan));box-shadow:0 0 var(--glow) var(--cyan);transition:width 70ms linear}.archive-ticker span{color:var(--ice);transition:opacity .24s ease}.archive-ticker em{font-size:9px;color:var(--muted)}");
-	} else if (elementId == QStringLiteral("alert-popup")) {
+	} else if (componentId == QStringLiteral("alert-popup")) {
 		body = QStringLiteral(
 			"<aside class=\"alert-popup\"><div class=\"beacon\"><i></i></div><div><small>STREAM EVENT</small><h2 id=\"title\"></h2><p id=\"status\"></p></div></aside>");
 		componentCss = QStringLiteral(
 			".alert-popup{position:absolute;inset:3px;display:grid;grid-template-columns:120px 1fr;align-items:center;gap:24px;padding:20px 28px;border:1px solid color-mix(in srgb,var(--cyan) 50%,transparent);border-left:4px solid var(--cyan);background:linear-gradient(100deg,rgba(4,17,27,.96),rgba(4,10,16,.78));box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--cyan) 10%,transparent);clip-path:polygon(0 0,94% 0,100% 24%,100% 100%,0 100%)}.beacon{width:82px;height:82px;border:1px solid var(--cyan);transform:rotate(45deg);display:grid;place-items:center;box-shadow:0 0 var(--glow) color-mix(in srgb,var(--cyan) 50%,transparent)}.beacon i{width:34px;height:34px;background:var(--cyan);animation:pulse .8s ease-in-out infinite;box-shadow:0 0 var(--glow) var(--cyan)}small{color:var(--cyan);font-size:10px;letter-spacing:.28em}h2{margin:10px 0 7px;color:var(--ice);font-size:30px;letter-spacing:.12em}p{margin:0;color:var(--muted);font-size:12px;letter-spacing:.16em}");
-	} else if (elementId == QStringLiteral("signal-rail")) {
+	} else if (componentId == QStringLiteral("signal-rail")) {
 		body = QStringLiteral(
 			"<aside class=\"signal-rail\"><b>T<br>M</b><div class=\"track\"><i></i></div><span id=\"status\"></span><em id=\"clock\"></em></aside>");
 		componentCss = QStringLiteral(
 			".signal-rail{position:absolute;inset:2px;display:flex;flex-direction:column;align-items:center;gap:26px;padding:28px 18px;border-left:2px solid var(--cyan);border-right:1px solid color-mix(in srgb,var(--cyan) 25%,transparent);background:linear-gradient(90deg,rgba(4,17,27,.92),rgba(4,10,16,.6));text-align:center}.signal-rail b{font-size:42px;line-height:.86;letter-spacing:.1em;color:var(--ice);text-shadow:0 0 var(--glow) var(--cyan)}.track{position:relative;width:3px;flex:1;background:color-mix(in srgb,var(--cyan) 15%,transparent)}.track:before,.track:after{content:'';position:absolute;left:-9px;width:21px;height:1px;background:var(--cyan)}.track:before{top:0}.track:after{bottom:0}.track i{position:absolute;left:0;bottom:0;width:100%;height:var(--meter,4%);background:var(--cyan);box-shadow:0 0 var(--glow) var(--cyan);transition:height 70ms linear}.signal-rail span{writing-mode:vertical-rl;transform:rotate(180deg);max-height:220px;overflow:hidden;color:var(--cyan);font-size:10px;letter-spacing:.16em}.signal-rail em{font-style:normal;color:var(--muted);font-size:10px;letter-spacing:.12em}");
-	} else if (elementId == QStringLiteral("operator-lower-third")) {
+	} else if (componentId == QStringLiteral("operator-lower-third")) {
 		body = QStringLiteral(
 			"<section class=\"operator-lower-third\"><div class=\"mark\">TB</div><div><small>TEMPEST BROADCAST // CREATOR CHANNEL</small><h2 id=\"title\"></h2><p id=\"status\"></p></div><time id=\"clock\"></time></section>");
 		componentCss = QStringLiteral(
 			".operator-lower-third{position:absolute;inset:3px;display:grid;grid-template-columns:110px 1fr auto;gap:24px;align-items:center;padding:18px 26px;border-bottom:3px solid var(--cyan);background:linear-gradient(90deg,rgba(3,13,22,.96),rgba(3,9,15,.72) 78%,transparent);clip-path:polygon(0 0,94% 0,100% 32%,100% 100%,0 100%)}.mark{width:76px;height:76px;display:grid;place-items:center;border:1px solid var(--cyan);color:var(--ice);font-size:26px;font-weight:800;letter-spacing:.08em;box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--cyan) 20%,transparent)}small{color:var(--cyan);font-size:9px;letter-spacing:.24em}h2{margin:10px 0 5px;color:var(--ice);font-size:30px;letter-spacing:.12em}p{margin:0;color:var(--muted);font-size:11px;letter-spacing:.15em}time{align-self:start;color:var(--cyan);font-size:11px;letter-spacing:.14em}");
-	} else if (elementId == QStringLiteral("radio-player-template")) {
+	} else if (componentId == QStringLiteral("radio-player-template")) {
 		body = QString::fromUtf8(
 			R"TEMPESTRADIO(<section class="radio-player"><div class="radio-mark"><img id="shrArt" alt=""><i></i></div><div class="radio-info"><header><strong>RADIO PLAYER</strong><span id="shrState">SETUP REQUIRED</span></header><h2 id="shrTrack">ADD A STATION IN OVERLAY DESIGNER</h2><p id="shrArtist">AZURACAST PLAYER TEMPLATE</p><div class="radio-meta"><span id="shrListeners">-- LIVE</span><span id="shrClock">--:-- / --:--</span></div><div class="radio-progress"><i id="shrProgress"></i></div></div><aside><button id="shrToggle" type="button" aria-label="Play radio">▶</button><small>AUDIO INPUT</small></aside><audio id="shrAudio" preload="none" autoplay></audio></section><script>
 const shrApi='',shrAudio=document.getElementById('shrAudio'),shrToggle=document.getElementById('shrToggle'),shrTrack=document.getElementById('shrTrack'),shrArtist=document.getElementById('shrArtist'),shrState=document.getElementById('shrState'),shrListeners=document.getElementById('shrListeners'),shrClock=document.getElementById('shrClock'),shrProgress=document.getElementById('shrProgress'),shrArt=document.getElementById('shrArt');let shrElapsed=0,shrDuration=0,shrSynced=Date.now();
@@ -2412,14 +2456,54 @@ shrToggle.addEventListener('click',()=>{if(shrAudio.paused)shrAudio.play().catch
 			R"TEMPESTCSS(.radio-player{position:absolute;inset:2px;display:grid;grid-template-columns:82px minmax(0,1fr) 58px;gap:15px;align-items:center;padding:13px 18px;border:1px solid color-mix(in srgb,var(--cyan) 48%,transparent);border-left:3px solid var(--cyan);background:linear-gradient(105deg,rgba(3,13,22,.96),rgba(3,9,15,.78));box-shadow:inset 0 0 var(--glow) color-mix(in srgb,var(--cyan) 12%,transparent),0 0 var(--glow) color-mix(in srgb,var(--cyan) 10%,transparent);clip-path:polygon(0 0,96% 0,100% 18%,100% 100%,0 100%);transform:translateY(var(--audioLift)) scale(var(--audioScale));transition:transform 70ms linear}.radio-mark{justify-self:center;width:58px;height:58px;position:relative;overflow:hidden;border:2px solid var(--cyan);background:color-mix(in srgb,var(--cyan) 12%,#04101a);box-shadow:0 0 var(--glow) var(--cyan);transform:rotate(45deg) scale(var(--coreScale))}.radio-mark img{position:absolute;inset:-16px;width:88px;height:88px;object-fit:cover;transform:rotate(-45deg);opacity:.78}.radio-mark i{position:absolute;inset:12px;border:1px solid var(--cyan);background:color-mix(in srgb,var(--cyan) 18%,transparent);box-shadow:0 0 var(--glow) var(--cyan)}.radio-info{min-width:0;display:grid;grid-template-rows:20px 30px 17px 15px 4px;gap:2px}.radio-info header{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:8px;letter-spacing:.15em}.radio-info header strong,.radio-info header span{color:var(--cyan);white-space:nowrap}.radio-info h2{margin:0;color:var(--ice);font-size:17px;line-height:30px;letter-spacing:.055em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 var(--glow) color-mix(in srgb,var(--cyan) 35%,transparent)}.radio-info p{margin:0;color:var(--cyan);font-size:10px;line-height:17px;font-weight:700;letter-spacing:.13em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.radio-meta{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:8px;line-height:15px;letter-spacing:.1em}.radio-progress{height:3px;background:color-mix(in srgb,var(--cyan) 12%,transparent);overflow:hidden}.radio-progress i{display:block;width:0;height:100%;background:var(--cyan);box-shadow:0 0 var(--glow) var(--cyan);transition:width .8s linear}.radio-player aside{display:grid;justify-items:center;gap:10px}.radio-player button{width:38px;height:38px;padding:0;border:1px solid var(--cyan);border-radius:50%;background:color-mix(in srgb,var(--cyan) 8%,#04101a);color:var(--ice);font:800 15px/1 "Segoe UI",Arial,sans-serif;box-shadow:0 0 var(--glow) color-mix(in srgb,var(--cyan) 38%,transparent)}.radio-player small{color:var(--muted);font-size:7px;letter-spacing:.09em;white-space:nowrap}.radio-player audio{display:none})TEMPESTCSS");
 	}
 
+	if (portrait) {
+		if (componentId == QStringLiteral("uplink-header")) {
+			componentCss += QStringLiteral(
+				"header{padding:0 12px;font-size:16px;line-height:1.35;letter-spacing:.16em}.sig{max-width:570px}.status{font-size:13px;text-align:center}");
+		} else if (componentId == QStringLiteral("title-plate")) {
+			componentCss += QStringLiteral(
+				"main{padding:8px 18px}.kicker{font-size:18px;line-height:1.4;letter-spacing:.32em}.title{font-size:72px;line-height:1;letter-spacing:.04em;overflow-wrap:anywhere}.rule{width:82%;margin:30px auto}");
+		} else if (componentId == QStringLiteral("countdown")) {
+			componentCss += QStringLiteral(
+				".countdown{display:grid;place-items:center;font-size:110px;line-height:1;letter-spacing:.08em}");
+		} else if (componentId == QStringLiteral("rotation-message")) {
+			componentCss += QStringLiteral(
+				".message{display:grid;place-items:center;padding:10px 24px;font-size:24px;line-height:1.4;letter-spacing:.16em;overflow-wrap:anywhere}");
+		} else if (componentId == QStringLiteral("spectrum")) {
+			componentCss += QStringLiteral(".eq{gap:9px}.eq i{width:7px}");
+		} else if (componentId == QStringLiteral("footer-plate")) {
+			componentCss += QStringLiteral(
+				"footer{padding:0 12px;gap:12px;font-size:13px;letter-spacing:.12em}");
+		} else if (componentId == QStringLiteral("telemetry-plate")) {
+			componentCss += QStringLiteral(
+				".telemetry-plate{padding:28px 34px}h2{margin:38px 0 10px;font-size:34px}p{font-size:13px;margin-bottom:28px}header,footer{font-size:12px}");
+		} else if (componentId == QStringLiteral("archive-ticker")) {
+			componentCss += QStringLiteral(
+				".archive-ticker{grid-template-columns:auto 58px minmax(0,1fr) auto;gap:14px;padding:0 18px;font-size:13px}.archive-ticker span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}");
+		} else if (componentId == QStringLiteral("alert-popup")) {
+			componentCss += QStringLiteral(
+				".alert-popup{grid-template-columns:150px minmax(0,1fr);gap:28px;padding:28px 34px}.beacon{width:96px;height:96px}h2{font-size:34px;overflow-wrap:anywhere}p{font-size:14px}");
+		} else if (componentId == QStringLiteral("signal-rail")) {
+			componentCss += QStringLiteral(
+				".signal-rail{gap:34px;padding:34px 14px}.signal-rail b{font-size:38px}.signal-rail span{max-height:480px;font-size:12px}.signal-rail em{font-size:9px}");
+		} else if (componentId == QStringLiteral("operator-lower-third")) {
+			componentCss += QStringLiteral(
+				".operator-lower-third{grid-template-columns:120px minmax(0,1fr);grid-template-rows:1fr auto;gap:12px 24px;padding:26px 30px}.mark{width:88px;height:88px}h2{font-size:31px;overflow-wrap:anywhere}p{font-size:13px}time{grid-column:2;font-size:12px}");
+		} else if (componentId == QStringLiteral("radio-player-template")) {
+			componentCss += QStringLiteral(
+				".radio-player{grid-template-columns:120px minmax(0,1fr) 72px;gap:22px;padding:24px 28px}.radio-mark{width:82px;height:82px}.radio-mark img{inset:-20px;width:122px;height:122px}.radio-info{grid-template-rows:27px 44px 25px 22px 6px;gap:3px}.radio-info header{font-size:11px}.radio-info h2{font-size:23px;line-height:44px}.radio-info p{font-size:13px;line-height:25px}.radio-meta{font-size:10px;line-height:22px}.radio-player button{width:48px;height:48px;font-size:18px}");
+		}
+	}
+
 	QString html = QString::fromUtf8(
-		R"TEMPEST(<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="tempest-size" content="{{WIDTH}}x{{HEIGHT}}"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+		R"TEMPEST(<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="tempest-size" content="{{WIDTH}}x{{HEIGHT}}"><meta name="tempest-orientation" content="{{ORIENTATION}}"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 :root{--cyan:#45d9ff;--ice:#bdf6ff;--blue:#0c7ccb;--deep:#06345d;--muted:#748fa4;--glow:12px;--audioAlpha:.04;--coreScale:1;--reactorScale:.88;--reactorOpacity:.14;--titleScale:1;--audioScale:1;--audioLift:0px;--scanlineOpacity:.18;--footerPulse:.35;--audioFill:20%}*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;color:var(--ice);font-family:"Segoe UI",Arial,sans-serif}{{COMPONENT_CSS}}body.reduced-motion *{animation:none!important;transition:none!important}@keyframes pulse{50%{opacity:.55}}@keyframes sweep{from{transform:translateX(-15%)}to{transform:translateX(620%)}}@keyframes orbit{to{transform:rotate(360deg)}}@keyframes messagePulse{50%{opacity:.55;filter:brightness(1.35)}}@keyframes messageGlitch{0%,100%{filter:none}25%{filter:drop-shadow(3px 0 var(--lineAccent,var(--cyan)))}50%{filter:drop-shadow(-3px 0 var(--lineAccent,var(--cyan)))}75%{filter:brightness(1.6)}}@keyframes messageAlert{to{filter:brightness(1.65);letter-spacing:.36em}}
 </style></head><body>{{BODY}}<script id="tempest-state" type="application/json">{{STATE_JSON}}</script><script>
 const state=JSON.parse(document.getElementById('tempest-state').textContent),root=document.documentElement,title=document.getElementById('title'),status=document.getElementById('status'),countdown=document.getElementById('countdown'),message=document.getElementById('message'),kicker=document.getElementById('kicker'),eq=document.getElementById('eq');if(title)title.textContent=state.title||'STORM HORIZON RADIO';if(status)status.textContent=state.status||'OPERATOR LINK // STANDBY';if(kicker)kicker.textContent=state.kicker;if(eq)for(let i=0;i<32;i++)eq.appendChild(document.createElement('i'));let index=0,audio=0;function rotate(){if(!message)return;message.style.opacity='0';setTimeout(()=>{message.textContent=state.messages[index++%state.messages.length];message.style.opacity='1'},240)}rotate();if(message)setInterval(rotate,Math.max(2000,state.rotationMs||6000));function tick(){if(!countdown)return;if(!state.countdownEndMs){countdown.textContent=state.idleText;return}const remaining=Math.max(0,state.countdownEndMs-Date.now()),seconds=Math.ceil(remaining/1000),minutes=Math.floor(seconds/60),secs=seconds%60;countdown.textContent=remaining<=0?'UPLINK READY':String(minutes).padStart(2,'0')+':'+String(secs).padStart(2,'0')}tick();if(countdown)setInterval(tick,250);async function telemetry(){let data={};try{const response=await fetch('../telemetry.json?t='+Date.now(),{cache:'no-store'});if(response.ok)data=await response.json()}catch(_){}const number=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback,eventActive=!!data.externalEventActive,raw=Math.max(number(data.level,0),number(data.pulse,0),eventActive?number(data.externalEventStrength,0):0);audio=Math.max(raw,audio*.74);const reduced=!!data.reducedMotion,motion=reduced?0:Math.max(0,Math.min(2,number(data.reactionMotion,1))),glowGain=Math.max(0,Math.min(2,number(data.reactionGlow,1)));let palette=String(data.reactionPalette||'tempest'),base=190,span=105;if(eventActive&&String(data.externalEventEffect)==='spectrum')palette='spectrum';if(palette==='ultraviolet'){base=250;span=55}else if(palette==='ember'){base=12;span=38}else if(palette==='verdant'){base=135;span=55}let hue=palette==='spectrum'?(Date.now()/18+audio*140)%360:base+audio*span;const accent=eventActive&&/^#[0-9A-Fa-f]{6}$/.test(String(data.externalEventAccent||''))?String(data.externalEventAccent):'',cyan=accent||`hsl(${hue} 100% ${64+audio*8}%)`,ice=accent||`hsl(${(hue+8)%360} 100% ${86+audio*8}%)`,blue=accent?`color-mix(in srgb,${accent} 72%,#06101a)`:`hsl(${(hue+15)%360} 84% ${44+audio*8}%)`,deep=accent?`color-mix(in srgb,${accent} 28%,#02070b)`:`hsl(${(hue+20)%360} 75% ${18+audio*5}%)`;document.body.classList.toggle('reduced-motion',reduced);root.style.setProperty('--audio',audio.toFixed(3));root.style.setProperty('--cyan',cyan);root.style.setProperty('--ice',ice);root.style.setProperty('--blue',blue);root.style.setProperty('--deep',deep);root.style.setProperty('--glow',(12+audio*92*glowGain)+'px');root.style.setProperty('--audioAlpha',(.04+audio*.24*glowGain).toFixed(3));root.style.setProperty('--coreScale',(1+audio*.55*motion).toFixed(3));root.style.setProperty('--reactorScale',(.88+audio*.16*motion).toFixed(3));root.style.setProperty('--reactorOpacity',(.14+audio*.5*glowGain).toFixed(3));root.style.setProperty('--titleScale',(1+audio*.012*motion).toFixed(4));root.style.setProperty('--audioScale',(1+audio*.04*motion).toFixed(3));root.style.setProperty('--audioLift',(-audio*8*motion).toFixed(2)+'px');root.style.setProperty('--scanlineOpacity',(.18+audio*.7*glowGain).toFixed(3));root.style.setProperty('--footerPulse',(.35+audio*.65*glowGain).toFixed(3));root.style.setProperty('--audioFill',(20+audio*80*motion).toFixed(1)+'%');if(eq)[...eq.children].forEach((bar,i)=>{const wave=.28+.72*Math.abs(Math.sin(performance.now()/180+i*.61));bar.style.height=(3+audio*31*wave*motion)+'px'})}telemetry();setInterval(telemetry,60);
 </script><script>const clockNode=document.getElementById('clock'),levelNode=document.getElementById('level');function updateLocalClock(){if(clockNode)clockNode.textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})}updateLocalClock();if(clockNode)setInterval(updateLocalClock,1000);setInterval(()=>{root.style.setProperty('--meter',Math.max(4,Math.min(100,audio*100))+'%');if(levelNode)levelNode.textContent=Math.round(Math.min(1,audio)*100)+'%'},60);</script></body></html>)TEMPEST");
 	html.replace(QStringLiteral("{{WIDTH}}"), QString::number(width));
 	html.replace(QStringLiteral("{{HEIGHT}}"), QString::number(height));
+	html.replace(QStringLiteral("{{ORIENTATION}}"), portrait ? QStringLiteral("portrait") : QStringLiteral("landscape"));
 	html.replace(QStringLiteral("{{COMPONENT_CSS}}"), componentCss);
 	html.replace(QStringLiteral("{{BODY}}"), body);
 	html.replace(QStringLiteral("{{STATE_JSON}}"), BuildOverlayStateJson(QStringLiteral("starting"), true));
@@ -2484,6 +2568,22 @@ bool TempestControlDeck::RenderVaultElements()
 		{"signal-rail", "sandbox--14-signal-rail.html", 260, 760},
 		{"operator-lower-third", "sandbox--15-operator-lower-third.html", 960, 170},
 		{"radio-player-template", "radio--16-radio-player-template.html", 720, 160},
+		{"portrait-scanlines", "portrait--01-portrait-scanlines.html", 1080, 1920},
+		{"portrait-signal-frame", "portrait--02-portrait-signal-frame.html", 1016, 1856},
+		{"portrait-reactor-core", "portrait--03-portrait-reactor-core.html", 820, 820},
+		{"portrait-uplink-header", "portrait--04-portrait-uplink-header.html", 960, 150},
+		{"portrait-title-plate", "portrait--05-portrait-title-plate.html", 920, 330},
+		{"portrait-countdown", "portrait--06-portrait-countdown.html", 900, 220},
+		{"portrait-rotation-message", "portrait--07-portrait-rotation-message.html", 920, 150},
+		{"portrait-spectrum", "portrait--08-portrait-spectrum.html", 900, 72},
+		{"portrait-footer-plate", "portrait--09-portrait-footer-plate.html", 960, 120},
+		{"portrait-orbit-badge", "portrait--10-portrait-orbit-badge.html", 340, 340},
+		{"portrait-telemetry-plate", "portrait--11-portrait-telemetry-plate.html", 900, 300},
+		{"portrait-archive-ticker", "portrait--12-portrait-stream-ticker.html", 960, 120},
+		{"portrait-alert-popup", "portrait--13-portrait-alert-popup.html", 920, 280},
+		{"portrait-signal-rail", "portrait--14-portrait-signal-rail.html", 150, 1120},
+		{"portrait-operator-lower-third", "portrait--15-portrait-creator-lower-third.html", 920, 260},
+		{"portrait-radio-player-template", "portrait--16-portrait-radio-player.html", 920, 260},
 	};
 	const QString directory = QDir(overlayDirectory).filePath(QStringLiteral("vault-elements"));
 	if (!QDir().mkpath(directory))

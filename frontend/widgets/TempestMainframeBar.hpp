@@ -43,6 +43,7 @@ private:
 	void SetTransmissionState(const QString &state, const QString &detail, const QString &color);
 	void UpdateActionButtons();
 	void ApplyAdaptiveVisibility();
+	void WriteTelemetrySnapshot();
 	QString ElapsedText() const;
 
 	QPointer<OBSBasic> main;
@@ -66,10 +67,12 @@ private:
 	QPointer<QTimer> telemetryTimer;
 	QElapsedTimer streamElapsed;
 	QString baseStyleSheet;
+	QString telemetrySnapshotPath;
 	int uiScalePercent = 100;
 	int baseMinimumHeight = 68;
 	int baseMaximumHeight = 76;
 	bool streamStarting = false;
 	bool streamStopping = false;
 	bool recording = false;
+	bool telemetrySnapshotErrorLogged = false;
 };
