@@ -31,6 +31,7 @@ public:
 
 private:
 	struct ClientState;
+	struct InteractionState;
 
 	void BuildInterface();
 	void LoadState();
@@ -48,6 +49,9 @@ private:
 	void HandleAudioPlay(const QJsonObject &message, const QJsonObject &payload);
 	void HandleVisualShow(const QJsonObject &message, const QJsonObject &payload);
 	void HandleVisualHide(const QJsonObject &message, const QJsonObject &payload);
+	void HandleInteractionShow(const QJsonObject &message, const QJsonObject &payload);
+	void HandleInteractionUpdate(const QJsonObject &message, const QJsonObject &payload);
+	void HandleInteractionClear(const QJsonObject &message, const QJsonObject &payload);
 	void HandleStatusRequest(const QJsonObject &message);
 	void HandleDualFormatConfigure(const QJsonObject &message, const QJsonObject &payload);
 	void HandleDualFormatPreview(const QJsonObject &message);
@@ -57,6 +61,7 @@ private:
 	void HandleSimulcastStop(const QJsonObject &message, const QJsonObject &payload);
 	void HandleSimulcastRetryKick(const QJsonObject &message);
 	void ExpireLease(const QString &leaseKey);
+	void RestoreInteraction(const std::shared_ptr<InteractionState> &state);
 	void RememberCommand(const QString &key);
 	void SendDocument(const QJsonObject &document);
 	void SendHello();
@@ -92,6 +97,7 @@ private:
 	std::unique_ptr<ClientState> client;
 	QHash<QString, QPointer<QTimer>> activeLeases;
 	QHash<QString, QString> activeVisualSources;
+	QHash<QString, std::shared_ptr<InteractionState>> activeInteractions;
 	QSet<QString> processedCommands;
 	QStringList processedCommandOrder;
 	QString currentLeaseKey;

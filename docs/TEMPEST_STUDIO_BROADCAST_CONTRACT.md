@@ -2,6 +2,10 @@
 
 Protocol version: `1.0`
 
+Viewer interactions use the additive
+[`Tempest interaction render contract 1.0`](TEMPEST_INTERACTION_RENDER_CONTRACT_V1.md). The Bridge transport remains
+protocol `1.0` for backward compatibility.
+
 Studio sends commands to `com.tempestmainframe.tempest-broadcast`. Command inputs are always under
 `payload.arguments`. Broadcast responses include `commandId`, `success`, `status`, and `detail` and never include
 stream keys or access tokens.
@@ -16,6 +20,9 @@ stream keys or access tokens.
 - `broadcast.simulcast.stop`
 - `broadcast.simulcast.retry-kick`
 - `broadcast.status`
+- `broadcast.interaction.show`
+- `broadcast.interaction.update`
+- `broadcast.interaction.clear`
 
 The existing reaction, audio, and visual capabilities remain unchanged.
 

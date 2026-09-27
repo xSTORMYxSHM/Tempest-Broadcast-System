@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <mutex>
@@ -39,13 +40,14 @@
 #include "moc_TempestStudioBridge.cpp"
 
 #ifndef TEMPEST_PRODUCT_VERSION
-#define TEMPEST_PRODUCT_VERSION "1.4.5"
+#define TEMPEST_PRODUCT_VERSION "1.4.6"
 #endif
 
 namespace {
 constexpr char ConfigSection[] = "TempestStudioBridge";
 constexpr char ApplicationId[] = "com.tempestmainframe.tempest-broadcast";
 constexpr char ProtocolVersion[] = "1.0";
+constexpr char InteractionRenderContractVersion[] = "1.0";
 constexpr int MaximumRememberedCommands = 512;
 
 struct VerticalAlertInventory {
@@ -175,6 +177,167 @@ QJsonObject BuildCanvasProfile()
 		{QStringLiteral("fpsNumerator"), static_cast<int>(videoInfo.fps_num)},
 		{QStringLiteral("fpsDenominator"), static_cast<int>(videoInfo.fps_den)}};
 }
+
+QString InteractionKey(const QJsonObject &message, const QJsonObject &payload, const QJsonObject &arguments)
+{
+	const QString explicitKey = FirstString(arguments, {"instanceId"});
+	if (!explicitKey.isEmpty()) {
+		return explicitKey;
+	}
+	const QString runId = payload.value(QStringLiteral("runId")).toString().trimmed();
+	const QString actionId = payload.value(QStringLiteral("actionId")).toString().trimmed();
+	if (!runId.isEmpty() || !actionId.isEmpty()) {
+		return QStringLiteral("%1/%2").arg(runId, actionId);
+	}
+	return message.value(QStringLiteral("id")).toString();
+}
+
+QString InteractionStorageKey(const QString &instanceId)
+{
+	return QStringLiteral("interaction/%1").arg(instanceId);
+}
+
+QJsonObject InteractionRenderTargets(const QJsonObject &arguments)
+{
+	QJsonObject targets = arguments.value(QStringLiteral("renderTargets")).toObject();
+	if (!targets.isEmpty()) {
+		return targets;
+	}
+	const QString legacySource = FirstString(arguments, {"sourceName", "broadcastVisualSource", "visualSource"});
+	if (legacySource.isEmpty()) {
+		return {};
+	}
+	QJsonObject target{{QStringLiteral("sourceName"), legacySource}};
+	if (arguments.value(QStringLiteral("placement")).isObject()) {
+		target.insert(QStringLiteral("placement"), arguments.value(QStringLiteral("placement")));
+	}
+	if (arguments.value(QStringLiteral("restartMedia")).isBool()) {
+		target.insert(QStringLiteral("restartMedia"), arguments.value(QStringLiteral("restartMedia")));
+	}
+	return {{QStringLiteral("horizontal"), target}};
+}
+
+bool BuildInteractionTransform(obs_sceneitem_t *item, int canvasWidth, int canvasHeight, const QJsonObject &target,
+			       obs_transform_info &transform, bool &hasPlacement, QString &error)
+{
+	obs_sceneitem_get_info2(item, &transform);
+	hasPlacement = target.value(QStringLiteral("placement")).isObject();
+	if (!hasPlacement) {
+		return true;
+	}
+
+	const QJsonObject placement = target.value(QStringLiteral("placement")).toObject();
+	for (const QString &field :
+	     {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")}) {
+		if (!placement.value(field).isDouble()) {
+			error = QStringLiteral("Normalized placement requires numeric x, y, width, and height.");
+			return false;
+		}
+	}
+	const double x = placement.value(QStringLiteral("x")).toDouble();
+	const double y = placement.value(QStringLiteral("y")).toDouble();
+	const double width = placement.value(QStringLiteral("width")).toDouble();
+	const double height = placement.value(QStringLiteral("height")).toDouble();
+	if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height) || x < 0.0 ||
+	    y < 0.0 || width <= 0.0 || height <= 0.0 || x + width > 1.0 || y + height > 1.0) {
+		error = QStringLiteral("Normalized placement must stay within the 0..1 canvas and have positive size.");
+		return false;
+	}
+
+	const QString fit = target.value(QStringLiteral("fit")).toString(QStringLiteral("contain")).toLower();
+	if (fit != QStringLiteral("contain") && fit != QStringLiteral("cover") && fit != QStringLiteral("stretch")) {
+		error = QStringLiteral("Render target fit must be contain, cover, or stretch.");
+		return false;
+	}
+	const double rotation = target.value(QStringLiteral("rotationDegrees")).toDouble(0.0);
+	if (!std::isfinite(rotation) || rotation < -360.0 || rotation > 360.0) {
+		error = QStringLiteral("rotationDegrees must be between -360 and 360.");
+		return false;
+	}
+
+	vec2_set(&transform.pos, static_cast<float>(x * canvasWidth), static_cast<float>(y * canvasHeight));
+	vec2_set(&transform.scale, 1.0f, 1.0f);
+	vec2_set(&transform.bounds, static_cast<float>(width * canvasWidth), static_cast<float>(height * canvasHeight));
+	transform.rot = static_cast<float>(rotation);
+	transform.alignment = OBS_ALIGN_LEFT | OBS_ALIGN_TOP;
+	transform.bounds_alignment = OBS_ALIGN_CENTER;
+	transform.bounds_type =
+		fit == QStringLiteral("stretch")
+			? OBS_BOUNDS_STRETCH
+			: (fit == QStringLiteral("cover") ? OBS_BOUNDS_SCALE_OUTER : OBS_BOUNDS_SCALE_INNER);
+	transform.crop_to_bounds = fit == QStringLiteral("cover");
+	return true;
+}
+
+OBSScene ResolveInteractionScene(OBSBasic *main, const QString &orientation, QString &sceneName, QString &canvasId,
+				 int &canvasWidth, int &canvasHeight, QString &error)
+{
+	if (!main) {
+		error = QStringLiteral("Broadcast has no active scene controller.");
+		return {};
+	}
+	OBSScene current = main->GetCurrentScene();
+	if (!current) {
+		error = QStringLiteral("Broadcast has no current program scene.");
+		return {};
+	}
+	obs_source_t *currentSource = obs_scene_get_source(current);
+	if (orientation == QStringLiteral("horizontal")) {
+		sceneName = QString::fromUtf8(obs_source_get_name(currentSource));
+		canvasId = QStringLiteral("main");
+		canvasWidth = static_cast<int>(obs_source_get_width(currentSource));
+		canvasHeight = static_cast<int>(obs_source_get_height(currentSource));
+		return current;
+	}
+	if (orientation != QStringLiteral("vertical")) {
+		error = QStringLiteral("Render target orientation must be horizontal or vertical.");
+		return {};
+	}
+	if (!main->Config()) {
+		error = QStringLiteral("The active Broadcast profile is unavailable.");
+		return {};
+	}
+
+	const QString selectedUuid =
+		QString::fromUtf8(config_get_string(main->Config(), "Stream1", "MultitrackExtraCanvas"));
+	if (selectedUuid.isEmpty()) {
+		error = QStringLiteral("No additional portrait canvas is selected.");
+		return {};
+	}
+	OBSCanvasAutoRelease canvas = obs_get_canvas_by_uuid(selectedUuid.toUtf8().constData());
+	obs_video_info info{};
+	if (!canvas || !obs_canvas_get_video_info(canvas, &info)) {
+		error = QStringLiteral("The selected portrait canvas is unavailable.");
+		return {};
+	}
+
+	OBSDataAutoRelease settings = obs_source_get_settings(currentSource);
+	OBSDataArrayAutoRelease links = obs_data_get_array(settings, "canvas");
+	for (size_t index = 0; links && index < obs_data_array_count(links); ++index) {
+		OBSDataAutoRelease link = obs_data_array_item(links, index);
+		if (obs_data_get_int(link, "width") != static_cast<long long>(info.base_width) ||
+		    obs_data_get_int(link, "height") != static_cast<long long>(info.base_height)) {
+			continue;
+		}
+		const QString linkedName = QString::fromUtf8(obs_data_get_string(link, "scene")).trimmed();
+		if (linkedName.isEmpty()) {
+			continue;
+		}
+		OBSSceneAutoRelease linked = obs_canvas_get_scene_by_name(canvas, linkedName.toUtf8().constData());
+		if (!linked) {
+			continue;
+		}
+		sceneName = linkedName;
+		canvasId = selectedUuid;
+		obs_source_t *linkedSource = obs_scene_get_source(linked);
+		canvasWidth = static_cast<int>(obs_source_get_width(linkedSource));
+		canvasHeight = static_cast<int>(obs_source_get_height(linkedSource));
+		return OBSScene(linked);
+	}
+
+	error = QStringLiteral("The current program scene has no link to the selected portrait canvas.");
+	return {};
+}
 } // namespace
 
 struct TempestStudioBridge::ClientState {
@@ -185,6 +348,24 @@ struct TempestStudioBridge::ClientState {
 	std::thread worker;
 	std::mutex sendMutex;
 	std::atomic_bool connected{false};
+};
+
+struct TempestStudioBridge::InteractionState {
+	struct Target {
+		QString orientation;
+		QString sourceName;
+		QString sceneName;
+		QString canvasId;
+		int canvasWidth = 0;
+		int canvasHeight = 0;
+		OBSScene scene;
+		OBSSceneItem item;
+		obs_transform_info originalTransform{};
+		bool originalVisible = false;
+	};
+
+	QString instanceId;
+	QList<Target> targets;
 };
 
 TempestStudioBridge::TempestStudioBridge(OBSBasic *main, TempestSignalReactor *reactor, QWidget *parent)
@@ -625,6 +806,9 @@ void TempestStudioBridge::SendHello()
 				      QStringLiteral("broadcast.audio.play"),
 				      QStringLiteral("broadcast.visual.show"),
 				      QStringLiteral("broadcast.visual.hide"),
+				      QStringLiteral("broadcast.interaction.show"),
+				      QStringLiteral("broadcast.interaction.update"),
+				      QStringLiteral("broadcast.interaction.clear"),
 				      QStringLiteral("broadcast.status"),
 				      QStringLiteral("broadcast.dual-format.configure"),
 				      QStringLiteral("broadcast.dual-format.preview"),
@@ -637,6 +821,8 @@ void TempestStudioBridge::SendHello()
 				   {{QStringLiteral("applicationId"), QString::fromUtf8(ApplicationId)},
 				    {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)},
 				    {QStringLiteral("protocolVersion"), QString::fromUtf8(ProtocolVersion)},
+				    {QStringLiteral("interactionRenderContractVersion"),
+				     QString::fromUtf8(InteractionRenderContractVersion)},
 				    {QStringLiteral("capabilities"), capabilities}}));
 	QJsonArray topics = capabilities;
 	topics.append(QStringLiteral("system.*"));
@@ -734,6 +920,18 @@ QJsonObject TempestStudioBridge::BuildStatusSnapshot() const
 				     dualFormat.value(QStringLiteral("sceneLinksReady")).toBool() &&
 				     dualFormat.value(QStringLiteral("audioReady")).toBool() &&
 				     dualFormat.value(QStringLiteral("browserSourcesReady")).toBool();
+	const QJsonObject interactionRender{
+		{QStringLiteral("contractVersion"), QString::fromUtf8(InteractionRenderContractVersion)},
+		{QStringLiteral("coordinateSpace"), QStringLiteral("normalized-top-left")},
+		{QStringLiteral("orientations"), QJsonArray{QStringLiteral("horizontal"), QStringLiteral("vertical")}},
+		{QStringLiteral("fitModes"),
+		 QJsonArray{QStringLiteral("contain"), QStringLiteral("cover"), QStringLiteral("stretch")}},
+		{QStringLiteral("lifecycle"),
+		 QJsonArray{QStringLiteral("show"), QStringLiteral("update"), QStringLiteral("clear")}},
+		{QStringLiteral("audioPolicy"), QStringLiteral("source-native-single-path")},
+		{QStringLiteral("supported"), true},
+		{QStringLiteral("activeInstances"), activeInteractions.size()},
+		{QStringLiteral("maximumDurationMs"), 300000}};
 	QJsonObject status{{QStringLiteral("ready"), IsConnected() && reactor && reactor->ExternalEventBridgeArmed()},
 			   {QStringLiteral("version"), QStringLiteral(TEMPEST_PRODUCT_VERSION)},
 			   {QStringLiteral("streaming"), obs_frontend_streaming_active()},
@@ -743,6 +941,7 @@ QJsonObject TempestStudioBridge::BuildStatusSnapshot() const
 			   {QStringLiteral("canvasProfile"), BuildCanvasProfile()},
 			   {QStringLiteral("sourceInventory"), BuildSourceInventory(main)},
 			   {QStringLiteral("commandsHandled"), commandsHandled},
+			   {QStringLiteral("interactionRender"), interactionRender},
 			   {QStringLiteral("dualFormat"), dualFormat}};
 	if (destinationCoordinator) {
 		status.insert(QStringLiteral("simulcast"), destinationCoordinator->StatusSnapshot(dualFormatReady));
@@ -865,7 +1064,19 @@ void TempestStudioBridge::HandleCommand(const QJsonObject &message)
 		return;
 	}
 	const QJsonObject payload = message.value(QStringLiteral("payload")).toObject();
+	const QString topic = message.value(QStringLiteral("topic")).toString();
 	QString commandKey = CommandKey(payload);
+	if (topic == QStringLiteral("broadcast.interaction.update")) {
+		const QJsonValue revision =
+			payload.value(QStringLiteral("arguments")).toObject().value(QStringLiteral("revision"));
+		if (revision.isString() && !revision.toString().isEmpty()) {
+			commandKey.append(QStringLiteral("/%1").arg(revision.toString()));
+		} else if (revision.isDouble()) {
+			commandKey.append(QStringLiteral("/%1").arg(revision.toVariant().toLongLong()));
+		} else {
+			commandKey = message.value(QStringLiteral("id")).toString();
+		}
+	}
 	if (commandKey == QStringLiteral("//")) {
 		commandKey = message.value(QStringLiteral("id")).toString();
 	}
@@ -876,7 +1087,6 @@ void TempestStudioBridge::HandleCommand(const QJsonObject &message)
 	}
 	RememberCommand(commandKey);
 	++commandsHandled;
-	const QString topic = message.value(QStringLiteral("topic")).toString();
 	if (topic == QStringLiteral("broadcast.reaction.trigger")) {
 		HandleReactionTrigger(message, payload);
 	} else if (topic == QStringLiteral("broadcast.reaction.clear")) {
@@ -887,6 +1097,12 @@ void TempestStudioBridge::HandleCommand(const QJsonObject &message)
 		HandleVisualShow(message, payload);
 	} else if (topic == QStringLiteral("broadcast.visual.hide")) {
 		HandleVisualHide(message, payload);
+	} else if (topic == QStringLiteral("broadcast.interaction.show")) {
+		HandleInteractionShow(message, payload);
+	} else if (topic == QStringLiteral("broadcast.interaction.update")) {
+		HandleInteractionUpdate(message, payload);
+	} else if (topic == QStringLiteral("broadcast.interaction.clear")) {
+		HandleInteractionClear(message, payload);
 	} else if (topic == QStringLiteral("broadcast.dual-format.configure")) {
 		HandleDualFormatConfigure(message, payload);
 	} else if (topic == QStringLiteral("broadcast.dual-format.preview")) {
@@ -993,6 +1209,19 @@ void TempestStudioBridge::ExpireLease(const QString &leaseKey)
 {
 	if (auto timer = activeLeases.take(leaseKey)) {
 		timer->deleteLater();
+	}
+	if (const auto interaction = activeInteractions.take(leaseKey)) {
+		RestoreInteraction(interaction);
+		PublishEvent(QStringLiteral("broadcast.interaction.expired"),
+			     {{QStringLiteral("instanceId"), interaction->instanceId},
+			      {QStringLiteral("reason"), QStringLiteral("local-fallback-expiry")}});
+		PublishHealth(QStringLiteral("interaction-expired"));
+		if (commandLabel) {
+			commandLabel->setText(QStringLiteral("COMMANDS // %1 // ACTIVE LEASES // %2")
+						      .arg(commandsHandled)
+						      .arg(activeLeases.size()));
+		}
+		return;
 	}
 	if (currentLeaseKey == leaseKey && reactor) {
 		reactor->ClearExternalEvent();
@@ -1113,6 +1342,299 @@ void TempestStudioBridge::HandleVisualHide(const QJsonObject &message, const QJs
 	SendResponse(message, true, hidden ? QStringLiteral("hidden") : QStringLiteral("already-hidden"),
 		     hidden ? QStringLiteral("OBS visual source hidden: %1").arg(sourceName)
 			    : QStringLiteral("No visible OBS source remained for this Sound Alert."));
+}
+
+void TempestStudioBridge::RestoreInteraction(const std::shared_ptr<InteractionState> &state)
+{
+	if (!state) {
+		return;
+	}
+	for (const InteractionState::Target &target : state->targets) {
+		obs_sceneitem_t *item = target.item;
+		obs_source_t *source = item ? obs_sceneitem_get_source(item) : nullptr;
+		if (!item || !source || obs_source_removed(source)) {
+			continue;
+		}
+		obs_sceneitem_defer_update_begin(item);
+		obs_sceneitem_set_info2(item, &target.originalTransform);
+		obs_sceneitem_set_visible(item, target.originalVisible);
+		obs_sceneitem_defer_update_end(item);
+	}
+}
+
+void TempestStudioBridge::HandleInteractionShow(const QJsonObject &message, const QJsonObject &payload)
+{
+	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
+	const QJsonObject lease = payload.value(QStringLiteral("lease")).toObject();
+	const QString instanceId = InteractionKey(message, payload, arguments);
+	const QString storageKey = InteractionStorageKey(instanceId);
+	const QJsonObject renderTargets = InteractionRenderTargets(arguments);
+	if (instanceId.isEmpty() || renderTargets.isEmpty()) {
+		SendResponse(message, false, QStringLiteral("rejected"),
+			     QStringLiteral("Interaction show requires instanceId and at least one render target."));
+		return;
+	}
+
+	for (auto iterator = renderTargets.constBegin(); iterator != renderTargets.constEnd(); ++iterator) {
+		if (iterator.key() != QStringLiteral("horizontal") && iterator.key() != QStringLiteral("vertical")) {
+			SendResponse(message, false, QStringLiteral("rejected"),
+				     QStringLiteral("Unknown interaction render orientation: %1").arg(iterator.key()));
+			return;
+		}
+		if (!iterator.value().isObject()) {
+			SendResponse(message, false, QStringLiteral("rejected"),
+				     QStringLiteral("Each interaction render target must be an object."));
+			return;
+		}
+	}
+
+	if (auto timer = activeLeases.take(storageKey)) {
+		timer->stop();
+		timer->deleteLater();
+	}
+	if (const auto replaced = activeInteractions.take(storageKey)) {
+		RestoreInteraction(replaced);
+	}
+
+	auto state = std::make_shared<InteractionState>();
+	state->instanceId = instanceId;
+	QJsonArray appliedTargets;
+	QSet<quintptr> restartSources;
+	QString error;
+	for (const QString &orientation : {QStringLiteral("horizontal"), QStringLiteral("vertical")}) {
+		if (!renderTargets.value(orientation).isObject()) {
+			continue;
+		}
+		const QJsonObject targetObject = renderTargets.value(orientation).toObject();
+		const QString sourceName = FirstString(targetObject, {"sourceName"});
+		if (sourceName.isEmpty()) {
+			error = QStringLiteral("The %1 render target has no sourceName.").arg(orientation);
+			break;
+		}
+
+		QString sceneName;
+		QString canvasId;
+		int canvasWidth = 0;
+		int canvasHeight = 0;
+		OBSScene scene = ResolveInteractionScene(main, orientation, sceneName, canvasId, canvasWidth,
+							 canvasHeight, error);
+		if (!scene || canvasWidth <= 0 || canvasHeight <= 0) {
+			if (error.isEmpty()) {
+				error = QStringLiteral("The %1 render canvas has invalid dimensions.").arg(orientation);
+			}
+			break;
+		}
+		obs_sceneitem_t *item = obs_scene_find_source_recursive(scene, sourceName.toUtf8().constData());
+		if (!item) {
+			error = QStringLiteral("OBS source %1 was not found in the %2 render scene.")
+					.arg(sourceName, orientation);
+			break;
+		}
+
+		InteractionState::Target target;
+		target.orientation = orientation;
+		target.sourceName = sourceName;
+		target.sceneName = sceneName;
+		target.canvasId = canvasId;
+		target.canvasWidth = canvasWidth;
+		target.canvasHeight = canvasHeight;
+		target.scene = scene;
+		target.item = item;
+		obs_sceneitem_get_info2(item, &target.originalTransform);
+		target.originalVisible = obs_sceneitem_visible(item);
+
+		obs_transform_info transform{};
+		bool hasPlacement = false;
+		if (!BuildInteractionTransform(item, canvasWidth, canvasHeight, targetObject, transform, hasPlacement,
+					       error)) {
+			break;
+		}
+		if (hasPlacement && obs_sceneitem_get_scene(item) != scene) {
+			error = QStringLiteral("Normalized placement requires %1 to be a top-level scene source.")
+					.arg(sourceName);
+			break;
+		}
+
+		state->targets.append(target);
+		obs_sceneitem_defer_update_begin(item);
+		if (hasPlacement) {
+			obs_sceneitem_set_info2(item, &transform);
+		}
+		obs_sceneitem_set_visible(item, true);
+		obs_sceneitem_defer_update_end(item);
+
+		obs_source_t *source = obs_sceneitem_get_source(item);
+		if (targetObject.value(QStringLiteral("restartMedia")).toBool(false) && source &&
+		    (obs_source_get_output_flags(source) & OBS_SOURCE_CONTROLLABLE_MEDIA) != 0) {
+			restartSources.insert(reinterpret_cast<quintptr>(source));
+		}
+		appliedTargets.append(QJsonObject{{QStringLiteral("orientation"), orientation},
+						  {QStringLiteral("sourceName"), sourceName},
+						  {QStringLiteral("sceneName"), sceneName},
+						  {QStringLiteral("canvasId"), canvasId},
+						  {QStringLiteral("canvasWidth"), canvasWidth},
+						  {QStringLiteral("canvasHeight"), canvasHeight}});
+	}
+
+	if (!error.isEmpty() || state->targets.isEmpty()) {
+		RestoreInteraction(state);
+		SendResponse(message, false, QStringLiteral("rejected"),
+			     error.isEmpty() ? QStringLiteral("No interaction render target was applied.") : error);
+		PublishEvent(QStringLiteral("broadcast.failure"),
+			     {{QStringLiteral("capability"), QStringLiteral("broadcast.interaction.show")},
+			      {QStringLiteral("instanceId"), instanceId},
+			      {QStringLiteral("reason"), QStringLiteral("render-target-rejected")},
+			      {QStringLiteral("detail"), error}});
+		return;
+	}
+
+	for (quintptr pointer : restartSources) {
+		obs_source_media_restart(reinterpret_cast<obs_source_t *>(pointer));
+	}
+	const int requestedDuration = arguments.value(QStringLiteral("durationMs"))
+					      .toInt(lease.value(QStringLiteral("durationMs")).toInt(2200));
+	const int durationMs = std::clamp(requestedDuration, 250, 300000);
+	auto *timer = new QTimer(this);
+	timer->setSingleShot(true);
+	timer->setInterval(durationMs);
+	connect(timer, &QTimer::timeout, this, [this, storageKey]() { ExpireLease(storageKey); });
+	activeInteractions.insert(storageKey, state);
+	activeLeases.insert(storageKey, timer);
+	timer->start();
+
+	const QJsonObject result{{QStringLiteral("interactionRenderContractVersion"),
+				  QString::fromUtf8(InteractionRenderContractVersion)},
+				 {QStringLiteral("instanceId"), instanceId},
+				 {QStringLiteral("durationMs"), durationMs},
+				 {QStringLiteral("targets"), appliedTargets},
+				 {QStringLiteral("audioPolicy"), QStringLiteral("source-native-single-path")}};
+	SendResponse(message, true, QStringLiteral("shown"), QStringLiteral("Interaction render targets are visible."),
+		     result);
+	PublishEvent(QStringLiteral("broadcast.interaction.shown"), result);
+}
+
+void TempestStudioBridge::HandleInteractionUpdate(const QJsonObject &message, const QJsonObject &payload)
+{
+	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
+	const QString instanceId = InteractionKey(message, payload, arguments);
+	const QString storageKey = InteractionStorageKey(instanceId);
+	const auto state = activeInteractions.value(storageKey);
+	if (!state) {
+		SendResponse(message, false, QStringLiteral("not-found"),
+			     QStringLiteral("No active interaction render instance matches %1.").arg(instanceId));
+		return;
+	}
+
+	const QJsonObject renderTargets = InteractionRenderTargets(arguments);
+	struct PendingTransform {
+		obs_sceneitem_t *item = nullptr;
+		obs_transform_info transform{};
+	};
+	QList<PendingTransform> pending;
+	QJsonArray updatedTargets;
+	QString error;
+	for (auto iterator = renderTargets.constBegin(); iterator != renderTargets.constEnd(); ++iterator) {
+		const QString orientation = iterator.key();
+		if ((orientation != QStringLiteral("horizontal") && orientation != QStringLiteral("vertical")) ||
+		    !iterator.value().isObject()) {
+			error = QStringLiteral("Interaction update contains an invalid render target.");
+			break;
+		}
+		auto targetIterator = std::find_if(state->targets.begin(), state->targets.end(),
+						   [&orientation](const InteractionState::Target &target) {
+							   return target.orientation == orientation;
+						   });
+		if (targetIterator == state->targets.end()) {
+			error = QStringLiteral("The active interaction has no %1 render target.").arg(orientation);
+			break;
+		}
+		const QJsonObject targetObject = iterator.value().toObject();
+		const QString requestedSource = FirstString(targetObject, {"sourceName"});
+		if (!requestedSource.isEmpty() && requestedSource != targetIterator->sourceName) {
+			error = QStringLiteral(
+				"Interaction update cannot replace an active OBS source; clear and show instead.");
+			break;
+		}
+		if (!targetObject.value(QStringLiteral("placement")).isObject()) {
+			continue;
+		}
+		if (obs_sceneitem_get_scene(targetIterator->item) != targetIterator->scene) {
+			error = QStringLiteral("Normalized placement requires %1 to remain a top-level scene source.")
+					.arg(targetIterator->sourceName);
+			break;
+		}
+		obs_transform_info transform{};
+		bool hasPlacement = false;
+		if (!BuildInteractionTransform(targetIterator->item, targetIterator->canvasWidth,
+					       targetIterator->canvasHeight, targetObject, transform, hasPlacement,
+					       error)) {
+			break;
+		}
+		pending.append({targetIterator->item, transform});
+		updatedTargets.append(orientation);
+	}
+
+	if (!error.isEmpty()) {
+		SendResponse(message, false, QStringLiteral("rejected"), error);
+		return;
+	}
+	int durationMs = -1;
+	if (arguments.contains(QStringLiteral("durationMs"))) {
+		if (!arguments.value(QStringLiteral("durationMs")).isDouble()) {
+			SendResponse(message, false, QStringLiteral("rejected"),
+				     QStringLiteral("Interaction update durationMs must be numeric."));
+			return;
+		}
+		durationMs = std::clamp(arguments.value(QStringLiteral("durationMs")).toInt(), 250, 300000);
+	}
+	for (const PendingTransform &update : pending) {
+		obs_sceneitem_defer_update_begin(update.item);
+		obs_sceneitem_set_info2(update.item, &update.transform);
+		obs_sceneitem_set_visible(update.item, true);
+		obs_sceneitem_defer_update_end(update.item);
+	}
+
+	if (durationMs >= 0) {
+		if (auto timer = activeLeases.value(storageKey)) {
+			timer->start(durationMs);
+		}
+	}
+	QJsonObject result{{QStringLiteral("interactionRenderContractVersion"),
+			    QString::fromUtf8(InteractionRenderContractVersion)},
+			   {QStringLiteral("instanceId"), instanceId},
+			   {QStringLiteral("updatedOrientations"), updatedTargets},
+			   {QStringLiteral("durationMs"), durationMs}};
+	if (arguments.contains(QStringLiteral("revision"))) {
+		result.insert(QStringLiteral("revision"), arguments.value(QStringLiteral("revision")));
+	}
+	SendResponse(message, true, QStringLiteral("updated"), QStringLiteral("Interaction render state was updated."),
+		     result);
+	PublishEvent(QStringLiteral("broadcast.interaction.updated"), result);
+}
+
+void TempestStudioBridge::HandleInteractionClear(const QJsonObject &message, const QJsonObject &payload)
+{
+	const QJsonObject arguments = payload.value(QStringLiteral("arguments")).toObject();
+	const QString instanceId = InteractionKey(message, payload, arguments);
+	const QString storageKey = InteractionStorageKey(instanceId);
+	if (auto timer = activeLeases.take(storageKey)) {
+		timer->stop();
+		timer->deleteLater();
+	}
+	const auto state = activeInteractions.take(storageKey);
+	if (!state) {
+		SendResponse(message, true, QStringLiteral("already-cleared"),
+			     QStringLiteral("No active interaction render state remained."),
+			     {{QStringLiteral("instanceId"), instanceId}});
+		return;
+	}
+	RestoreInteraction(state);
+	const QJsonObject result{{QStringLiteral("interactionRenderContractVersion"),
+				  QString::fromUtf8(InteractionRenderContractVersion)},
+				 {QStringLiteral("instanceId"), instanceId}};
+	SendResponse(message, true, QStringLiteral("cleared"),
+		     QStringLiteral("Interaction sources were restored to their previous compositor state."), result);
+	PublishEvent(QStringLiteral("broadcast.interaction.cleared"), result);
 }
 
 void TempestStudioBridge::HandleStatusRequest(const QJsonObject &message)
