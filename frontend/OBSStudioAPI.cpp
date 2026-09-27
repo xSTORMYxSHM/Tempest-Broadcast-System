@@ -399,6 +399,10 @@ void OBSStudioAPI::obs_frontend_remove_event_callback(obs_frontend_event_cb call
 
 obs_output_t *OBSStudioAPI::obs_frontend_get_streaming_output()
 {
+	if (!main || !main->outputHandler) {
+		return nullptr;
+	}
+
 	auto multitrackVideo = main->outputHandler->multitrackVideo.get();
 	auto mtvOutput = multitrackVideo ? obs_output_get_ref(multitrackVideo->StreamingOutput()) : nullptr;
 	if (mtvOutput) {
