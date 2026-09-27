@@ -860,16 +860,16 @@ void TempestStudioBridge::ScheduleBrowserSourceRecovery()
 		if (!guarded->IsConnected()) {
 			return;
 		}
-		guarded->RecoverFailedBrowserSources();
+		guarded->RecoverFailedBrowserSources(false);
 		QTimer::singleShot(20000, guarded, [guarded]() {
 			if (guarded && guarded->IsConnected()) {
-				guarded->RecoverFailedBrowserSources();
+				guarded->RecoverFailedBrowserSources(true);
 			}
 		});
 	});
 }
 
-void TempestStudioBridge::RecoverFailedBrowserSources()
+void TempestStudioBridge::RecoverFailedBrowserSources(bool includeUnready)
 {
 	const QUrl endpoint(endpointEdit ? endpointEdit->text().trimmed() : QString());
 	QString tokenError;
@@ -903,7 +903,7 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 		request.setRawHeader("Cache-Control", "no-store");
 		pendingBrowserRecoverySources.insert(candidate.uuid);
 		QNetworkReply *reply = recoveryNetwork->get(request);
-		connect(reply, &QNetworkReply::finished, this, [this, reply, candidate]() {
+		connect(reply, &QNetworkReply::finished, this, [this, reply, candidate, includeUnready]() {
 			pendingBrowserRecoverySources.remove(candidate.uuid);
 			const QByteArray response = reply->readAll();
 			const QNetworkReply::NetworkError networkError = reply->error();
@@ -922,11 +922,19 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 				status = status.value(candidate.statusSection).toObject();
 			}
 			const int connectedClients = status.value(QStringLiteral("connectedClients")).toInt(-1);
+			const int readyClients = status.value(QStringLiteral("readyClients")).toInt(-1);
+			const int clientLoads = status.value(QStringLiteral("requests"))
+						.toObject()
+						.value(QStringLiteral("clientLoads"))
+						.toInt(0);
 			// A connected source can legitimately spend several seconds initializing a WebGL
-			// renderer. Readiness belongs to Studio's engine diagnostics; recovering it here
-			// would interrupt initialization and create a reload loop. Only revive a source
-			// when Studio confirms that no Browser Source transport is connected.
-			if (connectedClients != 0) {
+			// renderer or establishing transport. Once Studio has observed the client script,
+			// the initial pass leaves it alone. The delayed pass replaces a disconnected or
+			// never-ready transport, including stale pages that reconnect after Studio restarts
+			// but cannot run the new client runtime.
+			const bool disconnected = connectedClients == 0 && (includeUnready || clientLoads == 0);
+			const bool stalled = includeUnready && connectedClients > 0 && readyClients == 0;
+			if (!disconnected && !stalled) {
 				return;
 			}
 
@@ -938,6 +946,15 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 			QUrl browserUrl(QString::fromUtf8(obs_data_get_string(settings, "url")));
 			if (!browserUrl.isValid()) {
 				return;
+			}
+			// Keep the 3D Dice renderer in its own Chromium connection pool. The other
+			// Studio overlays use 127.0.0.1 and several hold persistent event streams;
+			// using the equivalent loopback hostname prevents those streams from starving
+			// Dice page, module, and result requests.
+			const bool isolatedDiceHost = candidate.statusPath == QStringLiteral("/v1/dice-overlay") &&
+						      browserUrl.host() == QStringLiteral("127.0.0.1");
+			if (isolatedDiceHost) {
+				browserUrl.setHost(QStringLiteral("localhost"));
 			}
 			// Reassert the current-scene item as visible before refreshing it. OBS can leave a
 			// transparent browser source loaded but JavaScript-suspended after its local server
@@ -957,7 +974,8 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 			obs_data_set_string(settings, "url", recoveredUrl.constData());
 			obs_source_update(source, settings);
 			obs_properties_t *properties = obs_source_properties(source);
-			obs_property_t *refresh = properties ? obs_properties_get(properties, "refreshnocache") : nullptr;
+			obs_property_t *refresh =
+				properties ? obs_properties_get(properties, "refreshnocache") : nullptr;
 			if (refresh) {
 				obs_property_button_clicked(refresh, source);
 			}
@@ -965,8 +983,8 @@ void TempestStudioBridge::RecoverFailedBrowserSources()
 				obs_properties_destroy(properties);
 			}
 			blog(LOG_INFO,
-			     "[Tempest Studio Bridge] Reinitialized disconnected Studio browser source '%s' with a cache-busting URL",
-			     candidate.name.toUtf8().constData());
+			     "[Tempest Studio Bridge] Reinitialized disconnected Studio browser source '%s' with a cache-busting URL%s",
+			     candidate.name.toUtf8().constData(), isolatedDiceHost ? " on an isolated loopback host" : "");
 		});
 	}
 }

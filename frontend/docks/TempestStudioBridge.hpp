@@ -44,7 +44,7 @@ private:
 	void HandleConnected();
 	void HandleDisconnected(const QString &reason);
 	void ScheduleBrowserSourceRecovery();
-	void RecoverFailedBrowserSources();
+	void RecoverFailedBrowserSources(bool includeUnready = false);
 	void HandleIncoming(const QByteArray &message);
 	void HandleCommand(const QJsonObject &message);
 	void HandleReactionTrigger(const QJsonObject &message, const QJsonObject &payload);
