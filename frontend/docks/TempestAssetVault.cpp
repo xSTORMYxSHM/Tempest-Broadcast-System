@@ -183,7 +183,31 @@ bool IsAudioReactiveHtml(const QFileInfo &info, const QByteArray &html)
 
 QString FriendlyAssetName(const QFileInfo &info, const QByteArray &html)
 {
-	if (info.fileName().startsWith(QStringLiteral("hud-"), Qt::CaseInsensitive)) {
+	const QString baseName = info.completeBaseName();
+	const bool hudAsset = baseName.startsWith(QStringLiteral("hud-"), Qt::CaseInsensitive);
+	const QString hudId = hudAsset ? baseName.mid(4) : QString();
+	if (hudId.compare(QStringLiteral("chat-terminal"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Chat Panel");
+	}
+	if (hudId.compare(QStringLiteral("now-playing"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Now Playing");
+	}
+	if (hudId.compare(QStringLiteral("signal-frame"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Stream Frame");
+	}
+	if (hudId.compare(QStringLiteral("transmission-plate"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Info Plate");
+	}
+	if (hudId.compare(QStringLiteral("storm-horizon-radio"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Storm Horizon Radio");
+	}
+
+	const bool anonymousHud = hudAsset &&
+				  QRegularExpression(QStringLiteral("^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$"),
+						     QRegularExpression::CaseInsensitiveOption)
+					  .match(hudId)
+					  .hasMatch();
+	if (anonymousHud) {
 		const QRegularExpression stateExpression(
 			QStringLiteral("<script\\s+id=[\\\"']hud-state[\\\"'][^>]*>(\\{.*?\\})</script>"),
 			QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
@@ -197,10 +221,10 @@ QString FriendlyAssetName(const QFileInfo &info, const QByteArray &html)
 		}
 	}
 
-	QString name = info.completeBaseName();
+	QString name = baseName;
 	name.remove(
 		QRegularExpression(QStringLiteral("^[a-z0-9-]+--\\d+-"), QRegularExpression::CaseInsensitiveOption));
-	if (name.startsWith(QStringLiteral("hud-"), Qt::CaseInsensitive)) {
+	if (hudAsset) {
 		name.remove(0, 4);
 	}
 	name.replace(QRegularExpression(QStringLiteral("[-_]+")), QStringLiteral(" "));
@@ -214,7 +238,11 @@ QString FriendlyAssetName(const QFileInfo &info, const QByteArray &html)
 			word = word.left(1).toUpper() + word.mid(1).toLower();
 		}
 	}
-	return words.isEmpty() ? info.fileName() : words.join(QLatin1Char(' '));
+	QString friendlyName = words.isEmpty() ? info.fileName() : words.join(QLatin1Char(' '));
+	if (hudAsset && !anonymousHud) {
+		friendlyName += QStringLiteral(" HUD");
+	}
+	return friendlyName;
 }
 } // namespace
 
@@ -626,6 +654,7 @@ void TempestAssetVault::RebuildAssetList()
 {
 	const QString selectedPath = SelectedAsset() ? SelectedAsset()->path : QString();
 	const QString search = searchField->text().trimmed();
+	const QStringList searchTerms = search.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
 	const QString root = rootsSelector->currentData().toString();
 	const QString bank = bankFilter->currentData().toString();
 	QSignalBlocker blocker(assetList);
@@ -638,13 +667,18 @@ void TempestAssetVault::RebuildAssetList()
 		if (!bank.isEmpty() && asset.bank != bank) {
 			continue;
 		}
-		if (!search.isEmpty() && !asset.name.contains(search, Qt::CaseInsensitive) &&
-		    !asset.displayName.contains(search, Qt::CaseInsensitive) &&
-		    !asset.path.contains(search, Qt::CaseInsensitive)) {
-			continue;
-		}
 		const QFileInfo info(asset.path);
 		const QString kindName = KindName(KindForFile(info), info);
+		const QString searchable =
+			QStringLiteral("%1 %2 %3 %4 %5")
+				.arg(asset.name, asset.displayName, asset.path, kindName, asset.bank);
+		const bool matchesSearch = std::all_of(searchTerms.cbegin(), searchTerms.cend(),
+						       [&searchable](const QString &term) {
+							       return searchable.contains(term, Qt::CaseInsensitive);
+						       });
+		if (!matchesSearch) {
+			continue;
+		}
 		auto *item = new QListWidgetItem(asset.displayName, assetList);
 		item->setData(Qt::UserRole, index);
 		item->setToolTip(QStringLiteral("%1\n%2 // %3\n%4")

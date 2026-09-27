@@ -246,6 +246,8 @@ The asset browser uses compact, name-first rows so audio-reactive and other gene
 
 The folder selector is also the library's primary navigation: **All Folders** shows the combined index, while selecting a named folder limits the list to that root. Adding a folder opens that view with search cleared and **All Tags** selected. User-folder files begin untagged instead of being classified automatically; optional tags can be assigned manually. Generated built-in Tempest assets retain their useful automatic tags.
 
+Generated HUD files use stable library names rather than their editable on-screen headings. Search treats whitespace-separated words independently across the friendly name, original filename, folder path, media type, and tag, so word order does not need to match the stored filename.
+
 The Asset Library provides:
 
 - incremental indexing for MP4, MOV, MKV, WebM, AVI, M4V, GIF, and local HTML overlay assets;

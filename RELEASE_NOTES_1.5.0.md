@@ -47,6 +47,10 @@ native dual-format production assets, startup recovery, and local runtime observ
   making valid assets appear missing.
 - Leaves user-folder assets untagged until the operator assigns a tag; automatic tags remain limited to generated
   built-in Tempest assets.
+- Keeps built-in HUD names stable instead of replacing them with editable on-screen headings, so the Chat Panel and
+  other familiar assets remain recognizable.
+- Matches search words in any order across the friendly name, filename, folder, type, and tag; searches such as
+  `chat hud` now find the Chat Panel.
 
 ## Compatibility and quality policy
 
