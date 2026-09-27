@@ -79,6 +79,8 @@ private:
 	QPointer<QComboBox> kickEncoder;
 	QPointer<QSpinBox> kickVideoBitrate;
 	QPointer<QSpinBox> kickAudioBitrate;
+	QPointer<QSpinBox> uploadCapacity;
+	QPointer<QCheckBox> recordingWithStream;
 	QPointer<QPushButton> saveButton;
 	QPointer<QPushButton> readinessButton;
 	QPointer<QLabel> statusLabel;

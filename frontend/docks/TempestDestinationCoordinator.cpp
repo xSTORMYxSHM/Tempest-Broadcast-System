@@ -196,11 +196,19 @@ void TempestDestinationCoordinator::BuildInterface()
 	kickAudioBitrate->setRange(64, 320);
 	kickAudioBitrate->setSingleStep(16);
 	kickAudioBitrate->setSuffix(QStringLiteral(" Kbps"));
+	uploadCapacity = new QSpinBox(root);
+	uploadCapacity->setRange(0, 1000000);
+	uploadCapacity->setSingleStep(500);
+	uploadCapacity->setSpecialValueText(QStringLiteral("Not measured"));
+	uploadCapacity->setSuffix(QStringLiteral(" Kbps"));
+	recordingWithStream = new QCheckBox(QStringLiteral("Start a local recording with the stream"), root);
 	form->addRow(QStringLiteral("Server URL"), kickServer);
 	form->addRow(QStringLiteral("Stream key"), kickKey);
 	form->addRow(QStringLiteral("H.264 encoder"), kickEncoder);
 	form->addRow(QStringLiteral("Video bitrate"), kickVideoBitrate);
 	form->addRow(QStringLiteral("Audio bitrate"), kickAudioBitrate);
+	form->addRow(QStringLiteral("Measured upload"), uploadCapacity);
+	form->addRow(QString(), recordingWithStream);
 	layout->addLayout(form);
 
 	auto *hint = new QLabel(
@@ -287,6 +295,9 @@ void TempestDestinationCoordinator::LoadSettings()
 	uploadCapacityKbps = config_has_user_value(config, ConfigSection, UploadCapacityKey)
 				     ? static_cast<int>(config_get_int(config, ConfigSection, UploadCapacityKey))
 				     : 0;
+	uploadCapacity->setValue(uploadCapacityKbps);
+	recordingWithStream->setChecked(App() && App()->GetUserConfig() &&
+					config_get_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming"));
 	const QString encoder = QString::fromUtf8(config_get_string(config, ConfigSection, EncoderKey));
 	PopulateEncoders();
 	int encoderIndex = kickEncoder->findData(encoder.isEmpty() ? QStringLiteral("auto") : encoder);
@@ -309,6 +320,7 @@ void TempestDestinationCoordinator::SaveSettings()
 	}
 
 	QString error;
+	uploadCapacityKbps = uploadCapacity->value();
 	if (!PersistSettings(error)) {
 		SetStatus(error, true);
 		return;
@@ -346,6 +358,11 @@ bool TempestDestinationCoordinator::PersistSettings(QString &error)
 	config_set_int(config, ConfigSection, VideoBitrateKey, kickVideoBitrate->value());
 	config_set_int(config, ConfigSection, AudioBitrateKey, kickAudioBitrate->value());
 	config_set_int(config, ConfigSection, UploadCapacityKey, uploadCapacityKbps);
+	if (App() && App()->GetUserConfig()) {
+		config_set_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming",
+				recordingWithStream && recordingWithStream->isChecked());
+		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
+	}
 	if (config_save_safe(config, "tmp", nullptr) != CONFIG_SUCCESS) {
 		error = QStringLiteral("The active Broadcast profile could not be saved.");
 		return false;
@@ -573,9 +590,11 @@ bool TempestDestinationCoordinator::ConfigureFromStudio(const QJsonObject &argum
 		kickKey->clear();
 	}
 	uploadCapacityKbps = capacity;
+	uploadCapacity->setValue(capacity);
 	if (arguments.value(QStringLiteral("recordingWithStream")).isBool() && App() && App()->GetUserConfig()) {
-		config_set_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming",
-				arguments.value(QStringLiteral("recordingWithStream")).toBool());
+		const bool record = arguments.value(QStringLiteral("recordingWithStream")).toBool();
+		recordingWithStream->setChecked(record);
+		config_set_bool(App()->GetUserConfig(), "BasicWindow", "RecordWhenStreaming", record);
 		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 	}
 	lastPreflightAt.clear();
@@ -1021,6 +1040,8 @@ void TempestDestinationCoordinator::UpdateEditorState()
 	kickEncoder->setEnabled(enabled);
 	kickVideoBitrate->setEnabled(enabled);
 	kickAudioBitrate->setEnabled(enabled);
+	uploadCapacity->setEnabled(!locked);
+	recordingWithStream->setEnabled(!locked);
 	readinessButton->setEnabled(!locked);
 	saveButton->setEnabled(!locked);
 }
